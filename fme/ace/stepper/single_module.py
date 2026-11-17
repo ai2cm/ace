@@ -48,6 +48,7 @@ from fme.core.normalizer import (
     NetworkAndLossNormalizationConfig,
     NormalizationConfig,
     StandardNormalizer,
+    validate_normalizer_spatial_shape,
 )
 from fme.core.ocean import OceanConfig
 from fme.core.optimization import NullOptimization
@@ -891,6 +892,7 @@ class Stepper:
             operations, loss variable names, and channel dimension.
         """
         loss_normalizer = self._step_obj.get_loss_normalizer()
+        validate_normalizer_spatial_shape(loss_normalizer, self._dataset_info)
         return loss_config.build(
             self._dataset_info.gridded_operations,
             out_names=self.loss_names,

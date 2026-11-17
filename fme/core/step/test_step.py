@@ -19,7 +19,11 @@ from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig, EnergyBudge
 from fme.core.distributed.distributed import Distributed
 from fme.core.distributed.non_distributed import DummyWrapper
 from fme.core.labels import BatchLabels
-from fme.core.normalizer import NetworkAndLossNormalizationConfig, NormalizationConfig
+from fme.core.normalizer import (
+    GroupedNormalizationConfig,
+    NetworkAndLossNormalizationConfig,
+    NormalizationConfig,
+)
 from fme.core.ocean import OceanConfig
 from fme.core.registry import ModuleSelector
 from fme.core.step.args import StepArgs
@@ -2546,28 +2550,38 @@ def test_multi_call_loss_scaling_follows_wrapped_residual_names():
     assert stds["b_double"] == pytest.approx(field_stds["b"])
 
 
+_LABELED_STEP_NAMES = [
+    "forcing_shared",
+    "forcing_rad",
+    "diagnostic_main",
+    "diagnostic_rad",
+]
+
+
 def _labeled_single_module_selector(
     grouped: bool = True,
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None,
+    normalization: NetworkAndLossNormalizationConfig | None = None,
 ) -> StepSelector:
     """A single-module step with an unconditional module, for labeled data.
 
     With ``grouped`` its network normalizes per label group. The two groups'
     constants differ sharply so that a batch normalized with the wrong group's
-    constants is easy to distinguish.
+    constants is easy to distinguish. A given ``normalization`` replaces
+    this normalization.
     """
-    names = ["forcing_shared", "forcing_rad", "diagnostic_main", "diagnostic_rad"]
-    normalization = NetworkAndLossNormalizationConfig(
-        network=trivial_normalization(names),
-        grouped=uniform_grouped_normalization(
-            names,
-            groups={"c96": (10.0, 2.0), "era5": (-10.0, 5.0)},
-            default_label="era5",
-            pinned_variables=["forcing_rad"],
+    if normalization is None:
+        normalization = NetworkAndLossNormalizationConfig(
+            network=trivial_normalization(_LABELED_STEP_NAMES),
+            grouped=uniform_grouped_normalization(
+                _LABELED_STEP_NAMES,
+                groups={"c96": (10.0, 2.0), "era5": (-10.0, 5.0)},
+                default_label="era5",
+                pinned_variables=["forcing_rad"],
+            )
+            if grouped
+            else None,
         )
-        if grouped
-        else None,
-    )
     return StepSelector(
         type="single_module",
         config=dataclasses.asdict(
@@ -2867,4 +2881,182 @@ def test_single_module_step_config_rejects_unknown_pinned_variable():
             in_names=["a"],
             out_names=["b"],
             normalization=normalization,
+        )
+
+
+# Per-grid-cell normalization schemes: constants pooled over all data, or per
+# label group with groups by data source or by configuration.
+PER_GRID_CELL_SCHEME_LABELS: dict[str, list[str] | None] = {
+    "pooled": None,
+    "source_groups": ["c96", "era5"],
+    "config_groups": ["amip", "ramped", "som", "era5"],
+}
+
+
+def _per_grid_cell_config(
+    seed: int, spatial_shape: tuple[int, ...] = DEFAULT_IMG_SHAPE
+) -> NormalizationConfig:
+    """Per-grid-cell constants for every labeled-step variable."""
+    generator = torch.Generator().manual_seed(seed)
+
+    def cell_values(low: float, high: float) -> torch.Tensor:
+        return low + (high - low) * torch.rand(spatial_shape, generator=generator)
+
+    return NormalizationConfig(
+        means={name: cell_values(-10.0, 10.0) for name in _LABELED_STEP_NAMES},
+        stds={name: cell_values(1.0, 3.0) for name in _LABELED_STEP_NAMES},
+        per_grid_cell=True,
+    )
+
+
+def _per_grid_cell_normalization(
+    scheme: str, spatial_shape: tuple[int, ...] = DEFAULT_IMG_SHAPE
+) -> NetworkAndLossNormalizationConfig:
+    labels = PER_GRID_CELL_SCHEME_LABELS[scheme]
+    if labels is None:
+        grouped = None
+    else:
+        grouped = GroupedNormalizationConfig(
+            groups={
+                label: _per_grid_cell_config(seed + 1, spatial_shape)
+                for seed, label in enumerate(labels)
+            },
+            default_label=labels[0],
+        )
+    return NetworkAndLossNormalizationConfig(
+        network=_per_grid_cell_config(0, spatial_shape), grouped=grouped
+    )
+
+
+def _per_grid_cell_step(
+    scheme: str, global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
+) -> tuple[SingleModuleStep, BatchLabels | None]:
+    """A step normalized per grid cell under ``scheme``, and labels for a
+    batch with one sample per group (two unlabeled samples if pooled)."""
+    labels = PER_GRID_CELL_SCHEME_LABELS[scheme]
+    step = get_step(
+        _labeled_single_module_selector(
+            global_mean_removal=global_mean_removal,
+            normalization=_per_grid_cell_normalization(scheme),
+        ),
+        DEFAULT_IMG_SHAPE,
+        all_labels=set(labels) if labels is not None else None,
+    )
+    assert isinstance(step, SingleModuleStep)
+    if labels is None:
+        return step, None
+    batch_labels = BatchLabels(
+        tensor=torch.eye(len(labels)).to(fme.get_device()), names=labels
+    )
+    return step, batch_labels
+
+
+def _per_grid_cell_constants(
+    step: SingleModuleStep, scheme: str, name: str
+) -> list[tuple[torch.Tensor, torch.Tensor]]:
+    """The (mean, std) each sample of ``_per_grid_cell_step``'s batch should
+    be normalized with, read from the step's config."""
+    normalization = step.config.normalization
+    labels = PER_GRID_CELL_SCHEME_LABELS[scheme]
+    if labels is None:
+        configs = [normalization.network] * 2
+    else:
+        assert normalization.grouped is not None
+        configs = [normalization.grouped.groups[label] for label in labels]
+    return [
+        (
+            torch.as_tensor(config.means[name]).to(fme.get_device()),
+            torch.as_tensor(config.stds[name]).to(fme.get_device()),
+        )
+        for config in configs
+    ]
+
+
+@pytest.mark.parametrize("scheme", list(PER_GRID_CELL_SCHEME_LABELS))
+def test_per_grid_cell_normalization_step_denormalizes_per_cell(scheme):
+    """The step runs, and its network output is denormalized with each
+    sample's own per-grid-cell constants."""
+    step, labels = _per_grid_cell_step(scheme)
+    n_samples = len(_per_grid_cell_constants(step, scheme, "diagnostic_main"))
+    output = step.step(
+        args=StepArgs(
+            input=get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples),
+            next_step_input_data=get_tensor_dict(
+                step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples
+            ),
+            labels=labels,
+        ),
+    ).output
+    assert output["diagnostic_main"].shape == (n_samples, *DEFAULT_IMG_SHAPE)
+    ones = torch.ones((n_samples, *DEFAULT_IMG_SHAPE)).to(fme.get_device())
+    denormalized = step.network_normalizer(labels).denormalize(
+        {"diagnostic_main": ones}
+    )["diagnostic_main"]
+    constants = _per_grid_cell_constants(step, scheme, "diagnostic_main")
+    for i, (mean, std) in enumerate(constants):
+        torch.testing.assert_close(denormalized[i], std + mean)
+
+
+@pytest.mark.parametrize("scheme", list(PER_GRID_CELL_SCHEME_LABELS))
+@pytest.mark.parametrize(
+    "global_mean_removal",
+    [
+        SharedGlobalMeanRemovalConfig(
+            reference_field="forcing_shared",
+            field_names=["forcing_shared", "forcing_rad"],
+        ),
+        PerChannelGlobalMeanRemovalConfig(
+            field_names=["forcing_shared", "forcing_rad"]
+        ),
+    ],
+    ids=["shared", "per_channel"],
+)
+def test_per_grid_cell_global_mean_removal_shifts_to_cell_mean_climatology(
+    scheme, global_mean_removal
+):
+    """Global mean removal shifts each sample's field so its spatial mean
+    equals the mean over grid cells of the per-grid-cell means that then
+    normalize it.
+    """
+    step, labels = _per_grid_cell_step(scheme, global_mean_removal)
+    normalizer = step.network_normalizer(labels)
+    constants = _per_grid_cell_constants(step, scheme, "forcing_shared")
+    n_samples = len(constants)
+    input_data = get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples)
+    captured: dict[str, torch.Tensor] = {}
+
+    def network_calls(input_norm: TensorDict) -> TensorDict:
+        captured.update(input_norm)
+        return {
+            name: torch.zeros_like(input_norm["forcing_shared"])
+            for name in step.output_names
+        }
+
+    step_with_adjustments(
+        input=input_data,
+        next_step_input_data={},
+        network_calls=network_calls,
+        normalizer=normalizer,
+        corrector=None,
+        ocean=None,
+        global_mean_removal=step._global_mean_removal,
+    )
+    shifted = normalizer.denormalize(captured)["forcing_shared"]
+    for i, (mean, _) in enumerate(constants):
+        torch.testing.assert_close(shifted[i].mean(), mean.mean(), atol=1e-4, rtol=0.0)
+
+
+@pytest.mark.parametrize("scheme", list(PER_GRID_CELL_SCHEME_LABELS))
+def test_per_grid_cell_normalization_rejects_mismatched_grid(scheme):
+    labels = PER_GRID_CELL_SCHEME_LABELS[scheme]
+    selector = _labeled_single_module_selector(
+        normalization=_per_grid_cell_normalization(
+            scheme, spatial_shape=DEFAULT_IMG_SHAPE[::-1]
+        ),
+    )
+    with pytest.raises(ValueError, match="does not match the data's spatial shape"):
+        get_step(
+            selector,
+            DEFAULT_IMG_SHAPE,
+            all_labels=set(labels) if labels is not None else None,
         )

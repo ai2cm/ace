@@ -171,9 +171,17 @@ class DatasetInfo:
         face dimension. Unlike ``img_shape``, which is always the trailing two,
         this is the full rank a per-sample constant must broadcast against.
         """
+        return len(self.spatial_shape)
+
+    @property
+    def spatial_shape(self) -> tuple[int, ...]:
+        """
+        Shape of the trailing spatial dimensions on this dataset's tensors,
+        including HEALPix's leading face dimension (see ``n_spatial_dims``).
+        """
         if self._horizontal_coordinates is None:
-            return len(self.img_shape)
-        return len(self._horizontal_coordinates.shape)
+            return tuple(self.img_shape)
+        return tuple(self._horizontal_coordinates.shape)
 
     @property
     def gridded_operations(self) -> GriddedOperations:

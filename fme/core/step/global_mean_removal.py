@@ -75,7 +75,10 @@ class GlobalMeanRemoval(abc.ABC):
     to ``forward_transform``, which must be the one normalizing the
     network's inputs. Its constants may be scalars or per-sample tensors
     of shape ``[batch, 1, ...]``; with per-sample constants, each sample
-    is shifted to its own climatology.
+    is shifted to its own climatology. Per-grid-cell constants, of shape
+    ``[*spatial]`` or ``[batch, *spatial]``, contribute their unweighted
+    mean over grid cells: a field is shifted so its spatial mean equals
+    that of its per-grid-cell means.
 
     Optional synthetic input channels (when ``append_as_input=True``) are
     produced by ``forward_transform`` already in *normalized* space and
@@ -186,6 +189,18 @@ class NoGlobalMeanRemoval(GlobalMeanRemoval):
         return output
 
 
+def _per_sample_constant(constant: torch.Tensor, n_spatial_dims: int) -> torch.Tensor:
+    """Reduce a normalization constant to one value per sample.
+
+    Scalar constants become ``[1]`` and per-sample constants ``[batch]``.
+    Per-grid-cell constants are first averaged over grid cells, unweighted to
+    match the unweighted sample means they are compared with.
+    """
+    if constant.shape[-n_spatial_dims:].numel() > 1:
+        constant = constant.mean(dim=tuple(range(-n_spatial_dims, 0)))
+    return constant.reshape(-1)
+
+
 def _broadcast_to_spatial(
     scalar_per_sample: torch.Tensor, spatial_shape: tuple[int, ...]
 ) -> torch.Tensor:
@@ -240,14 +255,18 @@ class SharedGlobalMeanRemoval(GlobalMeanRemoval):
                     "which is not supported for shared global mean removal."
                 )
         ref = input[ref_name]
+        n_spatial = ref.ndim - 1
         sample_mean = ref.mean(dim=tuple(range(1, ref.ndim)))
-        # reshape(-1): a scalar constant becomes [1], a per-sample one [batch].
-        offset = normalizer.means[ref_name].reshape(-1) - sample_mean
+        offset = (
+            _per_sample_constant(normalizer.means[ref_name], n_spatial) - sample_mean
+        )
         spatial_shape = tuple(ref.shape[1:])
 
         extras: TensorDict = {}
         if self._append_as_input:
-            normalized_mean = -offset / normalizer.stds[ref_name].reshape(-1)
+            normalized_mean = -offset / _per_sample_constant(
+                normalizer.stds[ref_name], n_spatial
+            )
             extras[_extra_channel_name(ref_name)] = _broadcast_to_spatial(
                 normalized_mean, spatial_shape
             )
@@ -324,8 +343,9 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
             if spatial_shape is None:
                 spatial_shape = tuple(t.shape[1:])
             sample_mean = t.mean(dim=tuple(range(1, t.ndim)))
-            # reshape(-1): a scalar constant becomes [1], a per-sample one [batch].
-            shift = normalizer.means[name].reshape(-1) - sample_mean
+            shift = (
+                _per_sample_constant(normalizer.means[name], t.ndim - 1) - sample_mean
+            )
             if data_mask is not None and name in data_mask:
                 mask = data_mask[name]
                 shift = torch.where(mask, shift, torch.zeros_like(shift))
@@ -338,7 +358,9 @@ class PerChannelGlobalMeanRemoval(GlobalMeanRemoval):
             for name in self._field_names:
                 if name not in shifts:
                     continue
-                normalized = -shifts[name] / normalizer.stds[name].reshape(-1)
+                normalized = -shifts[name] / _per_sample_constant(
+                    normalizer.stds[name], len(spatial_shape)
+                )
                 extras[_extra_channel_name(name)] = _broadcast_to_spatial(
                     normalized, spatial_shape
                 )

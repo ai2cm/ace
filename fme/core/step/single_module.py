@@ -21,6 +21,7 @@ from fme.core.normalizer import (
     GroupedNormalizer,
     NetworkAndLossNormalizationConfig,
     StandardNormalizer,
+    validate_normalizer_spatial_shape,
 )
 from fme.core.ocean import Ocean, OceanConfig
 from fme.core.optimization import NullOptimization
@@ -397,6 +398,9 @@ class SingleModuleStep(StepABC):
                 network's inputs and outputs and for global mean removal.
         """
         super().__init__()
+        validate_normalizer_spatial_shape(normalizer, dataset_info)
+        if grouped_normalizer is not None:
+            validate_normalizer_spatial_shape(grouped_normalizer, dataset_info)
         if config.global_mean_removal is not None:
             self._global_mean_removal: GlobalMeanRemoval = (
                 config.global_mean_removal.build(in_names=config.in_names)
@@ -434,6 +438,7 @@ class SingleModuleStep(StepABC):
             residual_normalizer = config.normalization.residual.build(
                 names=sorted(config.residual_names)
             )
+            validate_normalizer_spatial_shape(residual_normalizer, dataset_info)
             # Scale residual outputs by residual_std / field_std in normalized
             # space, so a unit network output is one tendency std. Scale only:
             # the stats convention pairs full-field centering with tendency

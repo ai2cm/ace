@@ -3,15 +3,20 @@ import logging
 import pathlib
 from collections.abc import Callable, Iterable, Mapping
 from copy import copy
-from typing import Protocol
+from typing import Protocol, TypeAlias
 
 import numpy as np
 import torch
 
 from fme.core.cloud import open_dataset_via_inter_filesystem_copy
 from fme.core.device import get_device, move_tensordict_to_device
+from fme.core.distributed import Distributed
 from fme.core.labels import BatchLabels
 from fme.core.typing_ import TensorDict, TensorMapping
+
+# A loaded normalization constant: a float, or a tensor of per-grid-cell
+# values (see NormalizationConfig.per_grid_cell).
+NormalizationConstant: TypeAlias = float | torch.Tensor
 
 
 @dataclasses.dataclass
@@ -33,16 +38,50 @@ class NormalizationConfig:
         fill_nans_on_denormalize: Whether to fill NaNs during denormalization. If
             true, on denormalization NaNs in the normalized input become global means in
             the denormalized output.
+        per_grid_cell: Whether variables in the netCDF files may carry
+            horizontal dimensions, giving a separate mean and std for each grid
+            cell. Their dimensions must match the data's horizontal dimensions,
+            in the same order (e.g. ``(lat, lon)``), and their values must be
+            finite. Scalar and per-grid-cell variables may be mixed in one
+            file. If false, variables with dimensions are skipped when loading
+            every variable and rejected when requested by name.
+        per_grid_cell_min_std_fraction: Floor applied to per-grid-cell stds
+            when they are read from file, as a fraction of each variable's
+            unweighted mean std over grid cells. Guards against near-constant
+            cells (e.g. sea ice in the tropics), whose ~0 std would blow up
+            their normalized values. Must be in [0, 1). A variable whose stds
+            are zero in every grid cell is rejected.
     """
 
     global_means_path: str | pathlib.Path | None = None
     global_stds_path: str | pathlib.Path | None = None
-    means: Mapping[str, float] = dataclasses.field(default_factory=dict)
-    stds: Mapping[str, float] = dataclasses.field(default_factory=dict)
+    means: Mapping[str, NormalizationConstant] = dataclasses.field(default_factory=dict)
+    stds: Mapping[str, NormalizationConstant] = dataclasses.field(default_factory=dict)
     fill_nans_on_normalize: bool = False
     fill_nans_on_denormalize: bool = False
+    per_grid_cell: bool = False
+    per_grid_cell_min_std_fraction: float = 0.01
 
     def __post_init__(self):
+        if not 0.0 <= self.per_grid_cell_min_std_fraction < 1.0:
+            raise ValueError(
+                "per_grid_cell_min_std_fraction must be in [0, 1), got "
+                f"{self.per_grid_cell_min_std_fraction}"
+            )
+        if not self.per_grid_cell:
+            non_scalar = sorted(
+                {
+                    name
+                    for constants in (self.means, self.stds)
+                    for name, value in constants.items()
+                    if isinstance(value, torch.Tensor) and value.numel() > 1
+                }
+            )
+            if non_scalar:
+                raise ValueError(
+                    f"Normalization constants for {non_scalar} are not scalars; "
+                    "set per_grid_cell to use per-grid-cell constants."
+                )
         using_path = (
             self.global_means_path is not None and self.global_stds_path is not None
         )
@@ -72,18 +111,13 @@ class NormalizationConfig:
         if self.global_means_path is not None and self.global_stds_path is not None:
             # convert to explicit means and stds so if the object is stored
             # and reloaded, we no longer need the netCDF files
-            means = load_dict_from_netcdf(
+            self.means, self.stds = _load_means_and_stds(
                 self.global_means_path,
-                names=None,
-                defaults={"x": 0.0, "y": 0.0, "z": 0.0},
-            )
-            stds = load_dict_from_netcdf(
                 self.global_stds_path,
                 names=None,
-                defaults={"x": 1.0, "y": 1.0, "z": 1.0},
+                per_grid_cell=self.per_grid_cell,
+                min_std_fraction=self.per_grid_cell_min_std_fraction,
             )
-            self.means = means
-            self.stds = stds
             self.global_means_path = None
             self.global_stds_path = None
 
@@ -96,12 +130,14 @@ class NormalizationConfig:
                 global_means_path=self.global_means_path,
                 global_stds_path=self.global_stds_path,
                 names=names,
+                per_grid_cell=self.per_grid_cell,
+                per_grid_cell_min_std_fraction=self.per_grid_cell_min_std_fraction,
                 fill_nans_on_normalize=self.fill_nans_on_normalize,
                 fill_nans_on_denormalize=self.fill_nans_on_denormalize,
             )
         else:
-            means = {k: torch.tensor(self.means[k]) for k in names}
-            stds = {k: torch.tensor(self.stds[k]) for k in names}
+            means = {k: _as_float_tensor(self.means[k]) for k in names}
+            stds = {k: _as_float_tensor(self.stds[k]) for k in names}
             return StandardNormalizer(
                 means=means,
                 stds=stds,
@@ -180,30 +216,42 @@ class StandardNormalizer:
             fill_nans=self._fill_nans_on_denormalize,
         )
 
-    def _scalar_constants(self) -> tuple[dict[str, float], dict[str, float]]:
-        """Means and stds as floats, for serialization.
+    @property
+    def is_per_grid_cell(self) -> bool:
+        """Whether any constant varies over grid cells."""
+        return any(v.numel() > 1 for v in (*self.means.values(), *self.stds.values()))
 
-        Raises if a constant is per-sample, as in a normalizer bound by
-        ``GroupedNormalizer.bind``: that is batch state, and the grouped
-        configuration is what gets serialized instead.
+    def validate_spatial_shape(self, spatial_shape: tuple[int, ...]) -> None:
+        """Check that per-grid-cell constants match the data's spatial shape.
+
+        Scalar constants always pass. Per-grid-cell constants are defined on
+        the global grid, so they are rejected under spatial parallelism, where
+        each rank holds only a slice of it.
+
+        Args:
+            spatial_shape: Shape of the trailing spatial dimensions of the
+                tensors being normalized, e.g. ``(n_lat, n_lon)``.
         """
-        for name, constants in (("means", self.means), ("stds", self.stds)):
-            per_sample = sorted(k for k, v in constants.items() if v.numel() != 1)
-            if per_sample:
-                raise ValueError(
-                    f"Cannot serialize per-sample normalization {name} for "
-                    f"{per_sample}; serialize the grouped normalization "
-                    "configuration instead."
-                )
-        means = {k: float(v.cpu().numpy().item()) for k, v in self.means.items()}
-        stds = {k: float(v.cpu().numpy().item()) for k, v in self.stds.items()}
-        return means, stds
+        _validate_constants_spatial_shape(
+            {"means": self.means, "stds": self.stds}, spatial_shape
+        )
+
+    def _serializable_constants(
+        self,
+    ) -> tuple[dict[str, NormalizationConstant], dict[str, NormalizationConstant]]:
+        """Means and stds for serialization: floats for scalar constants and
+        CPU tensors for per-grid-cell constants.
+        """
+        return (
+            {k: _to_serializable(v) for k, v in self.means.items()},
+            {k: _to_serializable(v) for k, v in self.stds.items()},
+        )
 
     def get_state(self):
         """
         Returns state as a serializable data structure.
         """
-        means, stds = self._scalar_constants()
+        means, stds = self._serializable_constants()
         return {
             "means": means,
             "stds": stds,
@@ -216,10 +264,8 @@ class StandardNormalizer:
         """
         Loads state from a serializable data structure.
         """
-        means = {
-            k: torch.tensor(v, dtype=torch.float) for k, v in state["means"].items()
-        }
-        stds = {k: torch.tensor(v, dtype=torch.float) for k, v in state["stds"].items()}
+        means = {k: _as_float_tensor(v) for k, v in state["means"].items()}
+        stds = {k: _as_float_tensor(v) for k, v in state["stds"].items()}
         return cls(
             means=means,
             stds=stds,
@@ -228,12 +274,88 @@ class StandardNormalizer:
         )
 
     def get_normalization_config(self) -> NormalizationConfig:
-        means, stds = self._scalar_constants()
+        means, stds = self._serializable_constants()
         return NormalizationConfig(
             means=means,
             stds=stds,
             fill_nans_on_normalize=self.fill_nans_on_normalize,
             fill_nans_on_denormalize=self.fill_nans_on_denormalize,
+            per_grid_cell=self.is_per_grid_cell,
+        )
+
+
+class _PerSampleNormalizer(StandardNormalizer):
+    """A normalizer bound to one batch by ``GroupedNormalizer.bind``.
+
+    Its constants carry a leading sample dimension, which is batch state
+    rather than configuration, so it refuses to be serialized: the grouped
+    configuration is what gets serialized instead.
+    """
+
+    def _serializable_constants(self):
+        raise ValueError(
+            "Cannot serialize per-sample normalization means and stds; "
+            "serialize the grouped normalization configuration instead."
+        )
+
+    def validate_spatial_shape(self, spatial_shape: tuple[int, ...]) -> None:
+        raise ValueError(
+            "Validate the GroupedNormalizer, not a normalizer bound to a batch."
+        )
+
+
+class _HasSpatialShape(Protocol):
+    @property
+    def spatial_shape(self) -> tuple[int, ...]: ...
+
+
+def validate_normalizer_spatial_shape(
+    normalizer: "StandardNormalizer | GroupedNormalizer",
+    dataset_info: _HasSpatialShape,
+) -> None:
+    """Check a normalizer's per-grid-cell constants, if any, against the
+    dataset's spatial shape. A no-op for scalar-only normalizers, which do
+    not require the dataset to know its spatial shape.
+    """
+    if normalizer.is_per_grid_cell:
+        normalizer.validate_spatial_shape(dataset_info.spatial_shape)
+
+
+def _as_float_tensor(value: NormalizationConstant) -> torch.Tensor:
+    return torch.as_tensor(value, dtype=torch.float)
+
+
+def _to_serializable(value: torch.Tensor) -> NormalizationConstant:
+    if value.numel() == 1:
+        return float(value.item())
+    return value.detach().cpu().clone()
+
+
+def _validate_constants_spatial_shape(
+    constants: Mapping[str, TensorMapping], spatial_shape: tuple[int, ...]
+) -> None:
+    """Check per-grid-cell constants against the data's spatial shape.
+
+    Args:
+        constants: Mapping from a description of each set of constants (e.g.
+            "means") to that set's constants.
+        spatial_shape: Shape of the data's trailing spatial dimensions.
+    """
+    per_grid_cell = False
+    for description, tensors in constants.items():
+        for name, value in tensors.items():
+            if value.numel() == 1:
+                continue
+            per_grid_cell = True
+            if tuple(value.shape) != tuple(spatial_shape):
+                raise ValueError(
+                    f"Per-grid-cell normalization {description} for '{name}' "
+                    f"have shape {tuple(value.shape)}, which does not match the "
+                    f"data's spatial shape {tuple(spatial_shape)}."
+                )
+    if per_grid_cell:
+        Distributed.get_instance().require_no_spatial_parallelism(
+            "Per-grid-cell normalization is not supported with spatial parallelism."
         )
 
 
@@ -271,47 +393,123 @@ def _denormalize(
 
 
 def get_normalizer(
-    global_means_path, global_stds_path, names: list[str], **normalizer_kwargs
+    global_means_path,
+    global_stds_path,
+    names: list[str],
+    per_grid_cell: bool = False,
+    per_grid_cell_min_std_fraction: float = 0.01,
+    **normalizer_kwargs,
 ) -> StandardNormalizer:
+    """Build a normalizer from means and stds netCDF files.
+
+    See ``NormalizationConfig`` for the per-grid-cell arguments.
+    """
+    means, stds = _load_means_and_stds(
+        global_means_path,
+        global_stds_path,
+        names,
+        per_grid_cell=per_grid_cell,
+        min_std_fraction=per_grid_cell_min_std_fraction,
+    )
+    return StandardNormalizer(
+        means={k: _as_float_tensor(v) for k, v in means.items()},
+        stds={k: _as_float_tensor(v) for k, v in stds.items()},
+        **normalizer_kwargs,
+    )
+
+
+def _load_means_and_stds(
+    means_path: str | pathlib.Path,
+    stds_path: str | pathlib.Path,
+    names: Iterable[str] | None,
+    per_grid_cell: bool,
+    min_std_fraction: float,
+) -> tuple[dict[str, NormalizationConstant], dict[str, NormalizationConstant]]:
     means = load_dict_from_netcdf(
-        global_means_path, names, defaults={"x": 0.0, "y": 0.0, "z": 0.0}
+        means_path,
+        names,
+        defaults={"x": 0.0, "y": 0.0, "z": 0.0},
+        per_grid_cell=per_grid_cell,
     )
-    means = {k: torch.as_tensor(v, dtype=torch.float) for k, v in means.items()}
     stds = load_dict_from_netcdf(
-        global_stds_path, names, defaults={"x": 1.0, "y": 1.0, "z": 1.0}
+        stds_path,
+        names,
+        defaults={"x": 1.0, "y": 1.0, "z": 1.0},
+        per_grid_cell=per_grid_cell,
     )
-    stds = {k: torch.as_tensor(v, dtype=torch.float) for k, v in stds.items()}
-    return StandardNormalizer(means=means, stds=stds, **normalizer_kwargs)
+    return means, _floor_per_grid_cell_stds(stds, min_std_fraction, stds_path)
+
+
+def _floor_per_grid_cell_stds(
+    stds: dict[str, NormalizationConstant],
+    min_fraction: float,
+    path: str | pathlib.Path,
+) -> dict[str, NormalizationConstant]:
+    """Clamp each per-grid-cell std to at least ``min_fraction`` of its
+    unweighted mean over grid cells. Scalar stds are returned unchanged.
+    """
+    result: dict[str, NormalizationConstant] = {}
+    for name, std in stds.items():
+        if isinstance(std, torch.Tensor):
+            mean_std = std.mean()
+            if not mean_std > 0:
+                raise ValueError(
+                    f"Per-grid-cell stds for '{name}' in {path} are zero in "
+                    "every grid cell, so the variable cannot be normalized."
+                )
+            std = torch.clamp(std, min=min_fraction * mean_std)
+        result[name] = std
+    return result
 
 
 def load_dict_from_netcdf(
     path: str | pathlib.Path,
     names: Iterable[str] | None,
     defaults: Mapping[str, float | np.ndarray],
-) -> dict[str, float]:
+    per_grid_cell: bool = False,
+) -> dict[str, NormalizationConstant]:
     """
-    Load a dictionary of scalar variables from a netCDF file.
+    Load a dictionary of variables from a netCDF file.
 
     Args:
         path: Path to the netCDF file.
         names: List of variable names to load. If None, all variables in the netCDF
-            file are loaded.
+            file are loaded, except non-scalar ones unless ``per_grid_cell``.
         defaults: Dictionary of default values for each variable, if not found
             in the netCDF file.
+        per_grid_cell: Whether to load non-scalar variables, as tensors of
+            per-grid-cell values. Otherwise only scalars are loaded, as floats.
     """
     ds = open_dataset_via_inter_filesystem_copy(path, mask_and_scale=False)
 
-    result = {}
+    result: dict[str, NormalizationConstant] = {}
     if names is None:
-        names = set(ds.variables.keys()).union(defaults.keys())
-        skip_non_scalar = True
-    else:
-        skip_non_scalar = False
+        # Coordinates are never constants, though they may share the
+        # variables' dimensions.
+        names = {
+            name
+            for name in ds.variables
+            if ds.variables[name].ndim == 0 or (per_grid_cell and name in ds.data_vars)
+        }.union(defaults.keys())
     for c in names:
         if c in ds.variables:
-            if skip_non_scalar and ds.variables[c].ndim > 0:
-                continue
-            result[c] = float(ds.variables[c].values.item())
+            variable = ds.variables[c]
+            if variable.ndim == 0:
+                result[c] = float(variable.values.item())
+            elif per_grid_cell:
+                values = _as_float_tensor(np.asarray(variable.values))
+                if not bool(torch.isfinite(values).all()):
+                    raise ValueError(
+                        f"Per-grid-cell variable '{c}' in {path} has non-finite "
+                        "values; fill them before using it for normalization."
+                    )
+                result[c] = values
+            else:
+                raise ValueError(
+                    f"Variable '{c}' in {path} has dimensions {variable.dims}; "
+                    "set per_grid_cell to use per-grid-cell normalization "
+                    "constants."
+                )
         elif c in defaults:
             result[c] = float(defaults[c])
         else:
@@ -365,6 +563,9 @@ class GroupedNormalizer:
     loss and the aggregators' normalized metrics continue to use the pooled
     constants, so those quantities remain comparable across models trained
     with different grouping strategies.
+
+    Any of the pooled and per-group constants may be per-grid-cell, and a
+    variable may be scalar in some groups and per-grid-cell in others.
     """
 
     def __init__(
@@ -408,20 +609,39 @@ class GroupedNormalizer:
         self._warned_default_label = False
 
     def _stack(self, attr: str) -> TensorDict:
-        """Stack each per-group variable's constants into a [n_groups] tensor.
+        """Stack each per-group variable's constants into a tensor of shape
+        ``[n_groups]``, or ``[n_groups, *spatial]`` if any group's constants
+        are per-grid-cell (scalar constants are broadcast over grid cells).
 
         The stack is ordered by ``self._group_names``, so a group index
         computed against that ordering indexes it directly.
         """
         return {
             name: torch.stack(
-                [
-                    getattr(self._groups[group], attr)[name]
-                    for group in self._group_names
-                ]
+                torch.broadcast_tensors(
+                    *[
+                        getattr(self._groups[group], attr)[name]
+                        for group in self._group_names
+                    ]
+                )
             ).to(get_device())
             for name in self._per_group_names
         }
+
+    @property
+    def is_per_grid_cell(self) -> bool:
+        """Whether any pooled or per-group constant varies over grid cells."""
+        return self._pooled.is_per_grid_cell or any(
+            group.is_per_grid_cell for group in self._groups.values()
+        )
+
+    def validate_spatial_shape(self, spatial_shape: tuple[int, ...]) -> None:
+        """Check the pooled and per-group constants against the data's
+        spatial shape; see ``StandardNormalizer.validate_spatial_shape``.
+        """
+        self._pooled.validate_spatial_shape(spatial_shape)
+        for group in self._groups.values():
+            group.validate_spatial_shape(spatial_shape)
 
     def _raise_on_degenerate_group_stds(self) -> None:
         """Reject a non-pinned variable that is ~constant within some group.
@@ -432,15 +652,25 @@ class GroupedNormalizer:
         """
         for name in sorted(self._per_group_names):
             pooled_std = self._pooled.stds[name].to(get_device())
-            if not (pooled_std > 0):
+            if not bool((pooled_std > 0).all()):
                 # Constant in the pooled stats too; pinning can't fix it.
                 continue
-            ratio = self._stacked_stds[name] / pooled_std
+            # Compared per grid cell if either std is per-grid-cell, so align
+            # scalar group stds ([n_groups]) with per-grid-cell pooled ones.
+            stacked = self._stacked_stds[name]
+            n_missing_dims = max(pooled_std.ndim - (stacked.ndim - 1), 0)
+            stacked = stacked.reshape(
+                stacked.shape[0], *(1,) * n_missing_dims, *stacked.shape[1:]
+            )
+            ratio = stacked / pooled_std
+            is_degenerate_per_group = (
+                ~(ratio >= _MIN_GROUP_TO_POOLED_STD_RATIO)
+            ).reshape(len(self._group_names), -1)
             degenerate = [
                 group_name
                 for group_name, is_degenerate in zip(
                     self._group_names,
-                    (~(ratio >= _MIN_GROUP_TO_POOLED_STD_RATIO)).tolist(),
+                    is_degenerate_per_group.any(dim=1).tolist(),
                 )
                 if is_degenerate
             ]
@@ -454,7 +684,9 @@ class GroupedNormalizer:
                 )
 
     def _select(
-        self, select: Callable[[torch.Tensor], torch.Tensor]
+        self,
+        select: Callable[[torch.Tensor], torch.Tensor],
+        normalizer_type: type[StandardNormalizer] = StandardNormalizer,
     ) -> StandardNormalizer:
         """Normalizer with ``select`` applied to each stacked per-group
         constant, and the pooled constants for pinned variables.
@@ -464,7 +696,7 @@ class GroupedNormalizer:
         for name in self._per_group_names:
             means[name] = select(self._stacked_means[name])
             stds[name] = select(self._stacked_stds[name])
-        return StandardNormalizer(
+        return normalizer_type(
             means=means,
             stds=stds,
             fill_nans_on_normalize=self._pooled.fill_nans_on_normalize,
@@ -476,9 +708,10 @@ class GroupedNormalizer:
         Resolve per-sample constants into a normalizer for a single batch.
 
         The returned normalizer holds means and stds of shape
-        ``[n_samples, *(1,) * n_spatial_dims]`` for non-pinned variables, which
-        broadcast against the ``[n_batch, *spatial]`` tensors the step operates
-        on. Pinned variables keep their scalar pooled constants.
+        ``[n_samples, *(1,) * n_spatial_dims]`` for non-pinned variables, or
+        ``[n_samples, *spatial]`` for per-grid-cell ones, which broadcast
+        against the ``[n_batch, *spatial]`` tensors the step operates on.
+        Pinned variables keep their pooled constants.
 
         Args:
             labels: Labels for each sample in the batch. If None or empty,
@@ -497,10 +730,21 @@ class GroupedNormalizer:
         if self._bind_cache is not None and self._bind_cache[0] is labels:
             return self._bind_cache[1]
         group_index = self._resolve_group_index(labels)
-        per_sample_shape = (-1, *(1,) * self._n_spatial_dims)
-        normalizer = self._select(lambda t: t[group_index].reshape(per_sample_shape))
+        normalizer = self._select(
+            lambda t: self._per_sample(t, group_index), _PerSampleNormalizer
+        )
         self._bind_cache = (labels, normalizer)
         return normalizer
+
+    def _per_sample(
+        self, stacked: torch.Tensor, group_index: torch.Tensor
+    ) -> torch.Tensor:
+        """Select each sample's constants from a stacked per-group constant,
+        padding with singleton spatial dimensions those it lacks.
+        """
+        cell_shape = stacked.shape[1:]
+        n_missing_dims = self._n_spatial_dims - len(cell_shape)
+        return stacked[group_index].reshape(-1, *(1,) * n_missing_dims, *cell_shape)
 
     def _resolve_group_index(self, labels: BatchLabels) -> torch.Tensor:
         """Map each sample's label to its group index.

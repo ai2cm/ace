@@ -1821,6 +1821,91 @@ def test_reloaded_grouped_stepper_keeps_per_group_constants(tmp_path: pathlib.Pa
     )
 
 
+def _write_per_grid_cell_stats(path: pathlib.Path, values: torch.Tensor) -> str:
+    """Write per-grid-cell constants for "a" on (lat, lon) to netCDF."""
+    xr.Dataset({"a": (("lat", "lon"), values.numpy())}).to_netcdf(path)
+    return str(path)
+
+
+@pytest.mark.parametrize(
+    "group_labels, sample_labels",
+    [
+        (None, None),
+        (["c96", "era5"], ["c96", "era5", "c96"]),
+        (["amip", "ramped", "som", "era5"], ["amip", "som", "era5"]),
+    ],
+    ids=["pooled", "source_groups", "config_groups"],
+)
+def test_reloaded_per_grid_cell_stepper_keeps_per_cell_constants(
+    tmp_path: pathlib.Path,
+    group_labels: list[str] | None,
+    sample_labels: list[str] | None,
+):
+    """A checkpoint carries per-grid-cell constants, pooled or per group.
+
+    The netCDF files are deleted before the checkpoint is reloaded. The
+    add-one network advances each cell of each sample by its own std, so a
+    reload which lost or scrambled the per-grid-cell constants would not.
+    """
+    generator = torch.Generator().manual_seed(0)
+
+    def per_grid_cell_config(name: str) -> NormalizationConfig:
+        return NormalizationConfig(
+            global_means_path=_write_per_grid_cell_stats(
+                tmp_path / f"{name}_means.nc", torch.randn(5, 5, generator=generator)
+            ),
+            global_stds_path=_write_per_grid_cell_stats(
+                tmp_path / f"{name}_stds.nc",
+                1.0 + torch.rand(5, 5, generator=generator),
+            ),
+            per_grid_cell=True,
+        )
+
+    config = _get_stepper_config(["a"], ["a"])
+    step_config = config.step.config
+    pooled = per_grid_cell_config("pooled")
+    step_config["normalization"]["network"] = dataclasses.asdict(pooled)
+    if group_labels is None:
+        expected_configs = [pooled] * 3
+        labels = None
+    else:
+        groups = {label: per_grid_cell_config(label) for label in group_labels}
+        step_config["normalization"]["grouped"] = dataclasses.asdict(
+            GroupedNormalizationConfig(groups=groups, default_label=group_labels[0])
+        )
+        assert sample_labels is not None
+        expected_configs = [groups[label] for label in sample_labels]
+        labels = BatchLabels(
+            tensor=torch.tensor(
+                [
+                    [float(label == name) for name in group_labels]
+                    for label in sample_labels
+                ]
+            ).to(DEVICE),
+            names=group_labels,
+        )
+    expected_step = torch.stack(
+        [config.build(["a"]).stds["a"] for config in expected_configs]
+    )
+    stepper = dataclasses.replace(
+        config, step=StepSelector(type="single_module", config=step_config)
+    ).get_stepper(get_dataset_info(all_labels=set(group_labels or [])))
+    state = stepper.get_state()
+    for path in tmp_path.glob("*.nc"):
+        path.unlink()
+    reloaded = Stepper.from_state(state)
+
+    input_data, forcing_data = get_data_for_predict(
+        n_steps=1, forcing_names=[], labels=labels
+    )
+    forcing_data.data = {}
+    output, _ = reloaded.predict(input_data, forcing_data)
+    torch.testing.assert_close(
+        output.data["a"][:, 0] - input_data.as_batch_data().data["a"][:, 0],
+        expected_step,
+    )
+
+
 class _RecordingCorrector(CorrectorABC):
     """Test corrector that seeds and bumps a counter inside CorrectorState.
 
