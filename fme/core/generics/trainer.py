@@ -353,6 +353,7 @@ class Trainer:
                         self.paths.latest_checkpoint_path,
                         include_optimization=True,
                     )
+                    WandB.get_instance().mark_checkpoint()
 
         dist = Distributed.get_instance()
         if not dist.has_spatial_parallelism:
@@ -655,6 +656,7 @@ class Trainer:
             self.paths.latest_checkpoint_path,
             include_optimization=True,
         )
+        WandB.get_instance().mark_checkpoint()
 
     @contextlib.contextmanager
     def validation_context(self):

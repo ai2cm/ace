@@ -56,10 +56,10 @@ def _field(times, offset=0.0, seed=0):
     )
 
 
-def _write_input_zarrs(input_dir):
-    atmos_times = _times("2000-01-01T06:00:00", N_ATMOS_TIMES, "6h")
+def _write_input_zarrs(input_dir, year=2000):
+    atmos_times = _times(f"{year:04d}-01-01T06:00:00", N_ATMOS_TIMES, "6h")
     # 5-daily snapshots at the ends of the two 120h windows
-    ocean_times = _times(FIRST_WINDOW_END, 2, "120h")
+    ocean_times = _times(f"{year:04d}-01-06T00:00:00", 2, "120h")
 
     atmos = xr.Dataset(
         {
@@ -79,8 +79,8 @@ def _write_input_zarrs(input_dir):
     )
     ocean["sea_surface_fraction"] = _field(ocean_times, seed=8).isel(time=0, drop=True)
 
-    atmos_path = str(input_dir / "atmosphere.zarr")
-    ocean_path = str(input_dir / "ocean.zarr")
+    atmos_path = str(input_dir / f"atmosphere-{year:04d}.zarr")
+    ocean_path = str(input_dir / f"ocean-{year:04d}.zarr")
     atmos.to_zarr(atmos_path)
     ocean.to_zarr(ocean_path)
     return atmos_path, ocean_path
@@ -411,3 +411,61 @@ def test_exclude_runs_on_single_dataset_raises(tmp_path):
     config = _make_config(tmp_path)
     with pytest.raises(ValueError, match="only supported for ensemble"):
         dataclasses.replace(config, stats=CoupledStatsConfig(exclude_runs=["run-a"]))
+
+
+def test_ensemble_flux_windows_follow_each_runs_ocean_times(tmp_path):
+    """Runs starting on different dates share one surface_flux_window_avg; with
+    no first_timestamp configured, each run's flux windows end on its own
+    ocean timesteps."""
+    single = _make_config(tmp_path)
+    years = {"run-a": 2001, "run-b": 2003}
+    runs = {}
+    input_paths = {}
+    for name, year in years.items():
+        atmos_path, ocean_path = _write_input_zarrs(tmp_path / "inputs", year=year)
+        input_paths[name] = (atmos_path, ocean_path)
+        runs[name] = EnsembleRunConfig(
+            atmosphere=CoupledInputDatasetConfig(
+                zarr_path=atmos_path, time_chunk_size=N_ATMOS_TIMES
+            ),
+            ocean=CoupledInputDatasetConfig(zarr_path=ocean_path, time_chunk_size=2),
+        )
+    coupled_datasets = dataclasses.replace(
+        single.coupled_datasets,
+        coupled_sea_ice=CoupledSeaIceConfig(
+            use_atmosphere_sea_ice_fraction_fallback=True
+        ),
+        coupled_sea_surface=dataclasses.replace(
+            single.coupled_datasets.coupled_sea_surface,
+            surface_flux_window_avg=WindowAvgDatasetConfig(
+                window_timedelta="120h", subset_names=["latent_heat_flux"]
+            ),
+        ),
+    )
+    config = CreateCoupledDatasetsConfig(
+        version=single.version,
+        family_name=single.family_name,
+        output_directory=single.output_directory,
+        coupled_datasets=coupled_datasets,
+        input_datasets=InputEnsembleConfig(
+            runs=runs,
+            stats=single.input_datasets.stats,
+            climate_data_type=single.input_datasets.climate_data_type,
+        ),
+    )
+    config.write_coupled_datasets(debug=False, subsample=False)
+
+    ensemble_dir = tmp_path / "outputs" / "v1-synthetic"
+    for name, (atmos_path, ocean_path) in input_paths.items():
+        atmos = xr.open_zarr(atmos_path)
+        ocean_in = xr.open_zarr(ocean_path)
+        ocean_out = xr.open_zarr(str(ensemble_dir / f"{name}-ocean.zarr"))
+        xr.testing.assert_equal(ocean_out.time, ocean_in.time)
+        # each 120h window holds 20 consecutive 6-hourly atmosphere samples
+        # and is labeled at its right edge
+        expected = (
+            atmos["latent_heat_flux"]
+            .coarsen(time=N_ATMOS_TIMES // 2, coord_func="max")
+            .mean()
+        )
+        xr.testing.assert_allclose(ocean_out["latent_heat_flux"], expected)

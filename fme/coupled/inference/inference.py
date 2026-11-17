@@ -300,7 +300,7 @@ def _get_initialization_time_and_timestep(
     # the coupled timestep and the prognostic names.
     stepper = config.load_stepper()
     initial_condition = config.initial_condition.get_initial_condition(
-        ocean_prognostic_names=stepper.config.ocean.stepper.prognostic_names,
+        ocean_prognostic_names=stepper.config.ocean_state_names,
         atmosphere_prognostic_names=stepper.config.atmosphere.stepper.prognostic_names,
         n_ensemble_per_ic=config.n_ensemble_per_ic,
     )
@@ -380,7 +380,7 @@ def run_inference_from_config(config: InferenceConfig):
     )
     logging.info("Loading initial condition data")
     initial_condition = config.initial_condition.get_initial_condition(
-        ocean_prognostic_names=stepper_config.ocean.stepper.prognostic_names,
+        ocean_prognostic_names=stepper_config.ocean_state_names,
         atmosphere_prognostic_names=stepper_config.atmosphere.stepper.prognostic_names,
         n_ensemble_per_ic=config.n_ensemble_per_ic,
     )
@@ -409,6 +409,8 @@ def run_inference_from_config(config: InferenceConfig):
         n_timesteps_ocean=n_timesteps_ocean,
         n_timesteps_atmosphere=n_timesteps_atmosphere,
         output_dir=config.experiment_dir,
+        ocean_normalize=stepper.ocean.normalizer.normalize,
+        atmosphere_normalize=stepper.atmosphere.normalizer.normalize,
     )
 
     writer = config.get_data_writer(data=data)

@@ -1,8 +1,7 @@
-__version__ = "2026.5.1"
+__version__ = "2026.10.0"
 
 
 from . import ace, coupled
-from . import sht_fix as _sht_fix
 from .core import Packer, StandardNormalizer, get_device, get_normalizer, using_gpu
 from .core.metrics import (
     gradient_magnitude,

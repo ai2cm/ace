@@ -45,6 +45,19 @@ def test_composite_predictions():
         )
 
 
+def test_composite_predictions_trims_shifted_last_patch():
+    # On a 1x4 domain, 1x3 patches with overlap 1 start at columns 0 and 2; the
+    # second runs past the edge, so it is shifted back to columns 1-3 and its
+    # first column is trimmed, leaving the configured one-column overlap.
+    patches = get_patches((1, 4), (1, 3), overlap=1, drop_partial_patches=False)
+    assert patches[1].output_slice.x == slice(1, None)
+    predictions = [{"x": torch.full((2, 3, 1, 3), value)} for value in (1.0, 3.0)]
+    composited = composite_patch_predictions(predictions, patches)["x"]
+    # without the trim, column 1 would also average the two patches, to 2.0
+    expected = torch.tensor([1.0, 1.0, 2.0, 3.0]).expand(2, 3, 1, 4)
+    torch.testing.assert_close(composited, expected)
+
+
 _COMPOSITE_PATCH = PatchPredictionConfig(
     divide_generation=True, composite_prediction=True
 )
