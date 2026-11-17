@@ -2,8 +2,8 @@
 # Reference file; fme does not parse it. Train configs copy from it.
 #
 # Splits and merge/concat structure: as in the reference,
-#   ace-exper@32fb049ba:configs/experiments/cm4_1pct_46to125_piC_156to235/ocean_ppad/train-config.yaml
-# Stores: .scratch/2026-11-16-1453-samudracev2-configs/data/stores.yaml (workspace root).
+#   ai2cm/ace@32fb049ba:configs/experiments/cm4_1pct_46to125_piC_156to235/ocean_ppad/train-config.yaml
+#   (on branch exper/2026-07-16-jamesd).
 #
 # Transcription into a train-config.yaml:
 #   {dataset: <key>} -> {data_path: <ocean.data_path>, file_pattern: <datasets.<key>.file_pattern>,
@@ -20,29 +20,31 @@
 #            only from there, so a run needs on_weka: true for every dataset it uses.
 ocean:
   data_path: /climate-default  # Beaker Weka volume; per-dataset copy status in `on_weka`
+  # `--coupled_stats` Beaker dataset (normalization stats) [maintainer, 2026-11-17]; not transcribed into train-config.
+  stats: andrep/2026-11-13-om4-1pctco2-1deg-coupled-stats
   datasets:
     1pctco2_coupled_ocean:
-      # NOT YET EXISTING: placeholder name [maintainer, 2026-11-16]; store not built.
+      # Weka copy: Beaker experiment 01M7NJGR8ZN8RDA0HH6VS7C73N (gcs-to-weka)
       file_pattern: 2026-11-13-om4-1pctco2-1deg-coupled-ocean.zarr
       engine: zarr
-      exists: false
-      on_weka: false  # not yet copied [maintainer, 2026-11-16]
+      exists: true  # built [maintainer, 2026-11-17]
+      on_weka: true  # copied [maintainer, 2026-11-17]
     1pctco2_ocean_5daily:
       file_pattern: 2026-11-13-om4-1pctco2-1deg-ocean-5daily.zarr
       engine: zarr
-      exists: true  # on gs://vcm-ml-intermediate
-      on_weka: false  # not yet copied [maintainer, 2026-11-16]
+      exists: true  # built [maintainer, 2026-11-17]
+      on_weka: true  # copied [maintainer, 2026-11-17]
     picontrol_coupled_ocean:
-      # NOT YET EXISTING: placeholder name [maintainer, 2026-11-16]; store not built.
+      # Weka copy: Beaker experiment 01M7NJGR8ZN8RDA0HH6VS7C73N (gcs-to-weka)
       file_pattern: 2026-11-13-om4-picontrol-1deg-coupled-ocean.zarr
       engine: zarr
-      exists: false
-      on_weka: false  # not yet copied [maintainer, 2026-11-16]
+      exists: true  # built [maintainer, 2026-11-17]
+      on_weka: true  # copied [maintainer, 2026-11-17]
     picontrol_ocean_5daily:
       file_pattern: 2026-11-13-om4-picontrol-1deg-ocean-5daily.zarr
       engine: zarr
-      exists: true  # on gs://vcm-ml-intermediate
-      on_weka: false  # not yet copied [maintainer, 2026-11-16]
+      exists: true  # built [maintainer, 2026-11-17]
+      on_weka: true  # copied [maintainer, 2026-11-17]
   splits:
     train:
       # 1pctCO2 years 0046-0125 concatenated with piControl years 0156-0235.
