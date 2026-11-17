@@ -184,6 +184,7 @@ def generate_face_masks(
     overwrite: bool = False,
     start_time: str | None = None,
     end_time: str | None = None,
+    member: str | None = None,
 ) -> None:
     """Scan a stream's C-grid velocity pair over the config's time window
     (optionally overridden by ``start_time``/``end_time``), compute the
@@ -226,7 +227,7 @@ def generate_face_masks(
             "--overwrite if you really mean to replace it."
         )
 
-    config = load_config(config_path)
+    config = load_config(config_path, member)
     if start_time is not None:
         config.start_time = start_time
     if end_time is not None:
@@ -369,6 +370,9 @@ def main() -> None:
         "--config", required=True, help="Path to the pipeline YAML config"
     )
     parser.add_argument(
+        "--member", help="Ensemble-member name substituted into the config's URLs"
+    )
+    parser.add_argument(
         "--stream",
         required=True,
         help="Name of the config stream whose first rotated pair is scanned",
@@ -410,6 +414,7 @@ def main() -> None:
         args.overwrite,
         args.start_time,
         args.end_time,
+        args.member,
     )
 
 

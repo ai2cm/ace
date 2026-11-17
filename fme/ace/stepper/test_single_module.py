@@ -2895,6 +2895,62 @@ def test_get_stepper_with_input_masking_raises():
         )
 
 
+def _get_stepper_with_fill_value_overrides(
+    fill_value_overrides: dict[str, Literal["mean"] | float],
+) -> Stepper:
+    in_names = ["thetao_0", "thetao_1", "zos", "forcing"]
+    out_names = ["thetao_0", "thetao_1", "zos", "diagnostic"]
+    mask = torch.ones(5, 5, device=fme.get_device())
+    mask[0, 0] = 0.0
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(
+                        type="prebuilt", config={"module": torch.nn.Identity()}
+                    ),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=trivial_network_and_loss_normalization(
+                        set(in_names + out_names), mean=5.0
+                    ),
+                )
+            ),
+        ),
+        input_masking=StaticSpatialMaskingConfig(
+            mask_value=0,
+            fill_value=0.0,
+            fill_value_overrides=fill_value_overrides,
+        ),
+    )
+    return config.get_stepper(
+        get_dataset_info(
+            spatial_mask_provider=SpatialMaskProvider(
+                {"mask_2d": mask, "mask_0": mask, "mask_1": mask}
+            )
+        )
+    )
+
+
+def test_get_stepper_fill_value_overrides_apply_to_inputs():
+    stepper = _get_stepper_with_fill_value_overrides({"thetao_": "mean", "zos": 1.0})
+    data = {
+        name: torch.full((1, 5, 5), 7.0, device=fme.get_device())
+        for name in ["thetao_0", "thetao_1", "zos", "forcing"]
+    }
+    out = stepper._input_process_func(data)
+    assert out["thetao_0"][0, 0, 0].item() == pytest.approx(5.0)  # mean
+    assert out["zos"][0, 0, 0].item() == pytest.approx(1.0)  # override
+    assert out["forcing"][0, 0, 0].item() == pytest.approx(0.0)  # fill_value
+    assert out["zos"][0, 1, 1].item() == pytest.approx(7.0)  # unmasked
+
+
+def test_get_stepper_fill_value_overrides_reject_output_only_key():
+    with pytest.raises(ValueError, match="match no masked input"):
+        _get_stepper_with_fill_value_overrides({"diagnostic": 1.0})
+
+
 @pytest.mark.parametrize("n_ensemble", [1, 3])
 def test_predict_with_derived_forcing(n_ensemble):
     insolation = InsolationConfig(INSOLATION_NAME, SOLAR_CONSTANT_AS_NAME)
@@ -4095,3 +4151,59 @@ def test_load_stepper_uses_stepper_weights_by_default(tmp_path: pathlib.Path):
     stepper = load_stepper(path)
 
     assert_parameters_equal(stepper.modules, stepper_weights)
+
+
+def test_surface_energy_flux_correction_with_output_only_sst():
+    """An ocean model that diagnoses sst (output-only) can use the surface
+    energy flux correction, which then reads the generated sst."""
+    fluxes = [
+        "DLWRFsfc",
+        "ULWRFsfc",
+        "DSWRFsfc",
+        "USWRFsfc",
+        "LHTFLsfc",
+        "SHTFLsfc",
+        "PRATEsfc",
+        "total_frozen_precipitation_rate",
+    ]
+    in_names = ["thetao_0", "land_fraction", "sea_ice_fraction", *fluxes]
+    out_names = ["thetao_0", "sst", "hfds"]
+    module = torch.nn.Conv2d(len(in_names), len(out_names), 1)
+    config = StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(type="prebuilt", config={"module": module}),
+                    in_names=in_names,
+                    out_names=out_names,
+                    normalization=trivial_network_and_loss_normalization(
+                        set(in_names + out_names)
+                    ),
+                    corrector=CorrectorSelector(
+                        type="ocean_corrector",
+                        config={
+                            "surface_energy_flux_correction": {"method": "prescribed"}
+                        },
+                    ),
+                )
+            ),
+        ),
+    )
+    assert "sst" not in config.prognostic_names
+    n_steps = 2
+    data = get_data(set(in_names + out_names), n_samples=2, n_time=n_steps + 1).data
+    dataset_info = _get_ocean_dataset_info()
+    stepper = config.get_stepper(dataset_info)
+    ic = data.get_start(stepper.prognostic_names, n_ic_timesteps=1)
+    output, _ = stepper.predict(ic, data.subset_names(config.input_only_names))
+    assert output.data["hfds"].shape[1] == n_steps
+    assert torch.isfinite(output.data["hfds"]).all()
+    train_stepper = _get_train_stepper(
+        config,
+        dataset_info,
+        n_forward_steps=n_steps,
+        loss=StepLossConfig(type="MSE"),
+    )
+    stepped = train_stepper.train_on_batch(data=data, optimization=NullOptimization())
+    assert torch.isfinite(stepped.gen_data["hfds"]).all()
