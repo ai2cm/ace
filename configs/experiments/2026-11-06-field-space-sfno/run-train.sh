@@ -184,3 +184,4 @@ run_training "pretrain-fieldsfno-v1-l16-h256-4deg-rs1.yaml" "fieldsfno-v1-l16-h2
 run_training "pretrain-fieldsfno-v1-e384-l16-h128-4deg-rs1.yaml" "fieldsfno-v1-embed384-l16-h128-4deg-pretrain-rs1" 1
 run_training "pretrain-fieldsfno-v1-l16-h128-4deg-rs1.yaml" "fieldsfno-v1-l16-h128-4deg-pretrain-rs1" 1
 run_training "pretrain-fieldsfno-v1-l64-h256-4deg-rs1.yaml" "fieldsfno-v1-l64-h256-4deg-pretrain-rs1" 1
+run_training "pretrain-muon-l32-4deg-rs1.yaml" "muon-l32-4deg-pretrain-rs1" 1
