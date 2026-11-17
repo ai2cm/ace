@@ -1,7 +1,7 @@
 import dataclasses
 import datetime
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 import torch
@@ -71,7 +71,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
     residual_prediction: bool = False
 
     def __post_init__(self):
-        self.normalization.raise_if_grouped("SeparateRadiationStepConfig")
+        self.normalization.raise_if_unsupported("SeparateRadiationStepConfig")
         seen_names: dict[str, str] = {}
         for name_list, label in (
             (self.main_prognostic_names, "main_prognostic_names"),
@@ -244,7 +244,7 @@ class SeparateRadiationStepConfig(StepConfigABC):
     def get_ocean(self) -> OceanConfig | None:
         return self.ocean
 
-    def load(self):
+    def load(self, extra_names: Iterable[str] = ()):
         self.normalization.load()
 
 

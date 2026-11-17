@@ -168,6 +168,10 @@ class PairedNormalizationConfig:
     fine: NormalizationConfig
     coarse: NormalizationConfig
 
+    def __post_init__(self):
+        self.fine.raise_if_per_grid_cell("Downscaling (fine normalization)")
+        self.coarse.raise_if_per_grid_cell("Downscaling (coarse normalization)")
+
     def build(
         self,
         in_names: list[str],

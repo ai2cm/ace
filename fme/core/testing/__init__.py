@@ -10,6 +10,7 @@ from .normalization import (
     trivial_network_and_loss_normalization,
     trivial_normalization,
     uniform_grouped_normalization,
+    write_normalization_stats,
 )
 from .regression import validate_tensor
 from .time_range import date_range

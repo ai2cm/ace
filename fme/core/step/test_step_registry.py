@@ -1,6 +1,6 @@
 import dataclasses
 import datetime
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -130,7 +130,7 @@ class MockStepConfig(StepConfigABC):
     ):
         raise NotImplementedError()
 
-    def load(self):
+    def load(self, extra_names: Iterable[str] = ()):
         pass
 
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:
@@ -259,7 +259,7 @@ class DeprecatingMockStepConfig(StepConfigABC):
     ):
         raise NotImplementedError()
 
-    def load(self):
+    def load(self, extra_names: Iterable[str] = ()):
         pass
 
     def replace_prescribed_prognostic_names(self, names: list[str]) -> None:

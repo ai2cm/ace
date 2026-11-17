@@ -30,6 +30,7 @@ listed here.
 | [#1615](https://github.com/ai2cm/ace/pull/1615) | Add checkpoint weight averaging (model soup) | yyexela |
 | [#1617](https://github.com/ai2cm/ace/pull/1617) | Add per-sample global-mean drift inference aggregator | yyexela |
 | [#1620](https://github.com/ai2cm/ace/pull/1620) | Add per-dataset spherical harmonic roundtrip of selected variables | yyexela |
+| [#1654](https://github.com/ai2cm/ace/pull/1654) | Add per-grid-cell normalization constants | yyexela |
 
 ## Deferred
 
