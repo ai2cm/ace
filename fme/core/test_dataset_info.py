@@ -24,6 +24,17 @@ from fme.core.metrics import spherical_area_weights
 from fme.core.spatial_mask_provider import SpatialMaskProvider
 
 
+def _make_depth_coordinate_with_ocean_volume_per_area() -> DepthCoordinate:
+    mask = torch.ones(2, 3, 2, device=get_device())
+    mask[0, 0, 1] = 0.0
+    return DepthCoordinate(
+        idepth=torch.tensor([0.0, 10.0, 50.0], device=get_device()),
+        mask=mask,
+        deptho=torch.full((2, 3), 50.0, device=get_device()),
+        ocean_volume_per_area=torch.full((2, 3, 2), 20.0, device=get_device()),
+    )
+
+
 @pytest.mark.parametrize(
     "dataset_info",
     [
@@ -60,6 +71,17 @@ from fme.core.spatial_mask_provider import SpatialMaskProvider
         ),
         pytest.param(
             DatasetInfo(
+                horizontal_coordinates=LatLonCoordinates(
+                    lat=torch.arange(2, device=get_device()),
+                    lon=torch.arange(3, device=get_device()),
+                ),
+                vertical_coordinate=_make_depth_coordinate_with_ocean_volume_per_area(),
+                timestep=datetime.timedelta(days=5),
+            ),
+            id="depth_coordinate_with_ocean_volume_per_area",
+        ),
+        pytest.param(
+            DatasetInfo(
                 variable_metadata={
                     "var_0": VariableMetadata(
                         "m",
@@ -75,6 +97,36 @@ def test_dataset_info_round_trip(dataset_info: DatasetInfo):
     state = dataset_info.get_state()
     dataset_info_reloaded = DatasetInfo.from_state(state)
     assert dataset_info == dataset_info_reloaded
+
+
+def test_dataset_info_round_trip_keeps_ocean_volume_per_area_dz():
+    dataset_info = DatasetInfo(
+        vertical_coordinate=_make_depth_coordinate_with_ocean_volume_per_area()
+    )
+    reloaded = DatasetInfo.from_state(dataset_info.get_state())
+    coordinate = reloaded.vertical_coordinate
+    assert isinstance(coordinate, DepthCoordinate)
+    assert coordinate.ocean_volume_per_area is not None
+    torch.testing.assert_close(
+        coordinate.dz,
+        _make_depth_coordinate_with_ocean_volume_per_area().dz,
+    )
+
+
+def test_dataset_info_from_state_without_ocean_volume_per_area():
+    old_coordinate = DepthCoordinate(
+        idepth=torch.tensor([0.0, 10.0, 50.0], device=get_device()),
+        mask=torch.ones(2, 3, 2, device=get_device()),
+        deptho=torch.full((2, 3), 30.0, device=get_device()),
+    )
+    state = DatasetInfo(vertical_coordinate=old_coordinate).get_state()
+    assert "ocean_volume_per_area" not in state["vertical_coordinate"]
+    reloaded = DatasetInfo.from_state(state)
+    coordinate = reloaded.vertical_coordinate
+    assert isinstance(coordinate, DepthCoordinate)
+    assert coordinate.ocean_volume_per_area is None
+    assert coordinate == old_coordinate
+    torch.testing.assert_close(coordinate.dz, old_coordinate.dz)
 
 
 @pytest.mark.parametrize(

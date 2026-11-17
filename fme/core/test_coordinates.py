@@ -352,6 +352,140 @@ def test_depth_integral_with_deptho(leading_dims):
     )
 
 
+def _make_ocean_volume_per_area_coordinate(
+    ocean_volume_per_area: torch.Tensor | None,
+) -> DepthCoordinate:
+    idepth = torch.tensor([0.0, 10.0, 50.0, 100.0])
+    mask = torch.tensor([[[1.0, 1.0, 1.0], [1.0, 1.0, 0.0], [0.0, 0.0, 0.0]]])
+    deptho = torch.tensor([[100.0, 50.0, 0.0]])
+    return DepthCoordinate(
+        idepth=idepth,
+        mask=mask,
+        deptho=deptho,
+        ocean_volume_per_area=ocean_volume_per_area,
+    )
+
+
+def _ocean_volume_per_area() -> torch.Tensor:
+    return torch.tensor([[[10.0, 30.0, 60.0], [8.0, 42.0, 0.0], [0.0, 0.0, 0.0]]])
+
+
+@pytest.mark.parametrize(
+    "leading_dims",
+    [(), (2,), (2, 3)],
+    ids=["no_leading", "batch", "batch_time"],
+)
+def test_depth_integral_with_ocean_volume_per_area(leading_dims):
+    ocean_volume_per_area = _ocean_volume_per_area()
+    coord = _make_ocean_volume_per_area_coordinate(ocean_volume_per_area)
+    torch.manual_seed(0)
+    integrand = torch.randn(*leading_dims, *coord.mask.shape)
+
+    result = coord.depth_integral(integrand)
+
+    expected = (ocean_volume_per_area * integrand).sum(dim=-1)
+    land = coord.mask[..., 0] == 0
+    expected = expected.where(~land, float("nan"))
+    torch.testing.assert_close(result, expected, equal_nan=True)
+    torch.testing.assert_close(coord.dz, ocean_volume_per_area * coord.mask)
+
+
+def test_dz_without_ocean_volume_per_area_uses_idepth_and_deptho():
+    coord = _make_ocean_volume_per_area_coordinate(None)
+    torch.testing.assert_close(
+        coord.dz, dz_from_idepth(coord.idepth, coord.mask, coord.deptho)
+    )
+
+
+def test_dz_with_ocean_volume_per_area_zero_off_mask():
+    ocean_volume_per_area = torch.full((1, 3, 3), 5.0)
+    coord = _make_ocean_volume_per_area_coordinate(ocean_volume_per_area)
+    torch.testing.assert_close(coord.dz, 5.0 * coord.mask)
+
+
+@pytest.mark.parametrize(
+    "ocean_volume_per_area, match",
+    [
+        pytest.param(torch.ones(1, 3, 2), "last dimension", id="too_few_levels"),
+        pytest.param(torch.ones(1, 2, 3), "broadcastable", id="not_broadcastable"),
+        pytest.param(
+            torch.tensor([[[1.0, float("nan"), 1.0]]]).expand(1, 3, 3),
+            "finite",
+            id="nan",
+        ),
+        pytest.param(
+            torch.tensor([[[1.0, float("inf"), 1.0]]]).expand(1, 3, 3),
+            "finite",
+            id="inf",
+        ),
+    ],
+)
+def test_ocean_volume_per_area_validation(ocean_volume_per_area, match):
+    with pytest.raises(ValueError, match=match):
+        _make_ocean_volume_per_area_coordinate(ocean_volume_per_area)
+
+
+@pytest.mark.parametrize(
+    "first, second, equal",
+    [
+        pytest.param(
+            _ocean_volume_per_area(), _ocean_volume_per_area(), True, id="same"
+        ),
+        pytest.param(_ocean_volume_per_area(), None, False, id="present_vs_none"),
+        pytest.param(None, _ocean_volume_per_area(), False, id="none_vs_present"),
+        pytest.param(
+            _ocean_volume_per_area(),
+            _ocean_volume_per_area() * 2,
+            False,
+            id="different_values",
+        ),
+    ],
+)
+def test_ocean_volume_per_area_equality(first, second, equal):
+    a = _make_ocean_volume_per_area_coordinate(first)
+    b = _make_ocean_volume_per_area_coordinate(second)
+    assert (a == b) is equal
+
+
+def test_ocean_volume_per_area_to_device():
+    coord = _make_ocean_volume_per_area_coordinate(_ocean_volume_per_area())
+    moved = coord.to(get_device())
+    assert moved.ocean_volume_per_area is not None
+    assert moved.ocean_volume_per_area.device == moved.idepth.device
+    assert moved == coord.to(get_device())
+    torch.testing.assert_close(moved.dz.cpu(), coord.dz)
+
+
+@pytest.mark.parametrize(
+    "ocean_volume_per_area",
+    [_ocean_volume_per_area(), None],
+    ids=["present", "absent"],
+)
+def test_ocean_volume_per_area_state_round_trip(ocean_volume_per_area):
+    coord = _make_ocean_volume_per_area_coordinate(ocean_volume_per_area)
+    state = coord.as_dict()
+    assert ("ocean_volume_per_area" in state) is (ocean_volume_per_area is not None)
+    reloaded = SerializableVerticalCoordinate.from_state(state)
+    assert isinstance(reloaded, DepthCoordinate)
+    assert reloaded == coord.to(get_device())
+    torch.testing.assert_close(reloaded.dz.cpu(), coord.dz)
+
+
+def test_depth_coordinate_state_without_ocean_volume_per_area_key():
+    old_state = {
+        "idepth": torch.tensor([0.0, 10.0, 50.0, 100.0]),
+        "mask": torch.ones(2, 3),
+        "deptho": torch.tensor([30.0, 100.0]),
+    }
+    reloaded = SerializableVerticalCoordinate.from_state(old_state)
+    assert isinstance(reloaded, DepthCoordinate)
+    assert reloaded.ocean_volume_per_area is None
+    expected_dz = dz_from_idepth(
+        old_state["idepth"], old_state["mask"], old_state["deptho"]
+    )
+    torch.testing.assert_close(reloaded.dz.cpu(), expected_dz)
+
+
 def test_depth_integral_gradient_with_mask():
     nlat, nlon, nz = 3, 4, 2
     idepth = torch.tensor([0.0, 10.0, 50.0])

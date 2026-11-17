@@ -70,6 +70,9 @@ def _get_vertical_coordinate(
     will be returned. If the dataset contains variables named
     `idepth_N` then a depth coordinate will be returned. If neither thing
     is true, a hybrid sigma-pressure coordinate of lenght 0 is returned.
+    For a depth coordinate, time-invariant variables named
+    `ocean_volume_per_area_N` (one per layer), when present, set the layer
+    thickness.
 
     Args:
         ds: Dataset to get vertical coordinates from.
@@ -131,8 +134,32 @@ def _get_vertical_coordinate(
                 "Dataset does not have a variable named 'deptho' (sea floor depth). "
                 "The ocean depth integral will not account for partial bottom cells."
             )
+        ocean_volume_per_area_layers = {
+            name: torch.as_tensor(ds[name].values, dtype=dtype)
+            for name in ds.data_vars
+            if re.match(r"ocean_volume_per_area_(\d+)$", name)
+        }
+        if len(ocean_volume_per_area_layers) > 0:
+            for name in ocean_volume_per_area_layers:
+                if "time" in ds[name].dims:
+                    raise ValueError(
+                        "'ocean_volume_per_area_<k>' must be time-independent."
+                    )
+            stacker = Stacker({"ocean_volume_per_area": ["ocean_volume_per_area_"]})
+            ocean_volume_per_area = stacker(
+                "ocean_volume_per_area", ocean_volume_per_area_layers
+            )
+        else:
+            logger.info(
+                "Dataset does not have 'ocean_volume_per_area_<k>' variables. "
+                "Ocean layer thickness is derived from 'idepth_<k>' and 'deptho'."
+            )
+            ocean_volume_per_area = None
         coordinate = DepthCoordinate(
-            torch.as_tensor(idepth_list, dtype=dtype), mask, deptho
+            torch.as_tensor(idepth_list, dtype=dtype),
+            mask,
+            deptho,
+            ocean_volume_per_area,
         )
     elif len(ak_list) > 0 and len(bk_list) > 0:
         coordinate = HybridSigmaPressureCoordinate(
