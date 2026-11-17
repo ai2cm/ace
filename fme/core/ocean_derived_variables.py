@@ -4,6 +4,10 @@ from collections.abc import Callable, MutableMapping
 
 import torch
 
+from fme.core.area_weights_provider import (
+    AreaWeightsProviderABC,
+    NullAreaWeightsProvider,
+)
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.ocean_data import (
     HasCellAreaInMetersSquared,
@@ -46,6 +50,7 @@ def _compute_ocean_derived_variable(
     forcing_data: TensorDict | None = None,
     exists_ok: bool = False,
     cell_area_provider: HasCellAreaInMetersSquared | None = None,
+    area_weights_provider: AreaWeightsProviderABC = NullAreaWeightsProvider,
 ) -> TensorDict:
     """Computes an ocean derived variable and adds it to the given data.
 
@@ -69,6 +74,8 @@ def _compute_ocean_derived_variable(
             unchanged.
         cell_area_provider: optional provider of cell areas in meters squared,
             needed by some derived variables.
+        area_weights_provider: the dataset's ocean-area weights, used by
+            derived variables that take ocean-area means.
 
     Returns:
         A new data dictionary with the derived variable added.
@@ -89,7 +96,10 @@ def _compute_ocean_derived_variable(
                 data[key] = value
 
     ocean_data = OceanData(
-        data, depth_coordinate, cell_area_provider=cell_area_provider
+        data,
+        depth_coordinate,
+        cell_area_provider=cell_area_provider,
+        area_weights_provider=area_weights_provider,
     )
 
     try:
@@ -107,6 +117,7 @@ def compute_ocean_derived_quantities(
     timestep: datetime.timedelta,
     forcing_data: TensorDict | None = None,
     cell_area_provider: HasCellAreaInMetersSquared | None = None,
+    area_weights_provider: AreaWeightsProviderABC = NullAreaWeightsProvider,
 ) -> TensorDict:
     """Computes all derived quantities from the given data."""
     for label in _OCEAN_DERIVED_VARIABLE_REGISTRY:
@@ -121,6 +132,7 @@ def compute_ocean_derived_quantities(
             forcing_data=forcing_data,
             exists_ok=exists_ok,
             cell_area_provider=cell_area_provider,
+            area_weights_provider=area_weights_provider,
         )
     return data
 
@@ -254,6 +266,60 @@ def net_salt_flux_into_ocean_column(
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
     return data.net_salt_flux_into_ocean
+
+
+@register(
+    VariableMetadata("m", "Sea surface height minus its ocean-area global mean"),
+    exists_ok=True,
+)
+def zos(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Sea surface height above geoid (zos) from sea surface height (SSH).
+
+    MOM6 in the CM4 configuration (no surface pressure in SSH) writes
+
+        zos_i = SSH_i - <SSH>_native
+
+    with <x>_native the ocean-area-weighted global mean on the native grid
+    (i: native cell). Here the mean is taken on the data grid (J: grid cell):
+
+        zos_J = SSH_J - <SSH>_W,  <x>_W = sum_J(W_J x_J) / sum_J(W_J)
+        W_J = ocean_area_weights_J * isfinite(SSH_J)
+            if the dataset has an area weights provider (areacello * ssf), else
+        W_J = area_weights_m2_J * sea_surface_fraction_J * isfinite(SSH_J)
+
+    <SSH>_W equals <SSH>_native only when W preserves the native ocean area
+    of each cell. So zos is exact only with an area weights provider (the
+    store holds areacello and sea_surface_fraction). Without one, W uses
+    cos-lat cell area (area_weights_m2), and zos differs from the native zos
+    by a spatially uniform offset per sample. <zos>_W is zero by construction.
+
+    Weights are on the global (lat, lon) grid. Spatial parallelism is not
+    supported: the weights' shape does not match a local shard (same as HI).
+
+    Registered before derived variables that read zos, and derived only when
+    zos is absent from the data.
+    """
+    ssh = data.sea_surface_height
+    ocean_area = data.ocean_area_weights
+    if ocean_area is None:
+        sea_surface_fraction = data.sea_surface_fraction
+        try:
+            cell_area = data.area_weights_m2
+        except ValueError as err:
+            raise KeyError("area_weights_m2") from err
+        if cell_area is None:
+            raise KeyError("area_weights_m2")
+        ocean_area = cell_area * sea_surface_fraction
+    finite = torch.isfinite(ssh)
+    weights = torch.where(finite, ocean_area, 0.0)
+    spatial_dims = (-2, -1)
+    mean = (weights * torch.where(finite, ssh, 0.0)).sum(
+        dim=spatial_dims, keepdim=True
+    ) / weights.sum(dim=spatial_dims, keepdim=True)
+    return ssh - mean
 
 
 @register(VariableMetadata("[0-1]", "sea ice concentration"), exists_ok=True)

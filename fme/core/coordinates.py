@@ -82,6 +82,7 @@ class OceanDeriveFn(DeriveFnABC):
         depth_coordinate: "OptionalDepthCoordinate",
         timestep: timedelta,
         horizontal_coordinates: "HorizontalCoordinates | None" = None,
+        area_weights_provider: AreaWeightsProviderABC = NullAreaWeightsProvider,
     ):
         self.depth_coordinate = depth_coordinate.to(
             "cpu"
@@ -93,6 +94,8 @@ class OceanDeriveFn(DeriveFnABC):
             if horizontal_coordinates is not None
             else None
         )
+        # must be on cpu for multiprocessing fork context
+        self.area_weights_provider = area_weights_provider.to("cpu")
 
     def __call__(self, data: TensorMapping, forcing_data: TensorMapping) -> TensorDict:
         if isinstance(self.depth_coordinate, NullVerticalCoordinate):
@@ -110,6 +113,7 @@ class OceanDeriveFn(DeriveFnABC):
             timestep=self.timestep,
             forcing_data=dict(forcing_data),
             cell_area_provider=cell_area_provider,
+            area_weights_provider=self.area_weights_provider.to(get_device()),
         )
 
 
@@ -137,6 +141,7 @@ class VerticalCoordinate(abc.ABC):
         self,
         timestep: timedelta,
         horizontal_coordinates: "HorizontalCoordinates | None" = None,
+        area_weights_provider: AreaWeightsProviderABC = NullAreaWeightsProvider,
     ) -> DeriveFnABC:
         pass
 
@@ -199,6 +204,7 @@ class HybridSigmaPressureCoordinate(VerticalCoordinate):
         self,
         timestep: timedelta,
         horizontal_coordinates: "HorizontalCoordinates | None" = None,
+        area_weights_provider: AreaWeightsProviderABC = NullAreaWeightsProvider,
     ) -> DeriveFnABC:
         return AtmosphericDeriveFn(self, timestep)
 
@@ -388,8 +394,11 @@ class DepthCoordinate(VerticalCoordinate):
         self,
         timestep: timedelta,
         horizontal_coordinates: "HorizontalCoordinates | None" = None,
+        area_weights_provider: AreaWeightsProviderABC = NullAreaWeightsProvider,
     ) -> DeriveFnABC:
-        return OceanDeriveFn(self, timestep, horizontal_coordinates)
+        return OceanDeriveFn(
+            self, timestep, horizontal_coordinates, area_weights_provider
+        )
 
     @property
     def dtype(self) -> torch.dtype:
@@ -519,6 +528,7 @@ class NullVerticalCoordinate(VerticalCoordinate):
         self,
         timestep: timedelta,
         horizontal_coordinates: "HorizontalCoordinates | None" = None,
+        area_weights_provider: AreaWeightsProviderABC = NullAreaWeightsProvider,
     ) -> DeriveFnABC:
         return NullDeriveFn()
 

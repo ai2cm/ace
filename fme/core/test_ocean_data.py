@@ -3,6 +3,7 @@ import math
 import pytest
 import torch
 
+from fme.core.area_weights_provider import AreaWeightsProvider
 from fme.core.constants import (
     DENSITY_OF_SEA_WATER_CM4,
     REFERENCE_SALINITY,
@@ -325,3 +326,10 @@ def test_sea_surface_temperature_missing():
     ocean_data = OceanData({"zos": torch.rand(1, 1, 2, 2)})
     with pytest.raises(KeyError, match="sea_surface_temperature"):
         _ = ocean_data.sea_surface_temperature
+
+
+def test_ocean_area_weights():
+    weights = torch.rand(2, 3)
+    assert OceanData({}).ocean_area_weights is None
+    ocean_data = OceanData({}, area_weights_provider=AreaWeightsProvider(weights))
+    assert ocean_data.ocean_area_weights is weights
