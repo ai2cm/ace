@@ -1,4 +1,4 @@
-version: "2026-10-11"
+version: "2026-11-13"
 family_name: CM4-like-AM4-random-CO2-coupled
 output_directory: gs://vcm-ml-intermediate
 
@@ -9,6 +9,9 @@ coupled_datasets:
     include_ts: true
   output_writer:
     n_dask_workers: 32
+  input_field_names:
+    ocean:
+      sea_surface_temperature_name: SST_degK
 
 stats:
   start_date: "0153-01-01T06:00:00"
@@ -16,7 +19,7 @@ stats:
     - random-CO2-1xCO2-ic_0003
     - random-CO2-2xCO2-ic_0003
     - random-CO2-4xCO2-ic_0003
-  beaker_dataset: 2026-10-11-cm4-like-am4-random-co2-1deg-coupled-stats-sst-blended
+  beaker_dataset: 2026-11-13-cm4-like-am4-random-co2-1deg-coupled-stats
 
 input_datasets:
   runs:
@@ -27,7 +30,7 @@ input_datasets:
         extra_fields:
           names_and_prefixes: ["ak_", "bk_"]
       ocean:
-        zarr_path: gs://vcm-ml-intermediate/2026-10-11-cm4-like-am4-random-co2-sea-surface-1deg/random-CO2-1xCO2-ic_0001.zarr
+        zarr_path: gs://vcm-ml-intermediate/2026-11-13-cm4-like-am4-random-co2-sea-surface-1deg/random-CO2-1xCO2-ic_0001.zarr
         time_chunk_size: 365
         time_stride: "5D"
     random-CO2-2xCO2-ic_0001:
@@ -37,7 +40,7 @@ input_datasets:
         extra_fields:
           names_and_prefixes: ["ak_", "bk_"]
       ocean:
-        zarr_path: gs://vcm-ml-intermediate/2026-10-11-cm4-like-am4-random-co2-sea-surface-1deg/random-CO2-2xCO2-ic_0001.zarr
+        zarr_path: gs://vcm-ml-intermediate/2026-11-13-cm4-like-am4-random-co2-sea-surface-1deg/random-CO2-2xCO2-ic_0001.zarr
         time_chunk_size: 365
         time_stride: "5D"
     random-CO2-4xCO2-ic_0001:
@@ -47,7 +50,7 @@ input_datasets:
         extra_fields:
           names_and_prefixes: ["ak_", "bk_"]
       ocean:
-        zarr_path: gs://vcm-ml-intermediate/2026-10-11-cm4-like-am4-random-co2-sea-surface-1deg/random-CO2-4xCO2-ic_0001.zarr
+        zarr_path: gs://vcm-ml-intermediate/2026-11-13-cm4-like-am4-random-co2-sea-surface-1deg/random-CO2-4xCO2-ic_0001.zarr
         time_chunk_size: 365
         time_stride: "5D"
     random-CO2-1xCO2-ic_0002:
@@ -57,7 +60,7 @@ input_datasets:
         extra_fields:
           names_and_prefixes: ["ak_", "bk_"]
       ocean:
-        zarr_path: gs://vcm-ml-intermediate/2026-10-11-cm4-like-am4-random-co2-sea-surface-1deg/random-CO2-1xCO2-ic_0002.zarr
+        zarr_path: gs://vcm-ml-intermediate/2026-11-13-cm4-like-am4-random-co2-sea-surface-1deg/random-CO2-1xCO2-ic_0002.zarr
         time_chunk_size: 365
         time_stride: "5D"
     random-CO2-2xCO2-ic_0002:
@@ -67,7 +70,7 @@ input_datasets:
         extra_fields:
           names_and_prefixes: ["ak_", "bk_"]
       ocean:
-        zarr_path: gs://vcm-ml-intermediate/2026-10-11-cm4-like-am4-random-co2-sea-surface-1deg/random-CO2-2xCO2-ic_0002.zarr
+        zarr_path: gs://vcm-ml-intermediate/2026-11-13-cm4-like-am4-random-co2-sea-surface-1deg/random-CO2-2xCO2-ic_0002.zarr
         time_chunk_size: 365
         time_stride: "5D"
     random-CO2-4xCO2-ic_0002:
@@ -77,7 +80,7 @@ input_datasets:
         extra_fields:
           names_and_prefixes: ["ak_", "bk_"]
       ocean:
-        zarr_path: gs://vcm-ml-intermediate/2026-10-11-cm4-like-am4-random-co2-sea-surface-1deg/random-CO2-4xCO2-ic_0002.zarr
+        zarr_path: gs://vcm-ml-intermediate/2026-11-13-cm4-like-am4-random-co2-sea-surface-1deg/random-CO2-4xCO2-ic_0002.zarr
         time_chunk_size: 365
         time_stride: "5D"
     random-CO2-1xCO2-ic_0003:
@@ -87,7 +90,7 @@ input_datasets:
         extra_fields:
           names_and_prefixes: ["ak_", "bk_"]
       ocean:
-        zarr_path: gs://vcm-ml-intermediate/2026-10-11-cm4-like-am4-random-co2-sea-surface-1deg/random-CO2-1xCO2-ic_0003.zarr
+        zarr_path: gs://vcm-ml-intermediate/2026-11-13-cm4-like-am4-random-co2-sea-surface-1deg/random-CO2-1xCO2-ic_0003.zarr
         time_chunk_size: 365
         time_stride: "5D"
     random-CO2-2xCO2-ic_0003:
@@ -97,7 +100,7 @@ input_datasets:
         extra_fields:
           names_and_prefixes: ["ak_", "bk_"]
       ocean:
-        zarr_path: gs://vcm-ml-intermediate/2026-10-11-cm4-like-am4-random-co2-sea-surface-1deg/random-CO2-2xCO2-ic_0003.zarr
+        zarr_path: gs://vcm-ml-intermediate/2026-11-13-cm4-like-am4-random-co2-sea-surface-1deg/random-CO2-2xCO2-ic_0003.zarr
         time_chunk_size: 365
         time_stride: "5D"
     random-CO2-4xCO2-ic_0003:
@@ -107,7 +110,7 @@ input_datasets:
         extra_fields:
           names_and_prefixes: ["ak_", "bk_"]
       ocean:
-        zarr_path: gs://vcm-ml-intermediate/2026-10-11-cm4-like-am4-random-co2-sea-surface-1deg/random-CO2-4xCO2-ic_0003.zarr
+        zarr_path: gs://vcm-ml-intermediate/2026-11-13-cm4-like-am4-random-co2-sea-surface-1deg/random-CO2-4xCO2-ic_0003.zarr
         time_chunk_size: 365
         time_stride: "5D"
   climate_data_type: "CM4"
