@@ -315,11 +315,18 @@ class DepthCoordinate(VerticalCoordinate):
             When provided, layer thicknesses account for partial bottom cells.
             Must be broadcastable to the spatial dimensions of ``mask``
             (i.e. ``mask.shape[:-1]``).
+        ocean_volume_per_area: optional ocean volume of each layer per ocean
+            area of the column, in meters, with the same last (vertical)
+            dimension as ``mask`` and leading dimensions broadcastable with it.
+            When provided, it is the layer thickness used by ``dz`` and
+            ``depth_integral`` in place of the thickness derived from
+            ``idepth`` and ``deptho``.
     """
 
     idepth: torch.Tensor
     mask: torch.Tensor
     deptho: torch.Tensor | None = None
+    ocean_volume_per_area: torch.Tensor | None = None
 
     def __post_init__(self):
         if len(self.idepth.shape) != 1:
@@ -336,10 +343,37 @@ class DepthCoordinate(VerticalCoordinate):
                 f"Got idepth.shape: {self.idepth.shape} and mask.shape: "
                 f"{self.mask.shape}."
             )
-        self._dz = dz_from_idepth(self.idepth, self.mask, self.deptho)
+        if self.ocean_volume_per_area is None:
+            self._dz = dz_from_idepth(self.idepth, self.mask, self.deptho)
+        else:
+            self._validate_ocean_volume_per_area(self.ocean_volume_per_area)
+            self._dz = self.ocean_volume_per_area * self.mask
+
+    def _validate_ocean_volume_per_area(self, ocean_volume_per_area: torch.Tensor):
+        if ocean_volume_per_area.shape[-1] != self.mask.shape[-1]:
+            raise ValueError(
+                "The last dimension of ocean_volume_per_area must match that of "
+                f"mask. Got ocean_volume_per_area.shape: "
+                f"{ocean_volume_per_area.shape} and mask.shape: {self.mask.shape}."
+            )
+        try:
+            torch.broadcast_shapes(ocean_volume_per_area.shape, self.mask.shape)
+        except RuntimeError as err:
+            raise ValueError(
+                "ocean_volume_per_area must be broadcastable with mask. Got "
+                f"ocean_volume_per_area.shape: {ocean_volume_per_area.shape} and "
+                f"mask.shape: {self.mask.shape}."
+            ) from err
+        if not torch.isfinite(ocean_volume_per_area).all():
+            raise ValueError("ocean_volume_per_area must be finite everywhere.")
 
     @property
     def dz(self) -> torch.Tensor:
+        """Layer thickness in meters, zero where the mask is zero.
+
+        ``ocean_volume_per_area * mask`` if ``ocean_volume_per_area`` is set,
+        else derived from ``idepth``, ``mask`` and ``deptho``.
+        """
         return self._dz
 
     def __len__(self):
@@ -370,6 +404,11 @@ class DepthCoordinate(VerticalCoordinate):
             idepth=self.idepth.to(device),
             mask=self.mask.to(device),
             deptho=self.deptho.to(device) if self.deptho is not None else None,
+            ocean_volume_per_area=(
+                self.ocean_volume_per_area.to(device)
+                if self.ocean_volume_per_area is not None
+                else None
+            ),
         )
 
     def __eq__(self, other) -> bool:
@@ -387,6 +426,20 @@ class DepthCoordinate(VerticalCoordinate):
                 torch.testing.assert_close(self.deptho, other.deptho, equal_nan=True)
             except AssertionError:
                 return False
+        if (self.ocean_volume_per_area is None) != (
+            other.ocean_volume_per_area is None
+        ):
+            return False
+        if (
+            self.ocean_volume_per_area is not None
+            and other.ocean_volume_per_area is not None
+        ):
+            try:
+                torch.testing.assert_close(
+                    self.ocean_volume_per_area, other.ocean_volume_per_area
+                )
+            except AssertionError:
+                return False
         return True
 
     def __repr__(self) -> str:
@@ -396,6 +449,8 @@ class DepthCoordinate(VerticalCoordinate):
         ]
         if self.deptho is not None:
             parts.append(f"    deptho={self.deptho}")
+        if self.ocean_volume_per_area is not None:
+            parts.append(f"    ocean_volume_per_area={self.ocean_volume_per_area}")
         return "DepthCoordinate(\n" + ",\n".join(parts) + "\n)"
 
     def as_dict(self) -> TensorMapping:
@@ -405,6 +460,8 @@ class DepthCoordinate(VerticalCoordinate):
         }
         if self.deptho is not None:
             result["deptho"] = self.deptho
+        if self.ocean_volume_per_area is not None:
+            result["ocean_volume_per_area"] = self.ocean_volume_per_area
         return result
 
     def depth_integral(self, integrand: torch.Tensor) -> torch.Tensor:
@@ -414,6 +471,9 @@ class DepthCoordinate(VerticalCoordinate):
         where
         - x = integrand
         - z = depth
+
+        computed as sum_k(x_k * dz_k) with ``dz`` the layer thickness: from
+        ``ocean_volume_per_area`` when set, else from ``idepth`` and ``deptho``.
 
         Args:
             integrand: A tensor whose last dimension is the vertical.
