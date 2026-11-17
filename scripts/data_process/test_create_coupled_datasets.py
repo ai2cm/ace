@@ -3,21 +3,19 @@ tiny synthetic atmosphere and ocean zarr stores in a temporary directory."""
 
 import dataclasses
 import os
+import shutil
 
+import create_coupled_datasets
 import numpy as np
 import pytest
 import xarray as xr
-
-pytest.importorskip("xpartition")
-
-import create_coupled_datasets  # noqa: E402
-from coupled_dataset_utils import (  # noqa: E402
+from coupled_dataset_utils import (
     CoupledSeaIceConfig,
     CoupledSeaSurfaceConfig,
     CoupledSurfaceTemperatureConfig,
     compute_coupled_sea_ice,
 )
-from create_coupled_datasets import (  # noqa: E402
+from create_coupled_datasets import (
     CoupledDatasetsConfig,
     CoupledInputDatasetConfig,
     CoupledStatsConfig,
@@ -28,9 +26,9 @@ from create_coupled_datasets import (  # noqa: E402
     InputStatsConfig,
     NullCoupledInputDatasetConfig,
 )
-from create_window_avg_dataset import WindowAvgDatasetConfig  # noqa: E402
-from merge_stats import STATS_NC_FILE_NAMES  # noqa: E402
-from writer_utils import OutputWriterConfig  # noqa: E402
+from create_window_avg_dataset import WindowAvgDatasetConfig
+from merge_stats import STATS_NC_FILE_NAMES
+from writer_utils import OutputWriterConfig
 
 DIRNAME = os.path.abspath(os.path.dirname(__file__))
 NLAT = 4
@@ -162,6 +160,16 @@ class _DummyDaskClient:
 
     def close(self):
         pass
+
+
+@pytest.fixture(autouse=True)
+def eager_writer(monkeypatch):
+    """Tiny stores need no xpartition-partitioned write."""
+
+    def _write(self, ds, output_store):
+        ds.to_zarr(output_store, mode="w")
+
+    monkeypatch.setattr(OutputWriterConfig, "write", _write)
 
 
 @pytest.fixture(autouse=True)
@@ -685,3 +693,21 @@ def test_only_ocean_store_keeps_land_nan(tmp_path):
     atmos_ifrac = atmos["sea_ice_fraction"].sel(time=after_lead)
     unmasked = ocean_held.notnull()
     xr.testing.assert_allclose(atmos_ifrac.where(unmasked), ocean_held.where(unmasked))
+
+
+def test_resume_computes_atmosphere_from_existing_sea_ice_store(tmp_path, monkeypatch):
+    config = _make_config(tmp_path, with_land=True)
+    config.write_coupled_datasets(debug=False, subsample=False)
+    expected = xr.open_zarr(config.atmosphere_output_store).load()
+    shutil.rmtree(config.atmosphere_output_store)
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("recomputed a stage that already has outputs")
+
+    monkeypatch.setattr(create_coupled_datasets, "compute_coupled_sea_ice", _fail)
+    monkeypatch.setattr(create_coupled_datasets, "compute_coupled_ocean", _fail)
+    config.write_coupled_datasets(debug=False, subsample=False)
+
+    xr.testing.assert_identical(
+        xr.open_zarr(config.atmosphere_output_store).load(), expected
+    )
