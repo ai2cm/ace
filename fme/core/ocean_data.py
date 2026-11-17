@@ -218,16 +218,20 @@ class OceanData:
         return coord
 
     def _wright97_profiles(
-        self, geometry: HasOceanLayerGeometry
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """``(thetao, so)`` with the depth coordinate's ``nz`` levels.
+        self, label: str
+    ) -> tuple[HasOceanLayerGeometry, torch.Tensor, torch.Tensor]:
+        """``(geometry, thetao, so)``, the profiles with the depth coordinate's
+        ``nz`` levels. Missing profiles raise before the depth coordinate is
+        checked, so ``compute_ocean_derived_quantities`` skips ``label``.
 
         Raises:
-            KeyError: If a level ``k < nz`` of either is missing.
-            ValueError: If either has more than ``nz`` levels.
+            KeyError: If either is missing, or a level ``k < nz`` of either.
+            ValueError: If the depth coordinate is not a
+                ``HasOceanLayerGeometry``, or either has more than ``nz`` levels.
         """
         thetao = self.sea_water_potential_temperature
         so = self.sea_water_salinity
+        geometry = self._layer_geometry(label)
         nz = geometry.mask.shape[-1]
         for name, x in (("thetao", thetao), ("so", so)):
             if x.shape[-1] < nz:
@@ -237,7 +241,7 @@ class OceanData:
                     f"{name} has {x.shape[-1]} levels, more than the "
                     f"{nz} of the depth coordinate."
                 )
-        return thetao, so
+        return geometry, thetao, so
 
     @property
     def mld_wright97(self) -> torch.Tensor:
@@ -261,8 +265,7 @@ class OceanData:
                 level below the reference layer), so
                 ``compute_ocean_derived_quantities`` skips it.
         """
-        geometry = self._layer_geometry("mld_wright97")
-        thetao, so = self._wright97_profiles(geometry)
+        geometry, thetao, so = self._wright97_profiles("mld_wright97")
         if thetao.shape[-1] < MLD_REF_LAYER + 2:
             # a level below the reference layer is missing, as a Stacker miss
             raise KeyError(
@@ -295,8 +298,7 @@ class OceanData:
             KeyError: If a level of potential temperature or salinity is
                 missing.
         """
-        geometry = self._layer_geometry("rho_wright97")
-        thetao, so = self._wright97_profiles(geometry)
+        geometry, thetao, so = self._wright97_profiles("rho_wright97")
         return density_anomaly(thetao, so, geometry.idepth, geometry.mask)
 
     @property
@@ -308,7 +310,9 @@ class OceanData:
 
         k: depth level; dz_k: the depth coordinate's ``dz``; <x>: mean weighted
         by ``area_weights_m2`` over the cells where ``mask_0 > 0`` and ``zos``
-        is finite; NaN elsewhere.
+        is finite; NaN elsewhere. A NaN ``rho_wright97_k`` at a level with
+        ``mask_k > 0`` (NaN T or S) counts as 0 in C, as NaN integrands in
+        ``DepthCoordinate.depth_integral``; ``mld_wright97`` is NaN there.
 
         With the steric sea level ``eta_steric = -C / RHO_0``,
         ``zos = eta_steric + eta_mano`` up to <x> (Gregory et al. 2019, Surv.
@@ -330,7 +334,6 @@ class OceanData:
                 the cell area provider or its ``area_weights_m2`` (``None`` on
                 HEALPix) is missing.
         """
-        geometry = self._layer_geometry("manometric_sea_level_wright97")
         area = (
             None
             if self._cell_area_provider is None
@@ -341,7 +344,9 @@ class OceanData:
                 "area_weights_m2, needed for the mean of manometric_sea_level_wright97"
             )
         zos = self.sea_surface_height_above_geoid
-        C = column_density_integral(self.rho_wright97, geometry.dz)
+        geometry, thetao, so = self._wright97_profiles("manometric_sea_level_wright97")
+        rho = density_anomaly(thetao, so, geometry.idepth, geometry.mask)
+        C = column_density_integral(rho, geometry.dz)
         mask_0 = geometry.mask.select(dim=-1, index=0).to(C.device)
         wet = (mask_0 > 0) & zos.isfinite()
         eta = torch.where(wet, zos, 0.0) + C / RHO_0
