@@ -70,6 +70,59 @@ def test_has_subwriters_enabled_field_set_is_current():
     )
 
 
+@pytest.mark.parametrize("build_method", ["build_paired", "build"])
+def test_spatial_parallelism_raises_with_gathered_writers(build_method: str):
+    """Gathered writers must raise under spatial parallelism."""
+    from unittest.mock import patch
+
+    from fme.core.distributed.distributed import SpatialParallelismNotImplemented
+
+    config = DataWriterConfig(save_prediction_files=True)
+    mock_dist = Distributed()
+    with patch.object(type(mock_dist), "has_spatial_parallelism", True):
+        with patch.object(Distributed, "get_instance", return_value=mock_dist):
+            with pytest.raises(SpatialParallelismNotImplemented):
+                build_args = dict(
+                    experiment_dir="/tmp/test",
+                    initial_condition_times=np.array([datetime.datetime(2020, 1, 1)]),
+                    n_timesteps=10,
+                    timestep=datetime.timedelta(hours=6),
+                    variable_metadata={},
+                    coords={"lat": np.arange(4), "lon": np.arange(5)},
+                    dataset_metadata=DatasetMetadata(),
+                )
+                getattr(config, build_method)(**build_args)
+
+
+@pytest.mark.parametrize("build_method", ["build_paired", "build"])
+def test_spatial_parallelism_allows_zarr_only(build_method: str):
+    """Zarr-only config (no gathered writers) should not raise under
+    spatial parallelism."""
+    from unittest.mock import patch
+
+    from fme.ace.inference.data_writer.zarr import ZarrWriterConfig
+
+    config = DataWriterConfig(
+        save_prediction_files=False,
+        save_monthly_files=False,
+        save_step_diagnostics=False,
+        files=[FileWriterConfig(label="test", format=ZarrWriterConfig())],
+    )
+    mock_dist = Distributed()
+    with patch.object(type(mock_dist), "has_spatial_parallelism", True):
+        with patch.object(Distributed, "get_instance", return_value=mock_dist):
+            build_args = dict(
+                experiment_dir="/tmp/test",
+                initial_condition_times=np.array([datetime.datetime(2020, 1, 1)]),
+                n_timesteps=10,
+                timestep=datetime.timedelta(hours=6),
+                variable_metadata={},
+                coords={"lat": np.arange(4), "lon": np.arange(5)},
+                dataset_metadata=DatasetMetadata(),
+            )
+            getattr(config, build_method)(**build_args)
+
+
 def test_write_single_timestep():
     n_samples = 2
     n_lat = 4
