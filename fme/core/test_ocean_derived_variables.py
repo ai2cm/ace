@@ -4,6 +4,11 @@ import math
 import pytest
 import torch
 
+from fme.core.area_weights_provider import (
+    AreaWeightsProvider,
+    AreaWeightsProviderABC,
+    NullAreaWeightsProvider,
+)
 from fme.core.constants import (
     DENSITY_OF_SEA_WATER_CM4,
     REFERENCE_SALINITY,
@@ -407,7 +412,9 @@ def _zos_inputs(n_lat: int = 4, n_lon: int = 8) -> tuple[LatLonCoordinates, Tens
 
 
 def _derive(
-    data: TensorDict, horizontal_coordinates: LatLonCoordinates | None
+    data: TensorDict,
+    horizontal_coordinates: LatLonCoordinates | None,
+    area_weights_provider: AreaWeightsProviderABC = NullAreaWeightsProvider,
 ) -> TensorDict:
     return compute_ocean_derived_quantities(
         dict(data),
@@ -416,7 +423,65 @@ def _derive(
         ),
         timestep=TIMESTEP,
         cell_area_provider=horizontal_coordinates,
+        area_weights_provider=area_weights_provider,
     )
+
+
+def _coarse_grained_ssh(
+    n_lat: int = 4, n_lon: int = 8, n_sub: int = 3
+) -> tuple[LatLonCoordinates, TensorDict, AreaWeightsProvider, torch.Tensor]:
+    """Target cells J each hold n_sub native cells i; data are native-area means.
+
+    Returns coordinates, target data (SSH, sea_surface_fraction), the provider
+    (areacello_J * ssf_J) and <SSH>_native per sample.
+    """
+    torch.manual_seed(0)
+    horizontal_coordinates = LatLonCoordinates(
+        lat=torch.linspace(-60, 60, n_lat),
+        lon=torch.linspace(0, 360, n_lon + 1)[:-1],
+    )
+    areacello_i = torch.rand(n_lat, n_lon, n_sub, dtype=torch.float64) + 0.5
+    wet_i = torch.rand(n_lat, n_lon, n_sub) > 0.3
+    wet_i[0, :2] = False
+    ocean_area_i = areacello_i * wet_i
+    ssh_i = torch.randn(2, 3, n_lat, n_lon, n_sub, dtype=torch.float64)
+    areacello_J = areacello_i.sum(dim=-1)
+    ocean_area_J = ocean_area_i.sum(dim=-1)
+    ssf_J = ocean_area_J / areacello_J
+    ssh_J = (ocean_area_i * ssh_i).sum(dim=-1) / ocean_area_J  # NaN on all-land J
+    native_mean = (ocean_area_i * ssh_i).sum(dim=(-3, -2, -1)) / ocean_area_i.sum()
+    data = {"SSH": ssh_J, "sea_surface_fraction": ssf_J.expand_as(ssh_J)}
+    provider = AreaWeightsProvider.from_cell_area_and_fraction(areacello_J, ssf_J)
+    return horizontal_coordinates, data, provider, native_mean[..., None, None]
+
+
+def test_zos_with_area_weights_provider_matches_native_mean():
+    horizontal_coordinates, data, provider, native_mean = _coarse_grained_ssh()
+    out = _derive(data, horizontal_coordinates, provider)
+    torch.testing.assert_close(out["zos"], data["SSH"] - native_mean, equal_nan=True)
+
+
+def test_zos_with_area_weights_provider_does_not_need_sea_surface_fraction():
+    horizontal_coordinates, data, provider, native_mean = _coarse_grained_ssh()
+    del data["sea_surface_fraction"]
+    out = _derive(data, None, provider)
+    torch.testing.assert_close(out["zos"], data["SSH"] - native_mean, equal_nan=True)
+
+
+def test_zos_without_area_weights_provider_falls_back_to_cell_area():
+    horizontal_coordinates, data, _, native_mean = _coarse_grained_ssh()
+    out = _derive(data, horizontal_coordinates)
+    ssh = data["SSH"]
+    weights = torch.where(
+        torch.isfinite(ssh),
+        horizontal_coordinates.area_weights_m2.double() * data["sea_surface_fraction"],
+        0.0,
+    )
+    fallback_mean = (weights * ssh.nan_to_num()).sum(
+        dim=(-2, -1), keepdim=True
+    ) / weights.sum(dim=(-2, -1), keepdim=True)
+    torch.testing.assert_close(out["zos"], ssh - fallback_mean, equal_nan=True)
+    assert not torch.allclose(fallback_mean, native_mean)
 
 
 def test_zos_derived_from_ssh():

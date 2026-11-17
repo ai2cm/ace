@@ -4,6 +4,10 @@ from typing import Protocol, runtime_checkable
 
 import torch
 
+from fme.core.area_weights_provider import (
+    AreaWeightsProviderABC,
+    NullAreaWeightsProvider,
+)
 from fme.core.constants import (
     DENSITY_OF_SEA_WATER_CM4,
     FREEZING_TEMPERATURE_KELVIN,
@@ -64,6 +68,7 @@ class OceanData:
         depth_coordinate: HasOceanDepthIntegral | None = None,
         ocean_field_name_prefixes: Mapping[str, list[str]] = OCEAN_FIELD_NAME_PREFIXES,
         cell_area_provider: HasCellAreaInMetersSquared | None = None,
+        area_weights_provider: AreaWeightsProviderABC = NullAreaWeightsProvider,
     ):
         """
         Initializes the instance based on the provided data and prefixes.
@@ -79,12 +84,15 @@ class OceanData:
             cell_area_provider: An object providing cell areas in square meters
                 via the ``area_weights_m2`` property. Used by derived variables
                 that need cell area information (e.g. sea ice thickness).
+            area_weights_provider: Ocean-area weights (areacello *
+                sea_surface_fraction) of the dataset, if it has them.
         """
         self._data = dict(ocean_data)
         self._prefix_map = ocean_field_name_prefixes
         self._depth_coordinate = depth_coordinate
         self._stacker = Stacker(ocean_field_name_prefixes)
         self._cell_area_provider = cell_area_provider
+        self._area_weights_provider = area_weights_provider
 
     @property
     def data(self) -> TensorDict:
@@ -308,6 +316,13 @@ class OceanData:
                 "A cell area provider must be provided to access cell area information."
             )
         return self._cell_area_provider.area_weights_m2
+
+    @property
+    def ocean_area_weights(self) -> torch.Tensor | None:
+        """2-D (lat, lon) ocean-area weights (areacello * sea_surface_fraction,
+        normalized), or None if the dataset has no area weights provider.
+        """
+        return self._area_weights_provider.area_weights
 
     @property
     def sea_ice_thickness(self) -> torch.Tensor:
