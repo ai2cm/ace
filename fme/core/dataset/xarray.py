@@ -19,6 +19,11 @@ import torch
 import xarray as xr
 from xarray.coding.times import CFDatetimeCoder
 
+from fme.core.area_weights_provider import (
+    AreaWeightsProvider,
+    AreaWeightsProviderABC,
+    NullAreaWeightsProvider,
+)
 from fme.core.coordinates import (
     DepthCoordinate,
     HorizontalCoordinates,
@@ -388,6 +393,46 @@ def _get_spatial_mask_provider(
     return spatial_mask_provider
 
 
+AREA_WEIGHT_NAMES = ("areacello", "sea_surface_fraction")
+
+
+def _get_area_weights_provider(
+    ds: xr.Dataset, dtype: torch.dtype | None, horizontal_shape: tuple[int, ...]
+) -> AreaWeightsProviderABC:
+    """Get the ocean area weights provider from a dataset.
+
+    Active only when the dataset holds both "areacello" and
+    "sea_surface_fraction"; otherwise NullAreaWeightsProvider.
+
+    Args:
+        ds: Dataset to get the cell area and sea surface fraction from.
+        dtype: Data type of the returned weights. If None, the dtype is not
+            changed from the original in ds.
+        horizontal_shape: Shape of the dataset's horizontal grid.
+    """
+    if not all(name in ds.data_vars for name in AREA_WEIGHT_NAMES):
+        return NullAreaWeightsProvider
+    tensors = {}
+    for name in AREA_WEIGHT_NAMES:
+        if "time" in ds[name].dims:
+            raise ValueError(f"'{name}' must be time-independent.")
+        if tuple(ds[name].shape) != tuple(horizontal_shape):
+            raise ValueError(
+                f"'{name}' has shape {tuple(ds[name].shape)}, expected the "
+                f"horizontal grid shape {tuple(horizontal_shape)}."
+            )
+        tensors[name] = torch.as_tensor(ds[name].values, dtype=torch.float64)
+        if not torch.isfinite(tensors[name]).all():
+            raise ValueError(f"'{name}' has non-finite values.")
+    provider = AreaWeightsProvider.from_cell_area_and_fraction(
+        tensors["areacello"], tensors["sea_surface_fraction"]
+    )
+    if dtype is not None:
+        provider = AreaWeightsProvider(provider.area_weights.to(dtype))
+    logging.info(f"Initialized {provider}.")
+    return provider
+
+
 @dataclasses.dataclass
 class OverwriteConfig:
     """Configuration to overwrite field values in XarrayDataset.
@@ -612,6 +657,9 @@ class XarrayDataset(DatasetABC):
             self._static_derived_data,
             _loaded_horizontal_dims,
         ) = self.configure_horizontal_coordinates(first_dataset)
+        self._area_weights_provider = _get_area_weights_provider(
+            first_dataset, self.dtype, self._horizontal_coordinates.shape
+        )
         (
             self._time_dependent_names,
             self._time_invariant_names,
@@ -753,6 +801,7 @@ class XarrayDataset(DatasetABC):
             self.timestep,
             self._is_remote,
             self._labels,
+            area_weights_provider=self._area_weights_provider,
         )
 
     @property

@@ -1,6 +1,10 @@
 import datetime
 import warnings
 
+from fme.core.area_weights_provider import (
+    AreaWeightsProviderABC,
+    NullAreaWeightsProvider,
+)
 from fme.core.coordinates import HorizontalCoordinates, VerticalCoordinate
 from fme.core.dataset.data_typing import VariableMetadata
 from fme.core.device import get_device
@@ -17,6 +21,7 @@ class DatasetProperties:
         timestep: datetime.timedelta | None,
         is_remote: bool,
         all_labels: set[str] | None,
+        area_weights_provider: AreaWeightsProviderABC = NullAreaWeightsProvider,
     ):
         self.variable_metadata = variable_metadata
         self.vertical_coordinate = vertical_coordinate
@@ -25,6 +30,7 @@ class DatasetProperties:
         self.timestep = timestep
         self.is_remote = is_remote
         self.all_labels = all_labels
+        self.area_weights_provider = area_weights_provider
 
     def to_device(self) -> "DatasetProperties":
         device = get_device()
@@ -36,6 +42,7 @@ class DatasetProperties:
             self.timestep,
             self.is_remote,
             self.all_labels,
+            area_weights_provider=self.area_weights_provider.to(device),
         )
 
     def localize(self) -> "DatasetProperties":
@@ -50,6 +57,7 @@ class DatasetProperties:
             self.timestep,
             self.is_remote,
             self.all_labels,
+            area_weights_provider=self.area_weights_provider.localize(),
         )
 
     def update(self, other: "DatasetProperties", strict: bool = True):
@@ -64,6 +72,8 @@ class DatasetProperties:
                 raise ValueError("Inconsistent horizontal coordinates between datasets")
             if self.spatial_mask_provider != other.spatial_mask_provider:
                 raise ValueError("Inconsistent mask providers between datasets")
+            if self.area_weights_provider != other.area_weights_provider:
+                raise ValueError("Inconsistent area weights providers between datasets")
         except ValueError as e:
             if strict:
                 raise e
@@ -90,6 +100,9 @@ class DatasetProperties:
         if isinstance(self.variable_metadata, dict):
             self.variable_metadata.update(other.variable_metadata)
         self.spatial_mask_provider.update(other.spatial_mask_provider)
+        self.area_weights_provider = self.area_weights_provider.merge(
+            other.area_weights_provider
+        )
         self.is_remote = self.is_remote or other.is_remote
         if self.timestep != other.timestep:
             raise ValueError("Inconsistent timesteps between datasets")
@@ -109,4 +122,5 @@ class DatasetProperties:
             self.timestep,
             self.is_remote,
             set(self.all_labels) if self.all_labels is not None else None,
+            area_weights_provider=self.area_weights_provider,
         )
