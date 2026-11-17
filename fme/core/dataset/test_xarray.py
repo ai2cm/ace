@@ -1107,6 +1107,69 @@ def test__get_vertical_coordinate_depth_with_lat_dependent_mask(has_deptho):
         assert vertical_coordinate.deptho is None
 
 
+def _depth_dataset_with_ocean_volume_per_area(
+    ocean_volume_per_area_levels: list[int], time_dependent: bool = False
+) -> xr.Dataset:
+    dims: tuple[str, ...] = ("time", "lat") if time_dependent else ("lat",)
+    shape = (2, 2) if time_dependent else (2,)
+    data_vars: dict = {
+        "idepth_0": 0.0,
+        "idepth_1": 10.0,
+        "idepth_2": 50.0,
+        "mask_0": ("lat", np.array([1.0, 1.0])),
+        "mask_1": ("lat", np.array([0.0, 1.0])),
+        "mask_2d": ("lat", np.array([1.0, 1.0])),
+        "deptho": ("lat", np.array([8.0, 50.0])),
+    }
+    for k in ocean_volume_per_area_levels:
+        data_vars[f"ocean_volume_per_area_{k}"] = (
+            dims,
+            np.full(shape, 10.0 * (k + 1)) * np.array([1.0 - k, 1.0]),
+        )
+    coords: dict = {"lat": np.array([1.0, 2.0])}
+    if time_dependent:
+        coords["time"] = np.array([1.0, 2.0])
+    return xr.Dataset(data_vars, coords=coords)
+
+
+@pytest.mark.parametrize(
+    "levels", [[], [0, 1]], ids=["no_ocean_volume_per_area", "ocean_volume_per_area"]
+)
+def test__get_vertical_coordinate_depth_ocean_volume_per_area(levels):
+    data = _depth_dataset_with_ocean_volume_per_area(levels)
+    vertical_coordinate = _get_vertical_coordinate(data, dtype=torch.float32)
+    assert isinstance(vertical_coordinate, DepthCoordinate)
+    if len(levels) == 0:
+        assert vertical_coordinate.ocean_volume_per_area is None
+        return
+    expected = torch.tensor([[10.0, 0.0], [10.0, 20.0]])
+    assert vertical_coordinate.ocean_volume_per_area is not None
+    assert vertical_coordinate.ocean_volume_per_area.dtype == torch.float32
+    torch.testing.assert_close(vertical_coordinate.ocean_volume_per_area, expected)
+    torch.testing.assert_close(
+        vertical_coordinate.dz, expected * vertical_coordinate.mask
+    )
+
+
+@pytest.mark.parametrize(
+    "levels, match",
+    [
+        pytest.param([0, 2], "Missing level", id="gap"),
+        pytest.param([0], "last dimension", id="truncated"),
+    ],
+)
+def test__get_vertical_coordinate_depth_partial_ocean_volume_per_area(levels, match):
+    data = _depth_dataset_with_ocean_volume_per_area(levels)
+    with pytest.raises(ValueError, match=match):
+        _get_vertical_coordinate(data, dtype=None)
+
+
+def test__get_vertical_coordinate_depth_time_dependent_ocean_volume_per_area():
+    data = _depth_dataset_with_ocean_volume_per_area([0, 1], time_dependent=True)
+    with pytest.raises(ValueError, match="must be time-independent"):
+        _get_vertical_coordinate(data, dtype=None)
+
+
 def test__get_vertical_coordinate_depth_with_time_dependent_deptho():
     data = xr.Dataset(
         data_vars={
