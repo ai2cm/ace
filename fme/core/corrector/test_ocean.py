@@ -617,6 +617,47 @@ def test_ocean_heat_content_correction(hfds_type):
     )
 
 
+def test_ocean_heat_content_correction_rescales_sst_degk_as_sst():
+    config = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature",
+            constant_unaccounted_heating=0.1,
+        )
+    )
+    timestep = datetime.timedelta(seconds=5 * 24 * 3600)
+    nsamples, nlat, nlon, nlevels = 2, 3, 4, 2
+    mask = torch.ones(nsamples, nlat, nlon, nlevels)
+    mask[:, 0, 0, :] = 0.0
+    ops = LatLonOperations(
+        torch.ones(nlat, nlon),
+        SpatialMaskProvider(
+            {"mask_0": mask[..., 0], "mask_1": mask[..., 1], "mask_2d": mask[..., 0]}
+        ),
+    )
+    depth_coordinate = DepthCoordinate(torch.tensor([2.5, 10, 20]), mask)
+    corrector = config._build(ops, depth_coordinate, timestep)
+    torch.manual_seed(0)
+    thetao = {f"thetao_{k}": torch.rand(nsamples, nlat, nlon) for k in range(2)}
+    gen_thetao = {k: v + 1.0 for k, v in thetao.items()}
+    sst = torch.rand(nsamples, nlat, nlon) + 280.0
+    input_data = {**thetao, "hfds": torch.ones(nsamples, nlat, nlon)}
+    forcing_data = {
+        "hfgeou": torch.ones(nsamples, nlat, nlon),
+        "sea_surface_fraction": mask[..., 0],
+    }
+
+    expected = corrector(
+        input_data, {**gen_thetao, "sst": sst}, forcing_data, None
+    ).corrected
+    result = corrector(input_data, {**gen_thetao, "SST_degK": sst}, forcing_data, None)
+
+    assert set(result.modified_names) == {"thetao_0", "thetao_1", "SST_degK"}
+    assert "sst" not in result.corrected
+    assert torch.equal(result.corrected["SST_degK"], expected["sst"])
+    for name in gen_thetao:
+        assert torch.equal(result.corrected[name], expected[name])
+
+
 class _PartialLandOHCBudgetCase(NamedTuple):
     ops: LatLonOperations
     depth_coordinate: DepthCoordinate
