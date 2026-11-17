@@ -3,6 +3,7 @@
 # https://github.com/ai2cm/fv3net/blob/8ed295cf0b8ca49e24ae5d6dd00f57e8b30169ac/Makefile#L310
 
 import dataclasses
+import json
 import logging
 import os
 import shutil
@@ -59,6 +60,14 @@ def add_history_attrs(ds, input_zarr, start_date, end_date, n_samples):
         f" {input_zarr}, START_DATE: {start_date}, END_DATE: {end_date}."
     )
     ds.attrs["input_samples"] = n_samples
+
+
+def _json_encode_dict_attrs(ds: xr.Dataset):
+    """netCDF attrs cannot be dicts (zarr v3 attrs can), so write them as JSON."""
+    for attrs in [ds.attrs] + [variable.attrs for variable in ds.variables.values()]:
+        for key, value in attrs.items():
+            if isinstance(value, dict):
+                attrs[key] = json.dumps(value)
 
 
 def copy(source: str, destination: str):
@@ -153,6 +162,7 @@ def get_stats(
         ds = xr.open_zarr(input_zarr)
 
     ds = ds.drop_vars(DROP_VARIABLES, errors="ignore")
+    _json_encode_dict_attrs(ds)
     ds = ds.sel(time=slice(config.start_date, config.end_date))
 
     dims = DIMS[config.data_type]
