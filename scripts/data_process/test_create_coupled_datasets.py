@@ -37,6 +37,7 @@ NLAT = 4
 NLON = 8
 N_ATMOS_TIMES = 40  # 6-hourly steps covering ten days
 FIRST_WINDOW_END = "2000-01-06T00:00:00"
+LAND_LON = 0  # longitude index of the all-land column in inputs with land
 
 
 def _times(start, periods, freq):
@@ -59,7 +60,7 @@ def _field(times, offset=0.0, seed=0):
     )
 
 
-def _write_input_zarrs(input_dir, year=2000):
+def _write_input_zarrs(input_dir, year=2000, with_land=False):
     atmos_times = _times(f"{year:04d}-01-01T06:00:00", N_ATMOS_TIMES, "6h")
     # 5-daily snapshots at the ends of the two 120h windows
     ocean_times = _times(f"{year:04d}-01-06T00:00:00", 2, "120h")
@@ -81,6 +82,12 @@ def _write_input_zarrs(input_dir, year=2000):
         }
     )
     ocean["sea_surface_fraction"] = _field(ocean_times, seed=8).isel(time=0, drop=True)
+    if with_land:
+        land = atmos.lon == atmos.lon[LAND_LON]
+        atmos["land_fraction"] = atmos["land_fraction"].where(~land, 1.0)
+        ocean["sea_surface_fraction"] = ocean["sea_surface_fraction"].where(~land, 0.0)
+        for name in ["sst", "hfds"]:
+            ocean[name] = ocean[name].where(~land)
 
     atmos_path = str(input_dir / f"atmosphere-{year:04d}.zarr")
     ocean_path = str(input_dir / f"ocean-{year:04d}.zarr")
@@ -98,10 +105,10 @@ def _write_fake_stats_dir(stats_dir, var_name):
         ds.to_netcdf(str(stats_dir / fname))
 
 
-def _make_config(tmp_path):
+def _make_config(tmp_path, with_land=False):
     input_dir = tmp_path / "inputs"
     input_dir.mkdir()
-    atmos_path, ocean_path = _write_input_zarrs(input_dir)
+    atmos_path, ocean_path = _write_input_zarrs(input_dir, with_land=with_land)
     _write_fake_stats_dir(input_dir / "atmosphere-stats", "uncoupled_atmos_var")
     _write_fake_stats_dir(input_dir / "ocean-stats", "uncoupled_ocean_var")
 
@@ -313,15 +320,15 @@ def _strided_route_inputs(tmp_path):
             ),
         }
     )
+    sst = np.broadcast_to(
+        (300.0 + steps).reshape(-1, 1, 1), (len(times), NLAT, NLON)
+    ).copy()
+    sst[:, :, 0] = np.nan
     ocean = xr.Dataset(
         {
             "sea_surface_fraction": _da(1.0 - land, dims=("lat", "lon")),
             "ocean_sea_ice_fraction": _da(sic),
-            "sst": _da(
-                np.broadcast_to(
-                    (300.0 + steps).reshape(-1, 1, 1), (len(times), NLAT, NLON)
-                ).copy()
-            ),
+            "sst": _da(sst),
         }
     )
     atmos_path = str(tmp_path / "atmos.zarr")
@@ -513,6 +520,13 @@ def _assert_blended_atmosphere(atmos, sea_ice):
     np.testing.assert_allclose(
         atmos["sea_ice_fraction"].values, sea_ice["sea_ice_fraction"].values
     )
+    _assert_no_nan(atmos)
+    _assert_no_nan(sea_ice)
+
+
+def _assert_no_nan(ds):
+    for name, da in ds.data_vars.items():
+        assert not da.isnull().any(), f"{name} has NaN"
 
 
 def test_coupled_ts_without_sea_surface_computes_sea_ice_in_same_run(tmp_path):
@@ -633,3 +647,41 @@ def test_ensemble_flux_windows_follow_each_runs_ocean_times(tmp_path):
             .mean()
         )
         xr.testing.assert_allclose(ocean_out["latent_heat_flux"], expected)
+
+
+def test_only_ocean_store_keeps_land_nan(tmp_path):
+    """land: column LAND_LON (input sea_surface_fraction 0, sst and hfds NaN).
+    lead: atmosphere steps before the first ocean step, left all-NaN."""
+    config = _make_config(tmp_path, with_land=True)
+    config.write_coupled_datasets(debug=False, subsample=False)
+    sea_ice = xr.open_zarr(config.sea_ice_output_store).load()
+    ocean = xr.open_zarr(config.ocean_output_store).load()
+    atmos = xr.open_zarr(config.atmosphere_output_store).load()
+
+    for name in ["sea_ice_fraction", "ocean_sea_ice_fraction", "hfds_total_area"]:
+        assert ocean[name].isel(lon=LAND_LON).isnull().all(), name
+    wet = ocean["sea_surface_fraction"] > 0
+    assert (ocean["sea_ice_fraction"].isnull() & wet).any(), "mask NaN not exercised"
+
+    after_lead = slice(ocean.time.values[0], None)
+    _assert_no_nan(sea_ice.sel(time=after_lead))
+    _assert_no_nan(atmos.sel(time=after_lead))
+
+    # atmosphere fractions: the sea ice store snapshot at each ocean step, held
+    # forward; equal to the ocean store wherever that is unmasked
+    for name in ["sea_ice_fraction", "ocean_fraction"]:
+        held = (
+            sea_ice[name]
+            .sel(time=ocean.time)
+            .reindex(time=atmos.time, method="ffill")
+            .sel(time=after_lead)
+        )
+        xr.testing.assert_allclose(atmos[name].sel(time=after_lead), held)
+    ocean_held = (
+        ocean["sea_ice_fraction"]
+        .reindex(time=atmos.time, method="ffill")
+        .sel(time=after_lead)
+    )
+    atmos_ifrac = atmos["sea_ice_fraction"].sel(time=after_lead)
+    unmasked = ocean_held.notnull()
+    xr.testing.assert_allclose(atmos_ifrac.where(unmasked), ocean_held.where(unmasked))
