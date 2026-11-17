@@ -420,6 +420,7 @@ def test_wright97_skipped_without_profiles_or_layer_geometry():
     )
     assert "mld_wright97" not in out
     assert "manometric_sea_level_wright97" not in out
+    assert "steric_sea_level_wright97" not in out
 
 
 def test_wright97_metadata_has_units():
