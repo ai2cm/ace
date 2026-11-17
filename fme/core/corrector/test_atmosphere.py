@@ -8,7 +8,9 @@ import pytest
 import torch
 
 from fme.core import AtmosphereData, metrics
-from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.area_weights_provider import AreaWeightsProvider
+from fme.core.coordinates import HybridSigmaPressureCoordinate, LatLonCoordinates
+from fme.core.dataset_info import DatasetInfo
 from fme.core.derived_variables import total_water_path_budget_residual
 from fme.core.gridded_ops import GriddedOperations, HEALPixOperations, LatLonOperations
 from fme.core.typing_ import TensorMapping
@@ -807,3 +809,39 @@ def test_atmosphere_corrector_empty_delta_when_nothing_modified():
     assert set(result.modified_names) == set()
     for name in gen_data:
         torch.testing.assert_close(result.corrected[name], gen_data[name])
+
+
+def test_atmosphere_corrector_ignores_area_weights_provider():
+    torch.manual_seed(0)
+    tensor_shape = (1, 5, 5)
+    input_data, gen_data, forcing_data, vertical_coord = _get_corrector_test_input(
+        tensor_shape
+    )
+    provider = AreaWeightsProvider(torch.rand(tensor_shape[-2:]))
+    config = AtmosphereCorrectorConfig(zero_global_mean_moisture_advection=True)
+    name = "tendency_of_total_water_path_due_to_advection"
+
+    def dataset_info(
+        area_weights_provider: AreaWeightsProvider | None,
+    ) -> DatasetInfo:
+        return DatasetInfo(
+            horizontal_coordinates=LatLonCoordinates(
+                lat=torch.linspace(-60.0, 60.0, tensor_shape[-2]),
+                lon=torch.arange(tensor_shape[-1]) * 72.0,
+            ),
+            vertical_coordinate=vertical_coord,
+            timestep=datetime.timedelta(seconds=3600),
+            area_weights_provider=area_weights_provider,
+        )
+
+    def corrected(info: DatasetInfo) -> torch.Tensor:
+        result = config.get_corrector(info)(input_data, gen_data, forcing_data, None)
+        return result.corrected[name]
+
+    with_provider = dataset_info(provider)
+    torch.testing.assert_close(corrected(with_provider), corrected(dataset_info(None)))
+    # guard: under the provider weights the corrected field is not zero-mean
+    provider_mean = with_provider.gridded_operations.area_weighted_mean(
+        corrected(with_provider)
+    )
+    assert provider_mean.abs().max() > 1e-9

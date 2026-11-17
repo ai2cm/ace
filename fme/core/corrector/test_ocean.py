@@ -6,12 +6,17 @@ import pytest
 import torch
 
 from fme import get_device
+from fme.core.area_weights_provider import AreaWeightsProvider
 from fme.core.constants import (
     DENSITY_OF_SEA_WATER_CM4,
     EARTH_RADIUS,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
-from fme.core.coordinates import DepthCoordinate, LatLonCoordinates
+from fme.core.coordinates import (
+    DepthCoordinate,
+    LatLonCoordinates,
+    NullVerticalCoordinate,
+)
 from fme.core.corrector.ocean import (
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
@@ -1320,3 +1325,43 @@ def test_zos_global_mean_correction_config_round_trip():
         reference_global_mean=0.0
     )
     assert OceanCorrectorConfig.from_state({}).zos_global_mean_correction is None
+
+
+def _zos_dataset_info(
+    mask: torch.Tensor, area_weights_provider: AreaWeightsProvider | None
+) -> DatasetInfo:
+    nlat, nlon = mask.shape
+    return DatasetInfo(
+        horizontal_coordinates=_salt_coordinates(nlat, nlon),
+        vertical_coordinate=NullVerticalCoordinate(),
+        spatial_mask_provider=SpatialMaskProvider({"mask_2d": mask}),
+        timestep=datetime.timedelta(seconds=3600),
+        area_weights_provider=area_weights_provider,
+    )
+
+
+def test_ocean_corrector_ignores_area_weights_provider():
+    torch.manual_seed(0)
+    _, gen_data, forcing_data, _, s = _zos_setup(0.0)
+    mask = (s > 0).to(s.dtype)
+    provider = AreaWeightsProvider(torch.rand(*mask.shape, device=DEVICE))
+    config = OceanCorrectorConfig(
+        zos_global_mean_correction=ZosGlobalMeanCorrectionConfig(
+            reference_global_mean=0.0
+        )
+    )
+
+    def corrected_zos(dataset_info: DatasetInfo) -> torch.Tensor:
+        corrector = config.get_corrector(dataset_info)
+        return corrector({}, gen_data, forcing_data, None).corrected["zos"]
+
+    with_provider = _zos_dataset_info(mask, provider)
+    torch.testing.assert_close(
+        corrected_zos(with_provider), corrected_zos(_zos_dataset_info(mask, None))
+    )
+    # guard: provider weights would change the result if the corrector used them
+    provider_corrector = config._build(
+        with_provider.gridded_operations, None, with_provider.timestep
+    )
+    provider_zos = provider_corrector({}, gen_data, forcing_data, None).corrected
+    assert not torch.allclose(provider_zos["zos"], corrected_zos(with_provider))

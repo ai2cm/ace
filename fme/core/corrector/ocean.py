@@ -511,7 +511,7 @@ class OceanCorrectorConfig(CorrectorConfigABC):
         except MissingDatasetInfo:
             spatial_mask_provider = NullSpatialMaskProvider
         return self._build(
-            dataset_info.gridded_operations,
+            dataset_info.get_gridded_operations(use_area_weights_provider=False),
             dataset_info.ocean_vertical_coordinate,
             dataset_info.timestep,
             spatial_mask_provider=spatial_mask_provider,
