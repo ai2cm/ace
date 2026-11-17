@@ -29,7 +29,7 @@ from ..utils import (
 
 SAMPLE_DIM, TIME_DIM = 0, 1
 
-DEFAULT_SST_NAMES = ["sst"]
+DEFAULT_SST_NAMES = ["sst", "SST_degK"]
 
 MIN_YEARS_FOR_FILTERED_TPI = 80
 
