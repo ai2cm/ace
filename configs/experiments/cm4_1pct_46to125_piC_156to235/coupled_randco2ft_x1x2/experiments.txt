@@ -2,4 +2,19 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 1deg-hybridsstdiag-randco2ft-x2-pclr-replayonly-wgz8np8z||01M7HMHMXD1A5SPX2RT36JTH5W|training|best_inference_ckpt|normal|--min-runtime 8h
 
-1deg-hybridsstdiag-randco2ft-x1-pclr-replayonly-tb6xf0ju||01M7HN1PK8CQZV6ADZ413SN0X6|training|best_inference_ckpt|normal|--min-runtime 8h
+# U10 begin X1
+# X1 01M7HN1PK8CQZV6ADZ413SN0X6: training finished (jobs[-1] exit 0); results dataset 01M7HN1PKG1QF9GF4K63GW8VDP.
+# training row: 1deg-hybridsstdiag-randco2ft-x1-pclr-replayonly-tb6xf0ju||01M7HN1PK8CQZV6ADZ413SN0X6|training|best_inference_ckpt|normal|--min-runtime 8h
+# Rows written by analysis/2026-11-15-2110-coupled-ft-enso-randco2-training/scripts/U10_eval_rows.py;
+# deferred_upload_* rows wait for the results dataset to be committed with their EMA file (rerun the script).
+# launch: ./job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_randco2ft_x1x2 . --config-dir configs/experiments/cm4_eval/coupled
+# --config-dir configs/experiments/cm4_eval/coupled
+1deg-hybridsstdiag-randco2ft-x1-pclr-replayonly-tb6xf0ju||01M7HN1PK8CQZV6ADZ413SN0X6|deferred_upload_1pct-ic0001-130yr|ema_ckpt_0001|high|--min-runtime 8h||01M7HN1PKG1QF9GF4K63GW8VDP
+1deg-hybridsstdiag-randco2ft-x1-pclr-replayonly-tb6xf0ju||01M7HN1PK8CQZV6ADZ413SN0X6|deferred_upload_piC-ic0151-200yr|ema_ckpt_0001|high|--min-runtime 8h||01M7HN1PKG1QF9GF4K63GW8VDP
+1deg-hybridsstdiag-randco2ft-x1-pclr-replayonly-tb6xf0ju||01M7HN1PK8CQZV6ADZ413SN0X6|deferred_upload_1pct-ic0001-130yr|ema_ckpt_0002|high|--min-runtime 8h||01M7HN1PKG1QF9GF4K63GW8VDP
+1deg-hybridsstdiag-randco2ft-x1-pclr-replayonly-tb6xf0ju||01M7HN1PK8CQZV6ADZ413SN0X6|deferred_upload_piC-ic0151-200yr|ema_ckpt_0002|high|--min-runtime 8h||01M7HN1PKG1QF9GF4K63GW8VDP
+1deg-hybridsstdiag-randco2ft-x1-pclr-replayonly-tb6xf0ju||01M7HN1PK8CQZV6ADZ413SN0X6|deferred_upload_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 8h||01M7HN1PKG1QF9GF4K63GW8VDP
+1deg-hybridsstdiag-randco2ft-x1-pclr-replayonly-tb6xf0ju||01M7HN1PK8CQZV6ADZ413SN0X6|deferred_upload_piC-ic0151-200yr|ema_ckpt_0003|high|--min-runtime 8h||01M7HN1PKG1QF9GF4K63GW8VDP
+1deg-hybridsstdiag-randco2ft-x1-pclr-replayonly-tb6xf0ju||01M7HN1PK8CQZV6ADZ413SN0X6|deferred_upload_1pct-ic0001-130yr|ema_ckpt_0004|high|--min-runtime 8h||01M7HN1PKG1QF9GF4K63GW8VDP
+1deg-hybridsstdiag-randco2ft-x1-pclr-replayonly-tb6xf0ju||01M7HN1PK8CQZV6ADZ413SN0X6|deferred_upload_piC-ic0151-200yr|ema_ckpt_0004|high|--min-runtime 8h||01M7HN1PKG1QF9GF4K63GW8VDP
+# U10 end X1
