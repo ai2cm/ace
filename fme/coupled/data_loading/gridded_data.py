@@ -83,6 +83,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
                 horizontal_coordinates=self._ocean.horizontal_coordinates,
                 vertical_coordinate=self._ocean.vertical_coordinate,
                 spatial_mask_provider=self._ocean.spatial_mask_provider,
+                area_weights_provider=self._ocean.area_weights_provider,
                 timestep=self._ocean.timestep,
                 variable_metadata=self._properties.variable_metadata,
             ),
@@ -90,6 +91,7 @@ class GriddedData(GriddedDataABC[CoupledBatchData]):
                 horizontal_coordinates=self._atmosphere.horizontal_coordinates,
                 vertical_coordinate=self._atmosphere.vertical_coordinate,
                 spatial_mask_provider=self._atmosphere.spatial_mask_provider,
+                area_weights_provider=self._atmosphere.area_weights_provider,
                 timestep=self._atmosphere.timestep,
                 variable_metadata=self._properties.variable_metadata,
             ),
@@ -219,12 +221,14 @@ class InferenceGriddedData(InferenceDataABC[CoupledPrognosticState, CoupledBatch
             horizontal_coordinates=self._properties.ocean.horizontal_coordinates,
             vertical_coordinate=self._properties.ocean.vertical_coordinate,
             spatial_mask_provider=self._properties.ocean.spatial_mask_provider,
+            area_weights_provider=self._properties.ocean.area_weights_provider,
             timestep=self.ocean_timestep,
         )
         atmosphere = DatasetInfo(
             horizontal_coordinates=self._properties.atmosphere.horizontal_coordinates,
             vertical_coordinate=self._properties.atmosphere.vertical_coordinate,
             spatial_mask_provider=self._properties.atmosphere.spatial_mask_provider,
+            area_weights_provider=self._properties.atmosphere.area_weights_provider,
             timestep=self.atmosphere_timestep,
         )
         return CoupledDatasetInfo(ocean=ocean, atmosphere=atmosphere)

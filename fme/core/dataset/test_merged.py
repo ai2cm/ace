@@ -3,8 +3,16 @@ import math
 import pytest
 import torch
 
+from fme.core.area_weights_provider import (
+    AreaWeightsProvider,
+    AreaWeightsProviderABC,
+    NullAreaWeightsProvider,
+)
+from fme.core.coordinates import LatLonCoordinates, NullVerticalCoordinate
 from fme.core.dataset.merged import MergedXarrayDataset, TimePaddedMergedDataset
+from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.testing import MockDataset, assert_dataset_item_length
+from fme.core.spatial_mask_provider import SpatialMaskProvider
 
 
 def test_merged_contains_all_data():
@@ -315,3 +323,47 @@ def test_time_padded_merged_raises_on_different_epochs():
 def test_time_padded_merged_empty_raises():
     with pytest.raises(ValueError, match="at least one dataset"):
         TimePaddedMergedDataset([])
+
+
+def _dataset_with_area_weights(
+    varname: str, area_weights_provider: AreaWeightsProviderABC
+) -> MockDataset:
+    properties = DatasetProperties(
+        variable_metadata={},
+        vertical_coordinate=NullVerticalCoordinate(),
+        horizontal_coordinates=LatLonCoordinates(
+            lat=torch.zeros(2), lon=torch.arange(3)
+        ),
+        spatial_mask_provider=SpatialMaskProvider(),
+        timestep=None,
+        is_remote=False,
+        all_labels=None,
+        area_weights_provider=area_weights_provider,
+    )
+    return MockDataset.new(
+        n_times=4, varnames=[varname], sample_n_times=2, properties=properties
+    )
+
+
+def test_merged_area_weights_provider():
+    p = AreaWeightsProvider(torch.rand(2, 3))
+    q = AreaWeightsProvider(2 * p.area_weights)
+    null = NullAreaWeightsProvider
+    for providers, expected in [
+        ((null, null), null),
+        ((null, p), p),
+        ((p, null), p),
+        ((p, AreaWeightsProvider(p.area_weights.clone())), p),
+    ]:
+        merged = MergedXarrayDataset(
+            [
+                _dataset_with_area_weights(f"var_{i}", provider)
+                for i, provider in enumerate(providers)
+            ]
+        )
+        assert merged.properties.area_weights_provider == expected
+    merged = MergedXarrayDataset(
+        [_dataset_with_area_weights("a", p), _dataset_with_area_weights("b", q)]
+    )
+    with pytest.raises(ValueError, match="different area weights"):
+        merged.properties

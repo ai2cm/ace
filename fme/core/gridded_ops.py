@@ -6,6 +6,10 @@ import torch
 from torch import nn
 
 from fme.core import metrics
+from fme.core.area_weights_provider import (
+    AreaWeightsProviderABC,
+    NullAreaWeightsProvider,
+)
 from fme.core.cuhpx.sht import SHT as CuHpxSHT
 from fme.core.cuhpx.sht import iSHT as CuHpxiSHT
 from fme.core.device import get_device
@@ -289,13 +293,32 @@ class LatLonOperations(GriddedOperations):
         area_weights: torch.Tensor,
         spatial_mask_provider: SpatialMaskProviderABC = NullSpatialMaskProvider,
         grid: str = "legendre-gauss",
+        area_weights_provider: AreaWeightsProviderABC = NullAreaWeightsProvider,
     ):
+        """
+        Args:
+            area_weights: Latitude weights, longitudinally uniform.
+            spatial_mask_provider: Masks applied per variable name.
+            grid: Grid type for spectral operations.
+            area_weights_provider: If it holds weights, they replace
+                ``area_weights`` in area-weighted reductions.
+        """
         self._validate_area_weights(area_weights)
         self._cpu_area_global = area_weights.to("cpu", copy=True)
         dist = Distributed.get_instance()
         nlat, nlon = area_weights.shape[-2], area_weights.shape[-1]
         h_slice, w_slice = dist.get_local_slices((nlat, nlon))
-        local_weights = self._cpu_area_global[..., h_slice, w_slice]
+        provider_weights = area_weights_provider.area_weights
+        if provider_weights is None:
+            reduction_weights = self._cpu_area_global
+        else:
+            if tuple(provider_weights.shape) != (nlat, nlon):
+                raise ValueError(
+                    f"Area weights provider shape {tuple(provider_weights.shape)} "
+                    f"does not match grid shape {(nlat, nlon)}."
+                )
+            reduction_weights = provider_weights.to("cpu", copy=True)
+        local_weights = reduction_weights[..., h_slice, w_slice]
         self._device_area = local_weights.to(get_device(), copy=True)
         self._cpu_area = local_weights.to("cpu", copy=True)
         self._device_mask_provider = spatial_mask_provider.to(get_device())

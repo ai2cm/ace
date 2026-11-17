@@ -254,6 +254,7 @@ def _make_dummy_ocean_forcing(
         timestep=dataset_info.ocean.timestep,
         is_remote=False,
         all_labels=set(),
+        area_weights_provider=dataset_info.ocean.area_weights_provider,
     )
     ts = dataset_info.ocean.timestep
     ocean = DummyDataset(
