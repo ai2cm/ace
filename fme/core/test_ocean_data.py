@@ -19,6 +19,13 @@ from fme.core.ocean_eos import (
 )
 
 
+class _IntegralOnly:
+    """A depth coordinate without layer geometry."""
+
+    def depth_integral(self, integrand):
+        return integrand.sum(dim=-1)
+
+
 @pytest.mark.parametrize("has_depth_coordinate", [True, False])
 def test_column_integrated_ocean_heat_content(has_depth_coordinate: bool):
     """Test column-integrated ocean heat content."""
@@ -264,15 +271,14 @@ def test_mld_wright97_known_profile_land_and_masked_level():
     assert MLD_REF_LAYER == 0
     # by hand from the inputs: rho at p=0, density_diff_k = rho_k - rho_0,
     # crossing between the centres of levels 1 and 2
-    rho = wright97_anomaly(so[0], thetao[0], torch.zeros_like(thetao[0]))
+    rho = wright97_anomaly(S=so[0], theta=thetao[0], p=torch.zeros_like(thetao[0]))
     density_diff = rho - rho[0]
     center_depth = 0.5 * (idepth[:-1] + idepth[1:])
     assert density_diff[1] < DELTA_RHO_THRESHOLD < density_diff[2]
     expected = center_depth[1] + (DELTA_RHO_THRESHOLD - density_diff[1]) / (
         density_diff[2] - density_diff[1]
     ) * (center_depth[2] - center_depth[1])
-    # atol covers the 1e-8 kg m-3 added to the interpolation denominator
-    torch.testing.assert_close(mld[0], expected, atol=1e-5, rtol=0)
+    torch.testing.assert_close(mld[0], expected, atol=1e-6, rtol=0)
     # land: NaN exactly where depth_integral is NaN
     ohc_nan = torch.isnan(coord.depth_integral(thetao))
     torch.testing.assert_close(torch.isnan(mld), ohc_nan)
@@ -321,10 +327,6 @@ def test_mld_wright97_missing_depth_coordinate_raises_value_error():
 
 
 def test_mld_wright97_depth_coordinate_without_idepth_raises_value_error():
-    class _IntegralOnly:
-        def depth_integral(self, integrand):
-            return integrand.sum(dim=-1)
-
     _, _, _, _, data = _mld_case()
     with pytest.raises(ValueError, match="idepth"):
         _ = OceanData(data, _IntegralOnly()).mld_wright97
@@ -401,7 +403,7 @@ def _expected_eta_mano(data, deptho=DEPTHO) -> torch.Tensor:
         z_top, z_bot = float(IDEPTH[k]), float(IDEPTH[k + 1])
         dz = (deptho.clamp(z_top, z_bot) - z_top) * mask[..., k]
         p = torch.tensor(RHO_0 * G_EARTH * 0.5 * (z_top + z_bot))
-        rho = wright97_anomaly(data[f"so_{k}"], data[f"thetao_{k}"], p)
+        rho = wright97_anomaly(S=data[f"so_{k}"], theta=data[f"thetao_{k}"], p=p)
         C = C + torch.where(mask[..., k] > 0, rho * dz, 0.0)
     wet = (mask[..., 0] > 0) & data["zos"].isfinite()
     w = _cell_area().area_weights_m2 * wet
@@ -419,7 +421,7 @@ def test_rho_wright97_values_and_mask():
     for k in range(N_LEVELS):
         p = RHO_0 * G_EARTH * 0.5 * float(IDEPTH[k] + IDEPTH[k + 1])
         expected = wright97_anomaly(
-            data[f"so_{k}"], data[f"thetao_{k}"], torch.tensor(p)
+            S=data[f"so_{k}"], theta=data[f"thetao_{k}"], p=torch.tensor(p)
         )
         valid = mask[..., k] & expected.isfinite()
         torch.testing.assert_close(rho[..., k][valid], expected[valid])
@@ -515,10 +517,6 @@ def test_wright97_extra_levels_raise_value_error(name):
 
 @pytest.mark.parametrize("name", ["rho_wright97", "manometric_sea_level_wright97"])
 def test_wright97_without_layer_geometry_raises_value_error(name):
-    class _IntegralOnly:
-        def depth_integral(self, integrand):
-            return integrand.sum(dim=-1)
-
     data = _wright97_data()
     for coord in (None, _IntegralOnly()):
         ocean_data = OceanData(data, coord, cell_area_provider=_cell_area())
