@@ -631,9 +631,10 @@ def _correct_hfds(
     The net flux uses the input SST when the step input has one, and otherwise
     the generated SST (SST as an output-only diagnostic). The fluxes are means
     over the step while SST is a snapshot, so either endpoint is equally valid.
-    When SST is output-only the input SST is absent only on the first step of
-    a standalone ocean rollout: later steps receive the previous step's
-    output, and a coupled stepper carries SST in the ocean state.
+    When SST is output-only the input SST is absent on the first step of each
+    standalone `predict` window (every `forward_steps_in_memory` steps in
+    inference, and step 0 of each training window): later steps receive the
+    previous step's output, and a coupled stepper carries SST in the ocean state.
     """
     input = OceanData(input_data)
     forcing = OceanData(forcing_data)
