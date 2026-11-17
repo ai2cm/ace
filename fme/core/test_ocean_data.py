@@ -230,44 +230,81 @@ def test_getitem():
         _ = ocean_data["nonexistent_field"]
 
 
+def _mld_inputs(thetao: torch.Tensor, so: torch.Tensor) -> dict[str, torch.Tensor]:
+    data = {f"thetao_{k}": thetao[:, k] for k in range(thetao.shape[-1])}
+    data.update({f"so_{k}": so[:, k] for k in range(so.shape[-1])})
+    return data
+
+
 def _mld_case():
-    """Two columns, four levels: column 0 ocean with the threshold crossed
-    between the centres of levels 1 and 2; column 1 land (mask_0 == 0)."""
+    """Three columns, four levels: column 0 ocean with the threshold crossed
+    between the centres of levels 1 and 2 (levels 2 and 3 for a level-1
+    reference); column 1 land (mask_0 == 0); column 2 with level 3 masked and
+    a crossing fill value there."""
     idepth = torch.tensor([0.0, 10.0, 30.0, 60.0, 100.0], dtype=torch.float64)
-    mask = torch.tensor([[1.0, 1.0, 1.0, 1.0], [0.0, 0.0, 0.0, 0.0]])
-    thetao = torch.tensor([[20.0, 20.0, 18.0, 10.0], [20.0, 20.0, 18.0, 10.0]])
+    mask = torch.tensor(
+        [[1.0, 1.0, 1.0, 1.0], [0.0, 0.0, 0.0, 0.0], [1.0, 1.0, 1.0, 0.0]]
+    )
+    thetao = torch.tensor(
+        [
+            [20.0, 19.92, 19.85, 18.0],
+            [20.0, 19.92, 19.85, 18.0],
+            [20.0, 20.0, 20.0, 0.0],
+        ],
+        dtype=torch.float64,
+    )
     so = torch.full_like(thetao, 35.0)
-    data = {f"thetao_{k}": thetao[:, k].double() for k in range(4)}
-    data.update({f"so_{k}": so[:, k].double() for k in range(4)})
-    return idepth, mask, thetao.double(), so.double(), data
+    return idepth, mask, thetao, so, _mld_inputs(thetao, so)
 
 
-def test_mld_wright97_known_profile_and_land():
+def test_mld_wright97_known_profile_land_and_masked_level():
     idepth, mask, thetao, so, data = _mld_case()
     coord = DepthCoordinate(idepth=idepth, mask=mask)
     mld = OceanData(data, coord).mld_wright97
-    # by hand from the inputs: rho at p=0, d_k = rho_k - rho_ref, crossing
-    # between the centres of MLD_REF_LAYER and MLD_REF_LAYER + 1
+    assert MLD_REF_LAYER == 0
+    # by hand from the inputs: rho at p=0, density_diff_k = rho_k - rho_0,
+    # crossing between the centres of levels 1 and 2
     rho = wright97_anomaly(so[0], thetao[0], torch.zeros_like(thetao[0]))
-    d = rho - rho[MLD_REF_LAYER]
-    zc = 0.5 * (idepth[:-1] + idepth[1:])
-    k = MLD_REF_LAYER + 1
-    assert d[k] > DELTA_RHO_THRESHOLD
-    expected = zc[k - 1] + DELTA_RHO_THRESHOLD / d[k] * (zc[k] - zc[k - 1])
-    torch.testing.assert_close(mld[0], expected, atol=1e-6, rtol=0)
-    assert zc[k - 1] < mld[0] < zc[k]
+    density_diff = rho - rho[0]
+    center_depth = 0.5 * (idepth[:-1] + idepth[1:])
+    assert density_diff[1] < DELTA_RHO_THRESHOLD < density_diff[2]
+    expected = center_depth[1] + (DELTA_RHO_THRESHOLD - density_diff[1]) / (
+        density_diff[2] - density_diff[1]
+    ) * (center_depth[2] - center_depth[1])
+    # atol covers the 1e-8 kg m-3 added to the interpolation denominator
+    torch.testing.assert_close(mld[0], expected, atol=1e-5, rtol=0)
     # land: NaN exactly where depth_integral is NaN
     ohc_nan = torch.isnan(coord.depth_integral(thetao))
     torch.testing.assert_close(torch.isnan(mld), ohc_nan)
     assert torch.isnan(mld[1])
+    # masked level 3 does not cross: deepest unmasked interface
+    torch.testing.assert_close(mld[2], idepth[3])
+
+
+def test_mld_wright97_non_finite_wet_input_is_nan():
+    idepth, _, _, _, _ = _mld_case()
+    mask = torch.tensor([[1.0, 1.0, 1.0, 1.0]] * 3 + [[1.0, 1.0, 1.0, 0.0]])
+    thetao = torch.full((4, 4), 20.0, dtype=torch.float64)
+    so = torch.full_like(thetao, 35.0)
+    thetao[0, 0] = float("nan")  # reference level
+    so[1, 2] = float("nan")  # wet level, no crossing
+    thetao[2, 1] = 10.0  # crossing above a non-finite wet level
+    thetao[2, 3] = float("nan")
+    thetao[3, 3] = float("nan")  # masked level
+    deptho = torch.full((4,), 80.0, dtype=torch.float64)
+    mld = OceanData(
+        _mld_inputs(thetao, so),
+        DepthCoordinate(idepth=idepth, mask=mask, deptho=deptho),
+    ).mld_wright97
+    assert torch.isnan(mld[:3]).all()
+    torch.testing.assert_close(mld[3], deptho[3])
 
 
 def test_mld_wright97_no_crossing_is_sea_floor():
     idepth, mask, _, _, _ = _mld_case()
     thetao = torch.full((1, 4), 20.0, dtype=torch.float64)
     so = torch.full_like(thetao, 35.0)
-    data = {f"thetao_{k}": thetao[:, k] for k in range(4)}
-    data.update({f"so_{k}": so[:, k] for k in range(4)})
+    data = _mld_inputs(thetao, so)
     deptho = torch.tensor([80.0], dtype=torch.float64)
     mld = OceanData(
         data, DepthCoordinate(idepth=idepth, mask=mask[:1], deptho=deptho)

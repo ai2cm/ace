@@ -242,8 +242,10 @@ class OceanData:
         ``DELTA_RHO_THRESHOLD`` and ``MLD_REF_LAYER``: the depth where the
         Wright (1997) zero-pressure density first exceeds that of the reference
         layer by the threshold, else the sea floor depth (the depth
-        coordinate's ``deptho``, or the deepest unmasked interface). NaN where
-        ``mask_0 == 0``, as ``DepthCoordinate.depth_integral``.
+        coordinate's ``deptho``, or the deepest unmasked interface). The
+        reference is level 0, so the MLD lies below that level's centre. NaN
+        where ``mask_0 == 0``, as ``DepthCoordinate.depth_integral``, and where
+        an input is non-finite at a level with ``mask_k > 0``.
 
         Raises:
             ValueError: If the depth coordinate is not a
