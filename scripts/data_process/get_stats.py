@@ -31,10 +31,6 @@ DROP_VARIABLES = (
         "pressure_thickness_of_atmospheric_layer_5",
         "pressure_thickness_of_atmospheric_layer_6",
         "pressure_thickness_of_atmospheric_layer_7",
-        "mask_HI",
-        "mask_sea_ice_volume",
-        "mask_sea_ice_fraction",
-        "mask_ocean_sea_ice_fraction",
     ]
     + [f"ak_{i}" for i in range(9)]
     + [f"bk_{i}" for i in range(9)]

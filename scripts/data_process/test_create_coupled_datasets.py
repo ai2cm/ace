@@ -141,7 +141,6 @@ def _make_config(tmp_path, with_land=False):
                     first_timestamp=FIRST_WINDOW_END,
                     subset_names=["latent_heat_flux"],
                 ),
-                sst_threshold=275.5,
             ),
             output_writer=OutputWriterConfig(n_split=1),
         ),
@@ -690,14 +689,15 @@ def test_only_ocean_store_keeps_land_nan(tmp_path):
     for name in ["sea_ice_fraction", "ocean_sea_ice_fraction", "hfds_total_area"]:
         assert ocean[name].isel(lon=LAND_LON).isnull().all(), name
     wet = ocean["sea_surface_fraction"] > 0
-    assert (ocean["sea_ice_fraction"].isnull() & wet).any(), "mask NaN not exercised"
+    for name in ["sea_ice_fraction", "ocean_sea_ice_fraction"]:
+        assert not (ocean[name].isnull() & wet).any(), name
 
     after_lead = slice(ocean.time.values[0], None)
     _assert_no_nan(sea_ice.sel(time=after_lead))
     _assert_no_nan(atmos.sel(time=after_lead))
 
     # atmosphere fractions: the sea ice store snapshot at each ocean step, held
-    # forward; equal to the ocean store wherever that is unmasked
+    # forward; equal to the ocean store off land
     for name in ["sea_ice_fraction", "ocean_fraction"]:
         held = (
             sea_ice[name]
@@ -712,8 +712,8 @@ def test_only_ocean_store_keeps_land_nan(tmp_path):
         .sel(time=after_lead)
     )
     atmos_ifrac = atmos["sea_ice_fraction"].sel(time=after_lead)
-    unmasked = ocean_held.notnull()
-    xr.testing.assert_allclose(atmos_ifrac.where(unmasked), ocean_held.where(unmasked))
+    off_land = ocean_held.notnull()
+    xr.testing.assert_allclose(atmos_ifrac.where(off_land), ocean_held.where(off_land))
 
 
 @requires_dask

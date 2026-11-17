@@ -5,7 +5,6 @@ from coupled_dataset_utils import (
     CoupledSeaIceConfig,
     CoupledSeaSurfaceConfig,
     CoupledSurfaceTemperatureConfig,
-    PrecomputedSeaIceMaskConfig,
     compute_coupled_atmosphere,
     compute_coupled_ocean,
     compute_coupled_sea_ice,
@@ -291,7 +290,6 @@ def _sea_surface_config() -> CoupledSeaSurfaceConfig:
             first_timestamp="2000-01-06T00:00:00",
             subset_names=["latent_heat_flux"],
         ),
-        sst_threshold=300.0,
     )
 
 
@@ -366,31 +364,60 @@ def test_hfds_total_area_passthrough(native_present):
         np.testing.assert_allclose(coupled_ocean["hfds_total_area"].values, 2.0 * 0.5)
 
 
-def _write_mask(path, values) -> str:
-    store = str(path / "coupled-ocean.zarr")
-    xr.Dataset(
-        {"mask_sea_ice_fraction": (("lat", "lon"), np.array(values, dtype=float))},
-        coords={"lat": LAT, "lon": LON},
-    ).to_zarr(store)
-    return store
+def _land_and_ocean_chain():
+    """Coupled sea ice, ocean and atmosphere on a grid with one land cell."""
+    atmos = _synthetic_atmos(land_fraction=[[0.0, 0.3], [1.0, 0.0]])
+    ocean = _synthetic_ocean(
+        sea_surface_fraction=[[1.0, 0.7], [0.0, 1.0]],
+        ocean_sea_ice_fraction=0.0,
+    )
+    # ice-free at (0, 0) and (1, 1), ice at (0, 1), NaN on the land cell (1, 0)
+    ocean["ocean_sea_ice_fraction"] = ocean["ocean_sea_ice_fraction"] + _static(
+        [[0.0, 0.5], [np.nan, 0.0]]
+    )
+    coupled_sea_ice = compute_coupled_sea_ice(atmos, CoupledSeaIceConfig(), ocean=ocean)
+    coupled_ocean = compute_coupled_ocean(
+        ocean, atmos, coupled_sea_ice, _sea_surface_config()
+    )
+    coupled_atmos = compute_coupled_atmosphere(
+        atmos,
+        ocean,
+        coupled_ocean,
+        CoupledSurfaceTemperatureConfig(how="threshold"),
+    )
+    return coupled_sea_ice, coupled_ocean, coupled_atmos
 
 
-def test_precomputed_sea_ice_mask_loads_binary_mask(tmp_path):
-    store = _write_mask(tmp_path, [[0.0, 1.0], [1.0, 0.0]])
-    mask = PrecomputedSeaIceMaskConfig(zarr_path=store).get_sea_ice_mask()
-    np.testing.assert_array_equal(mask.values, [[0.0, 1.0], [1.0, 0.0]])
+LAND = (1, 0)
+SEA_ICE_NAMES = ["sea_ice_fraction", "ocean_sea_ice_fraction"]
 
 
-@pytest.mark.parametrize(
-    "values",
-    [
-        [[np.nan, np.nan], [np.nan, np.nan]],
-        [[0.0, 1.0], [np.nan, 0.0]],
-        [[0.5, 1.0], [1.0, 0.0]],
-    ],
-    ids=["unwritten", "partly-nan", "non-binary"],
-)
-def test_precomputed_sea_ice_mask_rejects_non_binary(tmp_path, values):
-    store = _write_mask(tmp_path, values)
-    with pytest.raises(ValueError, match="fully written"):
-        PrecomputedSeaIceMaskConfig(zarr_path=store).get_sea_ice_mask()
+def test_coupled_ocean_sea_ice_nan_only_on_land():
+    _, coupled_ocean, _ = _land_and_ocean_chain()
+    for name in SEA_ICE_NAMES:
+        values = coupled_ocean[name].values
+        assert np.isnan(values[:, LAND[0], LAND[1]]).all(), name
+        is_land = np.zeros(values.shape[1:], dtype=bool)
+        is_land[LAND] = True
+        assert np.isfinite(values[:, ~is_land]).all(), name
+    # ice-free ocean is 0, not NaN
+    np.testing.assert_array_equal(
+        coupled_ocean["sea_ice_fraction"].values[:, 0, 0], 0.0
+    )
+
+
+@pytest.mark.parametrize("store", ["sea_ice", "atmosphere"])
+def test_coupled_sea_ice_and_atmosphere_fill_land_with_zero(store):
+    coupled_sea_ice, _, coupled_atmos = _land_and_ocean_chain()
+    ds = coupled_sea_ice if store == "sea_ice" else coupled_atmos
+    names = [name for name in SEA_ICE_NAMES if name in ds.data_vars]
+    assert "sea_ice_fraction" in names
+    for name in names:
+        assert not np.isnan(ds[name].values).any(), name
+        np.testing.assert_array_equal(ds[name].values[:, LAND[0], LAND[1]], 0.0)
+
+
+def test_no_sea_ice_mask_written():
+    coupled_sea_ice, coupled_ocean, coupled_atmos = _land_and_ocean_chain()
+    for ds in [coupled_sea_ice, coupled_ocean, coupled_atmos]:
+        assert not [name for name in ds.data_vars if name.startswith("mask_")]

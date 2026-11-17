@@ -56,15 +56,6 @@ The argo flavour is offered only where the config's input and output stores are
 on GCS: `E3SMv3-piControl-100yr-coupled.yaml` writes to NERSC scratch, which the
 workflow does not mount, so it is local-only.
 
-The CM4 1pctCO2 coupled configs read their sea ice mask
-(`precomputed_sea_ice_mask`) from the piControl coupled ocean store, so submit
-each pair as one workflow: `make cm4_coupled_1daily_argo` (or `make
-cm4_coupled_argo`) runs `create_coupled_datasets.sh --config <piControl>
---dependent-config <1pctCO2>`, and the workflow starts the 1pctCO2 run once the
-piControl run has written its datasets. `--dependent-config` cannot be combined
-with `--debug` or `--subsample`, which leave no piControl store for 1pctCO2 to
-read. A mask read from a store that is not fully written fails the run.
-
 When the config sets `stats.beaker_dataset`, the argo workflow's upload step,
 `upload_coupled_stats.py`, uploads the merged stats to that Beaker dataset in
 the `ai2/ace` workspace, one subdirectory per category

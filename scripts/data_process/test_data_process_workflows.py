@@ -226,7 +226,6 @@ def test_coupled_templates_fit_the_argo_template_budget():
         dict(
             code_bundle=_submitted_code_bundle(),
             config=config,
-            dependent_config=config,
         ),
     )
     assert sizes and all(size < ARGO_TEMPLATE_BUDGET for size in sizes.values()), sizes
@@ -272,25 +271,19 @@ def _config_argument(task: dict) -> str:
     return parameter["value"]
 
 
-def test_coupled_workflow_chains_the_dependent_config():
+def test_coupled_workflow_runs_create_then_upload():
     tasks = _coupled_dag_tasks()
     assert {name: task["template"] for name, task in tasks.items()} == {
         "create": "create-coupled-datasets",
         "upload": "upload-coupled-stats",
-        "create-dependent": "create-coupled-datasets",
-        "upload-dependent": "upload-coupled-stats",
     }
     assert {name: task.get("depends") for name, task in tasks.items()} == {
         "create": None,
         "upload": "create",
-        "create-dependent": "create",
-        "upload-dependent": "create-dependent",
     }
     assert {name: _config_argument(task) for name, task in tasks.items()} == {
         "create": "{{workflow.parameters.config}}",
         "upload": "{{workflow.parameters.config}}",
-        "create-dependent": "{{workflow.parameters.dependent_config}}",
-        "upload-dependent": "{{workflow.parameters.dependent_config}}",
     }
 
 
@@ -300,16 +293,8 @@ def test_coupled_workflow_skip_conditions():
         "{{workflow.parameters.debug}} == false",
         "{{workflow.parameters.subsample}} == false",
     ]
-    run_dependent = "{{workflow.parameters.run_dependent}} == true"
     assert "when" not in tasks["create"]
     assert all(c in tasks["upload"]["when"] for c in no_stats)
-    assert run_dependent not in tasks["upload"]["when"]
-    assert tasks["create-dependent"]["when"] == run_dependent
-    # a bare `depends` is also met by a skipped task, so the dependent upload
-    # repeats run_dependent
-    assert all(
-        c in tasks["upload-dependent"]["when"] for c in no_stats + [run_dependent]
-    )
 
 
 def test_coupled_templates_read_config_from_inputs():
@@ -334,36 +319,14 @@ def _submit(
     )
 
 
-PAIR_FLAGS = (
-    "--config",
-    "configs/CM4-piControl-coupled-1deg-1daily-200yr.yaml",
-    "--dependent-config",
-    "configs/CM4-1pctCO2-coupled-1deg-1daily-140yr.yaml",
-)
-
-
 SUBMIT_FLAGS = {
-    COUPLED_SUBMIT_SCRIPT: PAIR_FLAGS[:2],
+    COUPLED_SUBMIT_SCRIPT: (
+        "--config",
+        "configs/CM4-piControl-coupled-1deg-1daily-200yr.yaml",
+    ),
     COMPUTE_DATASET_SUBMIT_SCRIPT: (
         "--config",
         "configs/shield-som-ensemble-c96-1deg-8layer.yaml",
         "--dataset",
     ),
 }
-
-
-def test_coupled_submit_script_passes_the_dependent_config():
-    single = _submit(*PAIR_FLAGS[:2])
-    pair = _submit(*PAIR_FLAGS)
-    assert single.returncode == 0 and pair.returncode == 0
-    assert "run_dependent" not in single.stdout
-    assert "dependent_config" not in single.stdout
-    assert "-p run_dependent=true" in pair.stdout
-    assert "-p dependent_config=# make cm4_1pctCO2_coupled_1daily" in pair.stdout
-
-
-@pytest.mark.parametrize("flag", ["--debug", "--subsample"])
-def test_coupled_submit_script_rejects_dependent_config_with(flag):
-    result = _submit(*PAIR_FLAGS, flag)
-    assert result.returncode != 0
-    assert "--dependent-config cannot be combined" in result.stdout

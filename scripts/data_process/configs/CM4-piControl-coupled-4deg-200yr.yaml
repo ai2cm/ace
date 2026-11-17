@@ -7,11 +7,6 @@ coupled_datasets:
   coupled_ts:
     how: interpolate_sst
   coupled_sea_surface:
-    sst_threshold: 291.75
-    ocean_extra_masked_names: ["HI", "sea_ice_volume", "UI", "VI", "sfdsi"]
-    ocean_extra_fill_values:
-      UI: 0.0
-      VI: 0.0
     surface_flux_window_avg:
       window_timedelta: 120h
       # The ocean store labels its 5-day intervals at the interval end, so the

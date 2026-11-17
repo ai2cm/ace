@@ -34,7 +34,7 @@ three stages; the ocean and atmosphere stages both depend on the sea ice stage:
     compute_coupled_sea_ice -> compute_coupled_ocean
     compute_coupled_sea_ice -> compute_coupled_atmosphere
 
-Only the coupled ocean dataset keeps NaN on land and outside the sea ice mask.
+Only the coupled ocean dataset keeps NaN on land.
 The coupled sea ice and atmosphere datasets take their fractions from the
 unmasked coupled sea ice fields. Without coupled_sea_surface the ocean stage is
 skipped.
@@ -460,7 +460,7 @@ class CoupledDatasetsConfig:
     Parameters:
         coupled_ts: Configuration for surface temperature in coupled atmosphere.
             Its fractions come from the coupled sea ice dataset, so they carry
-            no land or sea ice mask NaN.
+            no land NaN.
         coupled_sea_surface: Configuration for sea ice in coupled ocean.
         coupled_sea_ice: Configuration for for sea ice in the uncoupled atmosphere.
         input_field_names: Names of input fields.
