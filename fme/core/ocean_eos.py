@@ -100,9 +100,12 @@ def mixed_layer_depth(
 
     ``rho = wright97_anomaly(S=so, theta=thetao, p=0)``; the MLD is where
     ``rho_k - rho_ref`` first exceeds ``delta_rho_threshold`` below
-    ``ref_layer``, linearly interpolated between level centres, so
-    ``center_depth[ref_layer] < MLD <= deptho``. ``deptho`` where it never
-    does; NaN where an input is non-finite at a level with ``mask_k > 0``.
+    ``ref_layer``, linearly interpolated between the centres of the levels'
+    wet parts, ``(idepth_k + min(idepth_{k+1}, deptho)) / 2``, as MOM6 MLD_003
+    takes layer centres from layer thicknesses. So
+    ``center_depth[ref_layer] < MLD <= deptho``, also in a partial bottom cell.
+    ``deptho`` where it never does; NaN where an input is non-finite at a level
+    with ``mask_k > 0``.
 
     Args:
         thetao: Potential temperature [degC], ``(..., nz)``.
@@ -117,7 +120,8 @@ def mixed_layer_depth(
     if not 0 <= ref_layer < n_levels - 1:
         raise ValueError(f"ref_layer must be in [0, {n_levels - 2}], got {ref_layer}")
     rho = wright97_anomaly(S=so, theta=thetao, p=torch.zeros_like(thetao))
-    center_depth = interface_to_center_depth(idepth)
+    wet_bottom = deptho.unsqueeze(-1).clamp(min=idepth[:-1], max=idepth[1:])
+    wet_center_depth = 0.5 * (idepth[:-1] + wet_bottom)
     density_diff = rho - rho[..., ref_layer : ref_layer + 1]
     mask = mask.expand(density_diff.shape)
     mld = torch.full_like(density_diff[..., 0], float("nan"))
@@ -130,7 +134,8 @@ def mixed_layer_depth(
         )
         dprev = density_diff[..., k - 1]
         frac = (delta_rho_threshold - dprev) / (density_diff[..., k] - dprev)
-        value = center_depth[k - 1] + frac * (center_depth[k] - center_depth[k - 1])
+        z_prev, z_k = wet_center_depth[..., k - 1], wet_center_depth[..., k]
+        value = z_prev + frac * (z_k - z_prev)
         mld = torch.where(crossed_here, value, mld)
         not_yet_crossed = not_yet_crossed & ~crossed_here
     mld = torch.where(not_yet_crossed, deptho.expand(mld.shape), mld)

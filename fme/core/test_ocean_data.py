@@ -413,6 +413,44 @@ def test_mld_wright97_known_profile_land_and_masked_level():
     torch.testing.assert_close(mld[2], idepth[3])
 
 
+def _expected_mld(thetao, so, z_prev, z_k, k):
+    """Linear interpolation of rho - rho_0 at p=0 between depths z_prev and
+    z_k [m] of levels k - 1 and k."""
+    rho = wright97_anomaly(S=so, theta=thetao, p=torch.zeros_like(thetao))
+    d_prev, d_k = rho[k - 1] - rho[0], rho[k] - rho[0]
+    assert d_prev <= DELTA_RHO_THRESHOLD < d_k
+    return z_prev + (DELTA_RHO_THRESHOLD - d_prev) / (d_k - d_prev) * (z_k - z_prev)
+
+
+def test_mld_wright97_crossing_below_reference_level():
+    idepth, mask, _, _, _ = _mld_case()
+    thetao = torch.tensor([[20.0, 19.0, 18.0, 17.0]], dtype=torch.float64)
+    so = torch.full_like(thetao, 35.0)
+    mld = OceanData(
+        _mld_inputs(thetao, so), DepthCoordinate(idepth=idepth, mask=mask[:1])
+    ).mld_wright97
+    assert MLD_REF_LAYER == 0
+    # centres of levels 0 and 1: 5 m and 20 m
+    expected = _expected_mld(thetao[0], so[0], 5.0, 20.0, k=1)
+    torch.testing.assert_close(mld[0], expected, atol=1e-6, rtol=0)
+
+
+@pytest.mark.parametrize("thetao_2", [19.85, 19.8])
+def test_mld_wright97_partial_bottom_cell_uses_wet_centre(thetao_2):
+    idepth = torch.tensor([0.0, 10.0, 20.0, 1000.0], dtype=torch.float64)
+    deptho = torch.tensor([30.0], dtype=torch.float64)
+    thetao = torch.tensor([[20.0, 20.0, thetao_2]], dtype=torch.float64)
+    so = torch.full_like(thetao, 35.0)
+    mld = OceanData(
+        _mld_inputs(thetao, so),
+        DepthCoordinate(idepth=idepth, mask=torch.ones(1, 3), deptho=deptho),
+    ).mld_wright97
+    # level 2 is wet over [20, 30] m: centre 25 m, not the full cell's 510 m
+    expected = _expected_mld(thetao[0], so[0], 15.0, 25.0, k=2)
+    torch.testing.assert_close(mld[0], expected, atol=1e-6, rtol=0)
+    assert mld[0] <= deptho[0]
+
+
 def test_mld_wright97_non_finite_wet_input_is_nan():
     idepth, _, _, _, _ = _mld_case()
     mask = torch.tensor([[1.0, 1.0, 1.0, 1.0]] * 3 + [[1.0, 1.0, 1.0, 0.0]])
@@ -530,7 +568,7 @@ def _expected_eta_mano(data, deptho=DEPTHO) -> torch.Tensor:
         dz = (deptho.clamp(z_top, z_bot) - z_top) * mask[..., k]
         p = torch.tensor(RHO_0 * G_EARTH * 0.5 * (z_top + z_bot))
         rho = wright97_anomaly(S=data[f"so_{k}"], theta=data[f"thetao_{k}"], p=p)
-        C = C + torch.where(mask[..., k] > 0, rho * dz, 0.0)
+        C = C + torch.where((mask[..., k] > 0) & rho.isfinite(), rho * dz, 0.0)
     wet = (mask[..., 0] > 0) & data["zos"].isfinite()
     w = _cell_area().area_weights_m2 * wet
     eta = data["zos"].nan_to_num() + C / RHO_0
@@ -597,6 +635,17 @@ def test_manometric_sea_level_wright97_nan_zos_in_wet_cell():
     assert eta_mano[0, 0, 1:].isfinite().sum() == (N_LAT - 1) * N_LON - 1
 
 
+def test_manometric_sea_level_wright97_nan_wet_level_counts_as_zero():
+    data = _wright97_data()
+    data["thetao_1"][0, 0, 3, 2] = torch.nan
+    ocean_data = _wright97_ocean_data(data)
+    eta_mano = ocean_data.manometric_sea_level_wright97
+    assert eta_mano[0, 0, 3, 2].isfinite()
+    torch.testing.assert_close(eta_mano, _expected_eta_mano(data), equal_nan=True)
+    # D4: the MLD of the same cell is NaN
+    assert ocean_data.mld_wright97[0, 0, 3, 2].isnan()
+
+
 def test_wright97_one_dimensional_mask_matches_expanded():
     data = _wright97_data()
     mask_1d = torch.ones(N_LEVELS)
@@ -639,6 +688,17 @@ def test_wright97_extra_levels_raise_value_error(name):
     data[f"thetao_{N_LEVELS}"] = data["thetao_0"].clone()
     with pytest.raises(ValueError, match="more than"):
         _ = getattr(_wright97_ocean_data(data), name)
+
+
+@pytest.mark.parametrize(
+    "name", ["rho_wright97", "mld_wright97", "manometric_sea_level_wright97"]
+)
+def test_wright97_missing_profiles_raise_key_error_before_geometry(name):
+    data = {"zos": torch.zeros(1, 1, N_LAT, N_LON)}
+    for coord in (None, _IntegralOnly()):
+        ocean_data = OceanData(data, coord, cell_area_provider=_cell_area())
+        with pytest.raises(KeyError):
+            _ = getattr(ocean_data, name)
 
 
 @pytest.mark.parametrize("name", ["rho_wright97", "manometric_sea_level_wright97"])

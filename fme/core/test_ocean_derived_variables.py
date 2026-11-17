@@ -628,6 +628,20 @@ def test_mld_wright97_skipped_without_salinity():
     assert "ocean_heat_content" in out
 
 
+def test_wright97_skipped_without_profiles_or_layer_geometry():
+    class IntegralOnly:
+        def depth_integral(self, integrand):
+            return integrand.sum(dim=-1)
+
+    out = compute_ocean_derived_quantities(
+        {"zos": torch.zeros(1, 1, 2, 2)},
+        depth_coordinate=IntegralOnly(),
+        timestep=TIMESTEP,
+    )
+    assert "mld_wright97" not in out
+    assert "manometric_sea_level_wright97" not in out
+
+
 def test_wright97_metadata_has_units():
     metadata = get_derived_variable_metadata()
     assert metadata["mld_wright97"].units == "m"
