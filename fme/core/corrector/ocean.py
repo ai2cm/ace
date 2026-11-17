@@ -627,13 +627,23 @@ def _correct_hfds(
         residual_prediction: gen_hfds + ocean_fraction * net_flux
         prescribed: net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
         prescribed_open_ocean: net_flux where ocean_fraction == 1, else gen_hfds
+
+    The net flux uses the input SST when the step input has one, and otherwise
+    the generated SST (SST as an output-only diagnostic). The fluxes are means
+    over the step while SST is a snapshot, so either endpoint is equally valid.
+    When SST is output-only the input SST is absent on the first step of each
+    standalone `predict` window (every `forward_steps_in_memory` steps in
+    inference, and step 0 of each training window): later steps receive the
+    previous step's output, and a coupled stepper carries SST in the ocean state.
     """
     input = OceanData(input_data)
     forcing = OceanData(forcing_data)
     ocean_fraction = input.ocean_fraction
-    net_flux = _compute_ocean_net_surface_energy_flux(
-        forcing_data, input.sea_surface_temperature
-    )
+    try:
+        sst = input.sea_surface_temperature
+    except KeyError:
+        sst = OceanData(gen_data).sea_surface_temperature
+    net_flux = _compute_ocean_net_surface_energy_flux(forcing_data, sst)
     out: TensorDict = {}
     if "hfds" in gen_data:
         hfds_name = "hfds"
