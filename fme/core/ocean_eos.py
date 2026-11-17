@@ -21,8 +21,9 @@ RHO_0 = DENSITY_OF_SEA_WATER_CM4  # [kg m-3]
 G_EARTH = GRAVITY  # [m s-2]
 
 # Density-threshold mixed layer depth defaults of ``OceanData.mld_wright97``.
-DELTA_RHO_THRESHOLD = 0.03  # [kg m-3], as MOM6's mlotst diagnostic
-MLD_REF_LAYER = 1  # reference layer index, dimensionless
+# Threshold and top-level reference as CM4's mlotst (MOM6 MLD_003).
+DELTA_RHO_THRESHOLD = 0.03  # [kg m-3]
+MLD_REF_LAYER = 0  # reference layer index, dimensionless
 
 # Reduced-range fit, -2<T<30 degC, 28<S<38 PSU, 0<p<5e7 Pa.
 _A0, _A1, _A2 = 7.057924e-4, 3.480336e-7, -1.112733e-7
@@ -97,8 +98,9 @@ def _mixed_layer_depth(
 
     ``rho = wright97_anomaly(so, thetao, p=0)``; the MLD is where
     ``rho_k - rho_ref`` first exceeds ``delta_rho_threshold`` below
-    ``ref_layer``, linearly interpolated between level centres, and
-    ``deptho`` where it never does.
+    ``ref_layer``, linearly interpolated between level centres, so
+    ``center_depth[ref_layer] < MLD <= deptho``. ``deptho`` where it never
+    does; NaN where an input is non-finite at a level with ``mask_k > 0``.
 
     Args:
         thetao: Potential temperature [degC], ``(..., nz)``.
@@ -111,13 +113,11 @@ def _mixed_layer_depth(
     """
     n_levels = thetao.shape[-1]
     if not 0 <= ref_layer < n_levels - 1:
-        raise ValueError(
-            f"mld_ref_layer must be in [0, {n_levels - 2}], got {ref_layer}"
-        )
+        raise ValueError(f"ref_layer must be in [0, {n_levels - 2}], got {ref_layer}")
     # NaN inputs (land, below the bottom) are replaced by finite values before
     # the EOS and the interpolation so that the zero gradient torch.where passes
-    # to unselected entries is never multiplied by NaN; d keeps its NaN there so
-    # the forward selection is unchanged.
+    # to unselected entries is never multiplied by NaN; density_diff keeps its
+    # NaN there so the forward selection is unchanged.
     finite = torch.isfinite(thetao) & torch.isfinite(so)
     rho = wright97_anomaly(
         torch.where(finite, so, torch.zeros_like(so)),
@@ -125,31 +125,39 @@ def _mixed_layer_depth(
         torch.zeros_like(thetao),
     )
     rho = torch.where(finite, rho, torch.full_like(rho, float("nan")))
-    zc = interface_to_center_depth(idepth)
-    d = rho - rho[..., ref_layer : ref_layer + 1]
-    d_safe = torch.where(torch.isfinite(d), d, torch.zeros_like(d))
-    mask = mask.expand(d.shape)
-    mld = torch.full_like(d[..., 0], float("nan"))
-    notset = torch.ones_like(mld, dtype=torch.bool)
+    center_depth = interface_to_center_depth(idepth)
+    density_diff = rho - rho[..., ref_layer : ref_layer + 1]
+    d_safe = torch.where(
+        torch.isfinite(density_diff), density_diff, torch.zeros_like(density_diff)
+    )
+    mask = mask.expand(density_diff.shape)
+    mld = torch.full_like(density_diff[..., 0], float("nan"))
+    not_yet_crossed = torch.ones_like(mld, dtype=torch.bool)
     for k in range(ref_layer + 1, n_levels):
-        lm = (d[..., k] > delta_rho_threshold) & notset & (mask[..., k] > 0)
+        crossed_here = (
+            (density_diff[..., k] > delta_rho_threshold)
+            & not_yet_crossed
+            & (mask[..., k] > 0)
+        )
         if k == ref_layer + 1:
-            dprev = torch.zeros_like(d[..., k])
+            dprev = torch.zeros_like(density_diff[..., k])
             dprev_safe = dprev
         else:
-            dprev = d[..., k - 1]
+            dprev = density_diff[..., k - 1]
             dprev_safe = d_safe[..., k - 1]
-        zprev = zc[ref_layer] if k == ref_layer + 1 else zc[k - 1]
+        zprev = center_depth[ref_layer] if k == ref_layer + 1 else center_depth[k - 1]
         denom = d_safe[..., k] - dprev_safe + 1e-8
-        denom = torch.where(lm, denom, torch.ones_like(denom))
+        denom = torch.where(crossed_here, denom, torch.ones_like(denom))
         frac = (delta_rho_threshold - dprev_safe) / denom
-        value = zprev + frac * (zc[k] - zprev)
+        value = zprev + frac * (center_depth[k] - zprev)
         value = torch.where(
             torch.isfinite(dprev), value, torch.full_like(value, float("nan"))
         )
-        mld = torch.where(lm, value, mld)
-        notset = notset & ~lm
-    return torch.where(torch.isnan(mld), deptho.expand(mld.shape), mld)
+        mld = torch.where(crossed_here, value, mld)
+        not_yet_crossed = not_yet_crossed & ~crossed_here
+    mld = torch.where(not_yet_crossed, deptho.expand(mld.shape), mld)
+    wet_inputs_finite = (finite | (mask == 0)).all(dim=-1)
+    return torch.where(wet_inputs_finite, mld, torch.full_like(mld, float("nan")))
 
 
 def _density_anomaly(
