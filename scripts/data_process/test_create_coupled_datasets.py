@@ -2,6 +2,7 @@
 tiny synthetic atmosphere and ocean zarr stores in a temporary directory."""
 
 import dataclasses
+import importlib.util
 import os
 import shutil
 
@@ -36,6 +37,11 @@ NLON = 8
 N_ATMOS_TIMES = 40  # 6-hourly steps covering ten days
 FIRST_WINDOW_END = "2000-01-06T00:00:00"
 LAND_LON = 0  # longitude index of the all-land column in inputs with land
+
+# get_dataset opens inputs with xr.open_zarr(chunks=...), which needs dask
+requires_dask = pytest.mark.skipif(
+    importlib.util.find_spec("dask") is None, reason="requires dask"
+)
 
 
 def _times(start, periods, freq):
@@ -175,7 +181,10 @@ def eager_writer(monkeypatch):
 @pytest.fixture(autouse=True)
 def no_distributed_client(monkeypatch):
     """Stats computation on tiny data doesn't need a distributed cluster."""
-    distributed = pytest.importorskip("distributed")
+    try:
+        import distributed
+    except ImportError:
+        return
     monkeypatch.setattr(distributed, "Client", _DummyDaskClient)
 
 
@@ -187,6 +196,7 @@ def _output_paths(config):
     ]
 
 
+@requires_dask
 def test_write_datasets_and_stats_end_to_end_and_resume(tmp_path, monkeypatch):
     config = _make_config(tmp_path)
     config.write_coupled_datasets(debug=False, subsample=False)
@@ -217,6 +227,7 @@ def test_write_datasets_and_stats_end_to_end_and_resume(tmp_path, monkeypatch):
     config.write_coupled_datasets(debug=False, subsample=False)
 
 
+@requires_dask
 def test_write_datasets_and_stats_debug_writes_nothing(tmp_path):
     config = _make_config(tmp_path)
     config.write_coupled_datasets(debug=True, subsample=False)
@@ -238,6 +249,7 @@ def _write_zarr(path, times, name="sst"):
 @pytest.mark.parametrize(
     "time_stride, expected_steps", [("6h", 1), ("5D", STRIDE_STEPS)]
 )
+@requires_dask
 def test_time_stride_selects_every_nth_instant(tmp_path, time_stride, expected_steps):
     times = _times(STRIDE_START, N_STRIDE_TIMES, "6h")
     path = _write_zarr(tmp_path / "input.zarr", times)
@@ -251,6 +263,7 @@ def test_time_stride_selects_every_nth_instant(tmp_path, time_stride, expected_s
     assert (times[-1] in expected) == (expected_steps == 1)
 
 
+@requires_dask
 def test_time_stride_composes_with_timestamp_range(tmp_path):
     times = _times(STRIDE_START, N_STRIDE_TIMES, "6h")
     path = _write_zarr(tmp_path / "input.zarr", times)
@@ -267,6 +280,7 @@ def test_time_stride_composes_with_timestamp_range(tmp_path):
     assert ds.time.values[0] == first
 
 
+@requires_dask
 def test_time_stride_none_keeps_every_timestep(tmp_path):
     times = _times(STRIDE_START, N_STRIDE_TIMES, "6h")
     path = _write_zarr(tmp_path / "input.zarr", times)
@@ -283,6 +297,7 @@ def test_time_stride_none_keeps_every_timestep(tmp_path):
         ("single-timestamp", "5D", "fewer than two"),
     ],
 )
+@requires_dask
 def test_time_stride_invalid_raises(tmp_path, cause, time_stride, match):
     times = _times(STRIDE_START, N_STRIDE_TIMES, "6h")
     if cause == "non-uniform":
@@ -346,6 +361,7 @@ def _strided_route_inputs(tmp_path):
     return atmos_path, ocean_path, times, steps, sic
 
 
+@requires_dask
 def test_strided_ocean_input_gives_5daily_coherent_fractions(tmp_path):
     atmos_path, ocean_path, times, steps, sic = _strided_route_inputs(tmp_path)
     atmos = CoupledInputDatasetConfig(
@@ -399,6 +415,7 @@ def _make_ensemble_config(tmp_path, run_names, exclude_runs):
     )
 
 
+@requires_dask
 def test_ensemble_stats_omit_excluded_runs(tmp_path):
     config = _make_ensemble_config(
         tmp_path, ["run-a", "run-excluded"], exclude_runs=["run-excluded"]
@@ -482,6 +499,7 @@ def _sea_surface_ensemble_config(tmp_path, coupled_ts):
     )
 
 
+@requires_dask
 def test_coupled_ts_without_sea_surface_adds_blended_atmosphere(tmp_path, monkeypatch):
     _sea_surface_ensemble_config(tmp_path, coupled_ts=None).write_coupled_datasets(
         debug=False, subsample=False
@@ -537,6 +555,7 @@ def _assert_no_nan(ds):
         assert not da.isnull().any(), f"{name} has NaN"
 
 
+@requires_dask
 def test_coupled_ts_without_sea_surface_computes_sea_ice_in_same_run(tmp_path):
     coupled_ts = CoupledSurfaceTemperatureConfig(how="interpolate_sst")
     fresh_dir = tmp_path / "fresh"
@@ -599,6 +618,7 @@ def test_random_co2_configs_write_blended_atmosphere(path):
         )
 
 
+@requires_dask
 def test_ensemble_flux_windows_follow_each_runs_ocean_times(tmp_path):
     """Runs starting on different dates share one surface_flux_window_avg; with
     no first_timestamp configured, each run's flux windows end on its own
@@ -657,6 +677,7 @@ def test_ensemble_flux_windows_follow_each_runs_ocean_times(tmp_path):
         xr.testing.assert_allclose(ocean_out["latent_heat_flux"], expected)
 
 
+@requires_dask
 def test_only_ocean_store_keeps_land_nan(tmp_path):
     """land: column LAND_LON (input sea_surface_fraction 0, sst and hfds NaN).
     lead: atmosphere steps before the first ocean step, left all-NaN."""
@@ -695,6 +716,7 @@ def test_only_ocean_store_keeps_land_nan(tmp_path):
     xr.testing.assert_allclose(atmos_ifrac.where(unmasked), ocean_held.where(unmasked))
 
 
+@requires_dask
 def test_resume_computes_atmosphere_from_existing_sea_ice_store(tmp_path, monkeypatch):
     config = _make_config(tmp_path, with_land=True)
     config.write_coupled_datasets(debug=False, subsample=False)
