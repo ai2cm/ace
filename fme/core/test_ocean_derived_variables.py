@@ -12,6 +12,7 @@ from fme.core.constants import (
 from fme.core.coordinates import DepthCoordinate, LatLonCoordinates
 from fme.core.ocean_data import OceanData
 from fme.core.ocean_derived_variables import (
+    HI,
     _compute_ocean_derived_variable,
     compute_ocean_derived_quantities,
     get_ocean_derived_variable_metadata,
@@ -368,4 +369,21 @@ def test_sea_ice_thickness_derived_variable(case):
         thickness_in_m,
         equal_nan=True,
         msg="Recovered sea ice thickness should match original",
+    )
+
+
+def test_HI_derived_from_ocean_sea_ice_thickness_mean():
+    data = {
+        "ocean_sea_ice_thickness_mean": torch.tensor([[1.5, 0.0, float("nan")]]),
+        "ocean_sea_ice_fraction": torch.tensor([[0.75, 0.0, float("nan")]]),
+    }
+    out = _compute_ocean_derived_variable(
+        data,
+        depth_coordinate=None,
+        timestep=TIMESTEP,
+        label="HI",
+        derived_variable_func=HI,
+    )
+    torch.testing.assert_close(
+        out["HI"], torch.tensor([[2.0, 0.0, float("nan")]]), equal_nan=True
     )
