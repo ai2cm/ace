@@ -650,16 +650,16 @@ class CoupledStepperConfig:
         ocean = self.ocean.stepper.get_prognostic_state_data_requirements()
         return CoupledPrognosticStateDataRequirements(
             ocean=PrognosticStateDataRequirements(
-                names=self.ocean_ic_names, n_timesteps=ocean.n_timesteps
+                names=self.ocean_state_names, n_timesteps=ocean.n_timesteps
             ),
             atmosphere=self.atmosphere.stepper.get_prognostic_state_data_requirements(),
         )
 
     @property
-    def ocean_ic_names(self) -> list[str]:
+    def ocean_state_names(self) -> list[str]:
         """Ocean variables carried in the coupled state between coupled steps:
-        the ocean's prognostic variables plus the SST, which the atmosphere
-        reads from the ocean state at every coupled step and which may be an
+        the ocean's prognostic names plus the SST, which the atmosphere reads
+        from the ocean state at every coupled step and which may be an
         output-only diagnostic of the ocean (then it is taken from the ocean's
         previous output, or from the data at the initial condition).
         """
@@ -1534,7 +1534,7 @@ class CoupledStepper:
                 )
         prognostic_state = CoupledPrognosticState(
             ocean_data=gen_data.ocean_data.get_end(
-                self._config.ocean_ic_names,
+                self._config.ocean_state_names,
                 self.ocean.n_ic_timesteps,
             ),
             atmosphere_data=gen_data.atmosphere_data.get_end(
@@ -2527,7 +2527,7 @@ class CoupledTrainStepper(
                 self.atmosphere.prognostic_names, self.n_ic_timesteps
             ),
             ocean_data=data_ensemble.ocean_data.get_start(
-                self._stepper.config.ocean_ic_names, self.n_ic_timesteps
+                self._stepper.config.ocean_state_names, self.n_ic_timesteps
             ),
         )
         output_generator = self._stepper.get_prediction_generator(
