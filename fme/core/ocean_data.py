@@ -344,14 +344,16 @@ class OceanData:
         the meaningful metrics, not the field itself.
 
         Raises:
+            KeyError: If potential temperature or salinity is missing, or a
+                level of either; raised before the depth coordinate is checked,
+                so ``compute_ocean_derived_quantities`` skips it.
             ValueError: If the depth coordinate is not a
                 ``HasOceanLayerGeometry``, or potential temperature or salinity
                 has more levels than it.
-            KeyError: If a level of potential temperature or salinity is
-                missing.
         """
-        geometry = self._layer_geometry("steric_sea_level_wright97")
-        C = column_density_integral(self.rho_wright97, geometry.dz)
+        geometry, thetao, so = self._wright97_profiles("steric_sea_level_wright97")
+        rho = density_anomaly(thetao, so, geometry.idepth, geometry.mask)
+        C = column_density_integral(rho, geometry.dz)
         mask_0 = geometry.mask.select(dim=-1, index=0).to(C.device)
         return torch.where(mask_0 > 0, -C / RHO_0, torch.nan)
 
