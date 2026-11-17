@@ -4,6 +4,7 @@ import math
 import pytest
 import torch
 
+from fme.core import get_device
 from fme.core.constants import (
     DENSITY_OF_SEA_WATER_CM4,
     REFERENCE_SALINITY,
@@ -507,6 +508,8 @@ def test_manometric_sea_level_wright97_skipped_on_healpix():
     data = {f"thetao_{k}": 20.0 - 3.0 * k * torch.rand(shape) for k in range(nz)}
     data.update({f"so_{k}": 34.0 + torch.rand(shape) for k in range(nz)})
     data["zos"] = 0.1 * torch.randn(shape)
+    # OceanDeriveFn moves the coordinates to get_device() but not the data.
+    data = {name: value.to(get_device()) for name, value in data.items()}
     depth_coordinate = DepthCoordinate(
         idepth=torch.tensor([0.0, 10.0, 30.0, 60.0]), mask=torch.ones(12, 2, 2, nz)
     )
