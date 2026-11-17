@@ -365,6 +365,15 @@ def mld_wright97(
     return data.mld_wright97
 
 
+@register(VariableMetadata("m", "Steric sea level of the static column, Wright (1997)"))
+def steric_sea_level_wright97(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Steric sea level of the static column, -C / RHO_0."""
+    return data.steric_sea_level_wright97
+
+
 @register(
     VariableMetadata("m", "Globally demeaned manometric sea level, Wright (1997)")
 )
