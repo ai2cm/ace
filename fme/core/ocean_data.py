@@ -19,10 +19,10 @@ from fme.core.ocean_eos import (
     DELTA_RHO_THRESHOLD,
     MLD_REF_LAYER,
     RHO_0,
-    _column_density_integral,
-    _density_anomaly,
-    _mixed_layer_depth,
-    _sea_floor_depth,
+    column_density_integral,
+    density_anomaly,
+    mixed_layer_depth,
+    sea_floor_depth,
 )
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
@@ -266,7 +266,7 @@ class OceanData:
     def mld_wright97(self) -> torch.Tensor:
         """Density-threshold mixed layer depth [m], positive down.
 
-        ``_mixed_layer_depth`` of ``fme.core.ocean_eos`` with
+        ``mixed_layer_depth`` of ``fme.core.ocean_eos`` with
         ``DELTA_RHO_THRESHOLD`` and ``MLD_REF_LAYER``: the depth where the
         Wright (1997) zero-pressure density first exceeds that of the reference
         layer by the threshold, else the sea floor depth (the depth
@@ -294,8 +294,8 @@ class OceanData:
             )
         idepth = geometry.idepth.to(thetao.dtype)
         mask = geometry.mask
-        deptho = _sea_floor_depth(idepth, mask, geometry.deptho)
-        mld = _mixed_layer_depth(
+        deptho = sea_floor_depth(idepth, mask, geometry.deptho)
+        mld = mixed_layer_depth(
             thetao, so, idepth, mask, deptho, DELTA_RHO_THRESHOLD, MLD_REF_LAYER
         )
         mask_0 = mask.select(dim=-1, index=0).expand(mld.shape)
@@ -320,7 +320,7 @@ class OceanData:
         """
         geometry = self._layer_geometry("rho_wright97")
         thetao, so = self._wright97_profiles(geometry)
-        return _density_anomaly(thetao, so, geometry.idepth, geometry.mask)
+        return density_anomaly(thetao, so, geometry.idepth, geometry.mask)
 
     @property
     def manometric_sea_level_wright97(self) -> torch.Tensor:
@@ -364,7 +364,7 @@ class OceanData:
                 "area_weights_m2, needed for the mean of manometric_sea_level_wright97"
             )
         zos = self.sea_surface_height_above_geoid
-        C = _column_density_integral(self.rho_wright97, geometry.dz)
+        C = column_density_integral(self.rho_wright97, geometry.dz)
         mask_0 = geometry.mask.select(dim=-1, index=0).to(C.device)
         wet = (mask_0 > 0) & zos.isfinite()
         eta = torch.where(wet, zos, 0.0) + C / RHO_0

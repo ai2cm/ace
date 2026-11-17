@@ -20,7 +20,7 @@ from fme.core.constants import DENSITY_OF_SEA_WATER_CM4, GRAVITY
 RHO_0 = DENSITY_OF_SEA_WATER_CM4  # [kg m-3]
 G_EARTH = GRAVITY  # [m s-2]
 
-# Density-threshold mixed layer depth defaults of ``OceanData.mld_wright97``.
+# Density-threshold mixed layer depth constants of ``OceanData.mld_wright97``.
 # Threshold and top-level reference as CM4's mlotst (MOM6 MLD_003).
 DELTA_RHO_THRESHOLD = 0.03  # [kg m-3]
 MLD_REF_LAYER = 0  # reference layer index, dimensionless
@@ -36,7 +36,7 @@ _C0, _C1, _C2, _C3, _C4, _C5 = (
 
 
 def wright97_anomaly(
-    S: torch.Tensor, theta: torch.Tensor, p: torch.Tensor, rho_ref: float = RHO_0
+    *, S: torch.Tensor, theta: torch.Tensor, p: torch.Tensor, rho_ref: float = RHO_0
 ) -> torch.Tensor:
     """In-situ density anomaly ``rho - rho_ref`` via Wright (1997).
 
@@ -76,7 +76,7 @@ def interface_to_center_depth(idepth: torch.Tensor) -> torch.Tensor:
     return 0.5 * (idepth[:-1] + idepth[1:])
 
 
-def _sea_floor_depth(
+def sea_floor_depth(
     idepth: torch.Tensor, mask: torch.Tensor, deptho: torch.Tensor | None
 ) -> torch.Tensor:
     """Sea floor depth [m]: ``deptho`` when given, else
@@ -87,7 +87,7 @@ def _sea_floor_depth(
     return (mask * idepth[1:]).max(dim=-1).values
 
 
-def _mixed_layer_depth(
+def mixed_layer_depth(
     thetao: torch.Tensor,
     so: torch.Tensor,
     idepth: torch.Tensor,
@@ -98,7 +98,7 @@ def _mixed_layer_depth(
 ) -> torch.Tensor:
     """Density-threshold mixed layer depth [m], positive down.
 
-    ``rho = wright97_anomaly(so, thetao, p=0)``; the MLD is where
+    ``rho = wright97_anomaly(S=so, theta=thetao, p=0)``; the MLD is where
     ``rho_k - rho_ref`` first exceeds ``delta_rho_threshold`` below
     ``ref_layer``, linearly interpolated between level centres, so
     ``center_depth[ref_layer] < MLD <= deptho``. ``deptho`` where it never
@@ -116,22 +116,9 @@ def _mixed_layer_depth(
     n_levels = thetao.shape[-1]
     if not 0 <= ref_layer < n_levels - 1:
         raise ValueError(f"ref_layer must be in [0, {n_levels - 2}], got {ref_layer}")
-    # NaN inputs (land, below the bottom) are replaced by finite values before
-    # the EOS and the interpolation so that the zero gradient torch.where passes
-    # to unselected entries is never multiplied by NaN; density_diff keeps its
-    # NaN there so the forward selection is unchanged.
-    finite = torch.isfinite(thetao) & torch.isfinite(so)
-    rho = wright97_anomaly(
-        torch.where(finite, so, torch.zeros_like(so)),
-        torch.where(finite, thetao, torch.zeros_like(thetao)),
-        torch.zeros_like(thetao),
-    )
-    rho = torch.where(finite, rho, torch.full_like(rho, float("nan")))
+    rho = wright97_anomaly(S=so, theta=thetao, p=torch.zeros_like(thetao))
     center_depth = interface_to_center_depth(idepth)
     density_diff = rho - rho[..., ref_layer : ref_layer + 1]
-    d_safe = torch.where(
-        torch.isfinite(density_diff), density_diff, torch.zeros_like(density_diff)
-    )
     mask = mask.expand(density_diff.shape)
     mld = torch.full_like(density_diff[..., 0], float("nan"))
     not_yet_crossed = torch.ones_like(mld, dtype=torch.bool)
@@ -141,28 +128,18 @@ def _mixed_layer_depth(
             & not_yet_crossed
             & (mask[..., k] > 0)
         )
-        if k == ref_layer + 1:
-            dprev = torch.zeros_like(density_diff[..., k])
-            dprev_safe = dprev
-        else:
-            dprev = density_diff[..., k - 1]
-            dprev_safe = d_safe[..., k - 1]
-        zprev = center_depth[ref_layer] if k == ref_layer + 1 else center_depth[k - 1]
-        denom = d_safe[..., k] - dprev_safe + 1e-8
-        denom = torch.where(crossed_here, denom, torch.ones_like(denom))
-        frac = (delta_rho_threshold - dprev_safe) / denom
-        value = zprev + frac * (center_depth[k] - zprev)
-        value = torch.where(
-            torch.isfinite(dprev), value, torch.full_like(value, float("nan"))
-        )
+        dprev = density_diff[..., k - 1]
+        frac = (delta_rho_threshold - dprev) / (density_diff[..., k] - dprev)
+        value = center_depth[k - 1] + frac * (center_depth[k] - center_depth[k - 1])
         mld = torch.where(crossed_here, value, mld)
         not_yet_crossed = not_yet_crossed & ~crossed_here
     mld = torch.where(not_yet_crossed, deptho.expand(mld.shape), mld)
+    finite = torch.isfinite(thetao) & torch.isfinite(so)
     wet_inputs_finite = (finite | (mask == 0)).all(dim=-1)
     return torch.where(wet_inputs_finite, mld, torch.full_like(mld, float("nan")))
 
 
-def _density_anomaly(
+def density_anomaly(
     thetao: torch.Tensor,
     so: torch.Tensor,
     idepth: torch.Tensor,
@@ -183,10 +160,10 @@ def _density_anomaly(
     p = boussinesq_pressure(interface_to_center_depth(idepth.to(torch.float64)))
     p = p.to(dtype=thetao.dtype, device=thetao.device)
     valid = (mask.to(thetao.device) > 0) & thetao.isfinite() & so.isfinite()
-    return torch.where(valid, wright97_anomaly(so, thetao, p), torch.nan)
+    return torch.where(valid, wright97_anomaly(S=so, theta=thetao, p=p), torch.nan)
 
 
-def _column_density_integral(rho: torch.Tensor, dz: torch.Tensor) -> torch.Tensor:
+def column_density_integral(rho: torch.Tensor, dz: torch.Tensor) -> torch.Tensor:
     """``C = sum_k rho_k * dz_k`` [kg m-2] over the last dim, NaN ``rho_k``
     contributing 0.
     """
