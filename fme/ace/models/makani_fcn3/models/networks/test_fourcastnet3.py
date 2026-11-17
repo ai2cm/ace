@@ -3,8 +3,9 @@ from unittest import mock
 
 import pytest
 import torch
-import torch_harmonics as th
+import torch_harmonics
 
+import fme.core.sht as th
 from fme.ace.models.makani_fcn3.models.networks import fourcastnet3
 from fme.ace.models.makani_fcn3.models.networks.fourcastnet3 import (
     AtmoSphericNeuralOperatorNet,
@@ -143,7 +144,7 @@ def test_matches_torch_harmonics_disco_convolution():
     torch.manual_seed(0)
     net = _get_small_net()
     with mock.patch.object(
-        fourcastnet3, "DiscreteContinuousConvS2", th.DiscreteContinuousConvS2
+        fourcastnet3, "DiscreteContinuousConvS2", torch_harmonics.DiscreteContinuousConvS2
     ):
         ref_net = _get_small_net()
     assert net.state_dict().keys() == ref_net.state_dict().keys()

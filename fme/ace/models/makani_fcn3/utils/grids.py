@@ -14,7 +14,7 @@
 # limitations under the License.
 
 import torch
-from torch_harmonics.quadrature import clenshaw_curtiss_weights, legendre_gauss_weights
+from fme.core.sht import clenshaw_curtiss_weights, legendre_gauss_weights
 
 from fme.ace.models.makani_fcn3.utils import comm
 from fme.ace.models.makani_fcn3.utils.distributed import dist

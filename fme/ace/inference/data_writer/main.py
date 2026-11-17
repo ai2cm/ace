@@ -144,6 +144,11 @@ class DataWriterConfig:
         dataset_metadata: DatasetMetadata,
     ) -> "PairedDataWriter":
         dist = Distributed.get_instance()
+        if self._needs_gather:
+            dist.require_no_spatial_parallelism(
+                "Gathered (netCDF) data writers are not supported under "
+                "spatial parallelism. Use zarr file writers instead."
+            )
         is_multi_gpu = dist.total_data_parallel_ranks > 1
         is_root = dist.is_data_parallel_root()
         build_subwriters = not is_multi_gpu or is_root
@@ -269,6 +274,11 @@ class DataWriterConfig:
         dataset_metadata: DatasetMetadata,
     ) -> "DataWriter":
         dist = Distributed.get_instance()
+        if self._needs_gather:
+            dist.require_no_spatial_parallelism(
+                "Gathered (netCDF) data writers are not supported under "
+                "spatial parallelism. Use zarr file writers instead."
+            )
         is_multi_gpu = dist.total_data_parallel_ranks > 1
         is_root = dist.is_data_parallel_root()
         local_ic_times = initial_condition_times

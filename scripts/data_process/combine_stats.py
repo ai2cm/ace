@@ -9,6 +9,7 @@ import dacite
 import fsspec
 import xarray as xr
 import yaml
+from fs_utils import load_netcdf
 
 
 def copy(source: str, destination: str):
@@ -59,12 +60,7 @@ def _make_history_string(config_filename: str, stats_output_dir: str):
 
 
 def open_datasets(roots: List[str], filename: str) -> List[xr.Dataset]:
-    datasets = []
-    for root in roots:
-        with fsspec.open(root + filename) as file:
-            ds = xr.open_dataset(file, decode_timedelta=False).load()
-        datasets.append(ds)
-    return datasets
+    return [load_netcdf(root + filename) for root in roots]
 
 
 def _combined_stats_exist(output_directory: str, subdirectory: str) -> bool:
