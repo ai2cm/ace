@@ -93,31 +93,6 @@ def histogram(
     return return_counts
 
 
-def _rebin_counts(counts, bin_edges, new_edges):
-    """
-    Rebin histogram counts into new_edges, preserves total counts.
-    """
-    if len(bin_edges) != len(counts) + 1:
-        raise ValueError("bin_edges must have length len(counts) + 1")
-    new_counts = np.zeros(len(new_edges) - 1, dtype=float)
-
-    i, j = 0, 0
-    while i < len(counts) and j < len(new_counts):
-        left = max(bin_edges[i], new_edges[j])
-        right = min(bin_edges[i + 1], new_edges[j + 1])
-
-        if right > left:
-            frac = (right - left) / (bin_edges[i + 1] - bin_edges[i])
-            new_counts[j] += counts[i] * frac
-
-        if bin_edges[i + 1] <= new_edges[j + 1]:
-            i += 1
-        else:
-            j += 1
-
-    return new_counts
-
-
 class DynamicHistogram:
     """
     A histogram that dynamically bins values into a fixed number of bins
@@ -417,7 +392,7 @@ class ComparedDynamicHistograms:
         return return_dict
 
     def _plot_histogram(
-        self, target_histogram: _Histogram | None, prediction_histogram
+        self, target_histogram: _Histogram, prediction_histogram: _Histogram
     ) -> matplotlib.figure.Figure:
         fig, ax = plt.subplots()
         for histogram, label, line_style, color in zip(
@@ -429,15 +404,14 @@ class ComparedDynamicHistograms:
             normalized_counts = _normalize_histogram(
                 histogram.counts, histogram.bin_edges
             )
-            if histogram is not None:
-                ax.step(
-                    histogram.bin_edges[:-1],
-                    normalized_counts,
-                    line_style,
-                    where="post",
-                    label=label,
-                    color=color,
-                )
+            ax.step(
+                histogram.bin_edges[:-1],
+                normalized_counts,
+                line_style,
+                where="post",
+                label=label,
+                color=color,
+            )
         ax.set(yscale="log")
         ax.legend()
         plt.tight_layout()
@@ -449,25 +423,23 @@ class ComparedDynamicHistograms:
         return_dict: dict[str, matplotlib.figure.Figure | float] = {}
 
         for field_name, histograms in self._get_histograms().items():
-            target = histograms.get("target")
-            prediction = histograms.get("prediction")
+            target = histograms["target"]
+            prediction = histograms["prediction"]
             fig = self._plot_histogram(target, prediction)
             return_dict[field_name] = fig
             plt.close(fig)
             emit_percentiles = (
                 percentile_variables is None or field_name in percentile_variables
             )
-            if emit_percentiles and target is not None:
+            if emit_percentiles:
                 for p in self.percentiles:
                     return_dict[f"target/{p}th-percentile/{field_name}"] = quantile(
                         target.bin_edges, target.counts, p / 100.0
                     )
-            if emit_percentiles and prediction is not None:
-                for p in self.percentiles:
                     return_dict[f"prediction/{p}th-percentile/{field_name}"] = quantile(
                         prediction.bin_edges, prediction.counts, p / 100.0
                     )
-                    if self._compute_percentile_frac and target is not None:
+                    if self._compute_percentile_frac:
                         return_dict[
                             f"prediction_frac_of_target/{p}th-percentile/{field_name}"
                         ] = (
@@ -575,20 +547,20 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
         target_metrics: dict[str, float] = {}
 
         for field_name, histograms in self._get_histograms().items():
-            target = histograms.get("target")
-            prediction = histograms.get("prediction")
+            target = histograms["target"]
+            prediction = histograms["prediction"]
             fig = self._plot_histogram(target, prediction)
             return_metrics[field_name] = fig
             plt.close(fig)
             emit_percentiles = (
                 percentile_variables is None or field_name in percentile_variables
             )
-            if emit_percentiles and prediction is not None:
+            if emit_percentiles:
                 return_metrics.update(
                     self._get_percentile_metrics_for_field(prediction, field_name)
                 )
 
-                if self._compute_percentile_frac and target is not None:
+                if self._compute_percentile_frac:
                     target_metrics.update(
                         self._get_percentile_metrics_for_field(
                             target,
