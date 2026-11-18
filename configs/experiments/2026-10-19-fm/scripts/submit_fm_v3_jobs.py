@@ -45,13 +45,29 @@ unless --resubmit.
 
 Usage:
     python submit_fm_v3_jobs.py [--dry-run] [--only NAME ...] [--smoke]
-                                [--resubmit]
+                                [--resubmit] [--resume-from EXPERIMENT]
 
 --only takes job names (ace2-fm-nc-sfno-v3-...) or their unique substrings
 (e.g. c1-cellloss-s0). --smoke selects from the smoke tests (c2-cellloss,
 the main one, and c3-cellloss) instead of the 18 runs. --dry-run
 prints each gantry command and the request the shim would send (gantry run
 --dry-run), and submits nothing.
+
+--resume-from EXPERIMENT (an experiment name or its directory under
+AGENT_OUTPUT_ROOT; one run only; implies --resubmit) continues a run that a
+previous job of a different experiment name trained: a new experiment name
+means a new, empty $AGENT_OUTPUT_DIR, where fme would start again from epoch
+0 under a new wandb run. Before training, the job's wrapper copies the
+source directory (training_checkpoints with ckpt.tar, best and EMA
+checkpoints, wandb_run_id, metrics, logs) into its own $AGENT_OUTPUT_DIR,
+reading the source only, and marks the copy complete with
+$AGENT_OUTPUT_DIR/resume_copy_complete. fme then resumes from
+$AGENT_OUTPUT_DIR/training_checkpoints/ckpt.tar and resumes the wandb run in
+wandb_run_id, as after a preemption. A retry of the job finds the marker
+and does not copy again (the copy finishes before training starts, so an
+interrupted copy is redone in full). This is what fme's resume_results
+does, but done in bash with a completion marker, since fme skips its copy
+whenever training_checkpoints exists, even half-copied.
 """
 
 import argparse
@@ -93,10 +109,29 @@ WANDB_USERNAME = "yyexela"
 WANDB_SECRET = "WANDB_API_KEY=wandb-api-key-ai2cm-sa"
 WEKA = "climate-default:/climate-default"
 AGENT_OUTPUT_ROOT = "/climate-default/agents/alexeyy"
-# $1 is the run config. Fails fast if the proxy did not set AGENT_OUTPUT_DIR.
+RESUME_MARKER = "resume_copy_complete"
+# $1 is the run config, $2 (optional) the experiment directory to resume from
+# (see --resume-from). Fails fast if the proxy did not set AGENT_OUTPUT_DIR.
+# The copy only reads $2 and writes only inside $AGENT_OUTPUT_DIR.
 LAUNCH_SCRIPT = (
     'set -eu; : "${AGENT_OUTPUT_DIR:?AGENT_OUTPUT_DIR is not set}"; '
     'mkdir -p "$AGENT_OUTPUT_DIR"; '
+    'src="${2:-}"; '
+    f'marker="$AGENT_OUTPUT_DIR/{RESUME_MARKER}"; '
+    'if [ -n "$src" ] && [ -e "$marker" ]; then '
+    'echo "Resume copy from $(cat "$marker") already complete"; '
+    'elif [ -n "$src" ]; then '
+    'case "$src" in "$AGENT_OUTPUT_DIR"|"$AGENT_OUTPUT_DIR"/*) '
+    'echo "resume source $src is inside AGENT_OUTPUT_DIR" >&2; exit 1;; esac; '
+    "for f in training_checkpoints/ckpt.tar wandb_run_id; do "
+    '[ -f "$src/$f" ] || { echo "missing $src/$f" >&2; exit 1; }; done; '
+    'echo "Copying $src to $AGENT_OUTPUT_DIR to resume from it"; '
+    # Default modes, not the source's: the source may be read-only.
+    'cp -R --preserve=timestamps --no-preserve=mode "$src/." "$AGENT_OUTPUT_DIR/"; '
+    'rm -f "$AGENT_OUTPUT_DIR"/training_checkpoints/.*.tmp; '
+    'echo "$src" > "$marker"; '
+    'echo "Copied; wandb_run_id $(cat "$AGENT_OUTPUT_DIR/wandb_run_id")"; '
+    "fi; "
     f"exec torchrun --nproc_per_node {N_GPUS} -m fme.ace.train "
     '"$1" --override "experiment_dir=$AGENT_OUTPUT_DIR"'
 )
@@ -114,7 +149,9 @@ def image() -> str:
     return (REPO_ROOT / "latest_deps_only_image.txt").read_text().strip()
 
 
-def gantry_command(run: Run, dry_run: bool) -> list[str]:
+def gantry_command(
+    run: Run, dry_run: bool, resume_from: str | None = None
+) -> list[str]:
     config = run.path.relative_to(REPO_ROOT)
     cmd = [GANTRY, "run", "--branch", BRANCH]
     cmd += ["--name", run.job_name, "--task-name", run.job_name]
@@ -142,7 +179,22 @@ def gantry_command(run: Run, dry_run: bool) -> list[str]:
     if dry_run:
         cmd += ["--dry-run"]
     cmd += ["--", "bash", "-c", LAUNCH_SCRIPT, "fme-train", str(config)]
+    if resume_from is not None:
+        cmd += [resume_from]
     return cmd
+
+
+def resume_dir(experiment_or_dir: str) -> str:
+    """The experiment directory to resume from, given its experiment name or
+    its directory under AGENT_OUTPUT_ROOT.
+    """
+    name = experiment_or_dir.rstrip("/").removeprefix(AGENT_OUTPUT_ROOT + "/")
+    if not name.startswith(EXPERIMENT_PREFIX) or "/" in name:
+        raise SystemExit(
+            f"--resume-from {experiment_or_dir!r}: expected an experiment name "
+            f"{EXPERIMENT_PREFIX}... or {AGENT_OUTPUT_ROOT}/<experiment name>"
+        )
+    return f"{AGENT_OUTPUT_ROOT}/{name}"
 
 
 def output_paths(experiment: str) -> dict[str, str]:
@@ -209,9 +261,24 @@ def main() -> None:
         action="store_true",
         help="Submit even jobs already recorded in records/fm_v3_jobs.json.",
     )
+    parser.add_argument(
+        "--resume-from",
+        metavar="EXPERIMENT",
+        help=(
+            "Copy this experiment's directory into the new job's "
+            "$AGENT_OUTPUT_DIR before training, to resume its checkpoint and "
+            "wandb run. One run only; implies --resubmit."
+        ),
+    )
     args = parser.parse_args()
 
     selected = select(smoke_runs() if args.smoke else runs(), args.only)
+    resume_from = None
+    if args.resume_from is not None:
+        if len(selected) != 1:
+            raise SystemExit("--resume-from needs exactly one run (use --only)")
+        resume_from = resume_dir(args.resume_from)
+        args.resubmit = True
     record = read_record()
     pending = []
     for run in selected:
@@ -223,7 +290,7 @@ def main() -> None:
     if not args.dry_run:
         check_configs_at_head([run.path for run in pending])
     for run in pending:
-        cmd = gantry_command(run, args.dry_run)
+        cmd = gantry_command(run, args.dry_run, resume_from)
         print("Submitting:", subprocess.list2cmdline(cmd), flush=True)
         proc = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True)
         sys.stdout.write(proc.stdout)
@@ -237,8 +304,19 @@ def main() -> None:
             raise SystemExit(f"could not parse the gantry output for {run.job_name}")
         assert match["name"].startswith(EXPERIMENT_PREFIX + run.job_name), match
         record = read_record()
-        record.setdefault(run.job_name, {})
-        previous = record[run.job_name].get("experiment")
+        previous_entry = record.get(run.job_name, {})
+        previous = previous_entry.get("experiment")
+        # Every earlier job of this run, oldest first.
+        superseded = list(previous_entry.get("superseded", []))
+        if not superseded and "replaces" in previous_entry:
+            superseded.append(
+                {
+                    "experiment": previous_entry["replaces"],
+                    "id": previous_entry.get("replaces_id"),
+                }
+            )
+        if previous:
+            superseded.append({"experiment": previous, "id": previous_entry["id"]})
         record[run.job_name] = {
             "experiment": match["name"],
             "id": match["id"],
@@ -249,6 +327,9 @@ def main() -> None:
             "config": str(run.path.relative_to(EXP_DIR)),
             **output_paths(match["name"]),
             **({"replaces": previous} if previous else {}),
+            **({"replaces_id": previous_entry["id"]} if previous else {}),
+            **({"superseded": superseded} if superseded else {}),
+            **({"resumed_from": resume_from} if resume_from else {}),
         }
         write_record(record)
     if pending and not args.dry_run:
