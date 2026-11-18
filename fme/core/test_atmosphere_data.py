@@ -1,3 +1,5 @@
+import datetime
+
 import pytest
 import torch
 
@@ -7,6 +9,9 @@ from fme.core.atmosphere_data import (
     compute_layer_thickness,
 )
 from fme.core.constants import LATENT_HEAT_OF_FREEZING, LATENT_HEAT_OF_VAPORIZATION
+from fme.core.coordinates import HybridSigmaPressureCoordinate
+from fme.core.derived_variables import compute_derived_quantities
+from fme.core.humidity import saturation_specific_humidity
 
 
 def test_compute_layer_thickness():
@@ -311,3 +316,48 @@ def test_windspeed_at_10m():
     expected = torch.sqrt(torch.full(shape, 5))
     result = atmosphere_data.windspeed_at_10m
     torch.testing.assert_close(result, expected)
+
+
+def test_specific_total_water_reconstructed_from_relative_humidity():
+    torch.manual_seed(0)
+    n_levels = 3
+    vertical_coordinate = HybridSigmaPressureCoordinate(
+        ak=torch.tensor([0.0, 5000.0, 10000.0, 0.0]),
+        bk=torch.tensor([0.0, 0.1, 0.5, 1.0]),
+    )
+    shape = (2, 4, 3, 5)
+    surface_pressure = 9.0e4 + 1.0e4 * torch.rand(shape)
+    temperature = {
+        f"air_temperature_{k}": 220.0 + 30.0 * k + 10.0 * torch.rand(shape)
+        for k in range(n_levels)
+    }
+    q = {
+        f"specific_total_water_{k}": 1e-3 * (k + 1) * torch.rand(shape)
+        for k in range(n_levels)
+    }
+    q_data = {"PRESsfc": surface_pressure, **temperature, **q}
+    interface = vertical_coordinate.interface_pressure(surface_pressure)
+    layer = 0.5 * (interface[..., :-1] + interface[..., 1:])
+    rh = {
+        f"relative_humidity_{k}": q[f"specific_total_water_{k}"]
+        / saturation_specific_humidity(
+            temperature[f"air_temperature_{k}"], layer[..., k]
+        )
+        for k in range(n_levels)
+    }
+    rh_data = {"PRESsfc": surface_pressure, **temperature, **rh}
+    expected = AtmosphereData(q_data, vertical_coordinate)
+    reconstructed = AtmosphereData(rh_data, vertical_coordinate)
+    torch.testing.assert_close(
+        reconstructed.specific_total_water, expected.specific_total_water
+    )
+    torch.testing.assert_close(
+        reconstructed.total_water_path, expected.total_water_path
+    )
+    derived = compute_derived_quantities(
+        rh_data, vertical_coordinate, datetime.timedelta(days=1)
+    )
+    torch.testing.assert_close(derived["total_water_path"], expected.total_water_path)
+    # no vertical coordinate: q cannot be reconstructed, reported as missing
+    with pytest.raises(KeyError):
+        AtmosphereData(rh_data).specific_total_water

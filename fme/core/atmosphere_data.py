@@ -12,11 +12,13 @@ from fme.core.constants import (
     SPECIFIC_HEAT_OF_DRY_AIR_CONST_PRESSURE,
     SPECIFIC_HEAT_OF_DRY_AIR_CONST_VOLUME,
 )
+from fme.core.humidity import saturation_specific_humidity
 from fme.core.stacker import Stacker
 from fme.core.typing_ import TensorDict, TensorMapping
 
 ATMOSPHERE_FIELD_NAME_PREFIXES = {
     "specific_total_water": ["specific_total_water_", "STW_"],
+    "relative_humidity": ["relative_humidity_"],
     "surface_pressure": ["PRESsfc", "PS"],
     "surface_height": ["HGTsfc"],
     "surface_geopotential": ["PHIS"],
@@ -150,7 +152,45 @@ class AtmosphereData:
         """Returns all vertical levels of specific total water, e.g. a tensor of
         shape `(..., vertical_level)`.
         """
-        return self._stacker("specific_total_water", self.data)
+        try:
+            return self._stacker("specific_total_water", self.data)
+        except KeyError:
+            return self._specific_total_water_from_relative_humidity()
+
+    def _specific_total_water_from_relative_humidity(self) -> torch.Tensor:
+        """Reconstruct specific total water from ``relative_humidity_<k>`` as
+        ``relative_humidity * q_sat(air_temperature, layer-mean pressure)``, the
+        inverse of the data loader's relative humidity derivation
+        (``fme.core.dataset.relative_humidity``).
+
+        Raises KeyError if relative humidity, air temperature, surface pressure
+        or the vertical coordinate is unavailable, so derived variables that
+        need specific total water are skipped as when it is missing.
+        """
+        relative_humidity = self._stacker("relative_humidity", self.data)
+        air_temperature = self.air_temperature
+        if self._vertical_coordinate is None:
+            raise KeyError("vertical_coordinate")
+        interface_pressure = self._vertical_coordinate.interface_pressure(
+            self.surface_pressure
+        )
+        layer_pressure = 0.5 * (
+            interface_pressure[..., :-1] + interface_pressure[..., 1:]
+        )
+        if not (
+            relative_humidity.shape[-1]
+            == air_temperature.shape[-1]
+            == layer_pressure.shape[-1]
+        ):
+            raise ValueError(
+                "Reconstructing specific total water from relative humidity "
+                "requires relative humidity and air temperature on every layer "
+                f"of the vertical coordinate, got {relative_humidity.shape[-1]} "
+                f"and {air_temperature.shape[-1]} levels for "
+                f"{layer_pressure.shape[-1]} layers."
+            )
+        q_sat = saturation_specific_humidity(air_temperature, layer_pressure)
+        return (relative_humidity * q_sat).to(relative_humidity.dtype)
 
     @property
     def surface_height(self) -> torch.Tensor:
