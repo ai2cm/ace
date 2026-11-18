@@ -59,6 +59,11 @@ class HasOceanDepthIntegral(Protocol):
         integrand: torch.Tensor,
     ) -> torch.Tensor: ...
 
+    @property
+    def mask(self) -> torch.Tensor:
+        """Per-level validity; the last dimension is the vertical."""
+        ...
+
 
 @runtime_checkable
 class HasOceanLayerGeometry(Protocol):
