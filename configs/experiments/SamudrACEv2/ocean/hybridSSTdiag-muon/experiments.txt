@@ -27,3 +27,5 @@ SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr30e-4|01M7PQG9A2D98WRV8NSWSCRENC|train
 SamudrACEv2-hybridSSTdiag-muon|mse-null-lr10e-4|01M7PQGMMRMMDYKV4R96G1AHAQ|training|best_inference_ckpt|normal|--min-runtime 8h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-null-lr15e-4|01M7PQH0JZ6SQB944YGS43X8JH|training|best_inference_ckpt|normal|--min-runtime 8h
+
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr20e-4|01M7PQHBQSC63KX7909P20E6G7|training|best_inference_ckpt|normal|--min-runtime 8h
