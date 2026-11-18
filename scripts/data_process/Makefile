@@ -387,6 +387,7 @@ CONFIG_CM4_LIKE_AM4_RANDCO2_COUPLED = configs/CM4-like-AM4-random-CO2-ensemble-c
 CONFIG_CM4_LIKE_AM4_RANDCO2_COUPLED_4DEG = configs/CM4-like-AM4-random-CO2-ensemble-coupled-4deg.yaml
 CONFIG_CM4_ABRUPT_4XCO2_COUPLED = configs/CM4-abrupt-4xCO2-ensemble-coupled-$(RESOLUTION).yaml
 CONFIG_CM4_ABRUPT_4XCO2_COUPLED_1DAILY = configs/CM4-abrupt-4xCO2-ensemble-coupled-$(RESOLUTION)-1daily.yaml
+CONFIG_CM4_CMIP6_ABRUPT_4XCO2_IC_COUPLED = configs/CM4-CMIP6-abrupt-4xCO2-initial-condition-coupled-$(RESOLUTION)-1daily.yaml
 
 .PHONY: cm4_piControl_coupled
 cm4_piControl_coupled:
@@ -469,6 +470,22 @@ cm4_abrupt_4xCO2_ensemble_coupled_1daily:
 .PHONY: cm4_abrupt_4xCO2_ensemble_coupled_1daily_argo
 cm4_abrupt_4xCO2_ensemble_coupled_1daily_argo:
 	./create_coupled_datasets.sh --config $(CONFIG_CM4_ABRUPT_4XCO2_COUPLED_1DAILY) --image $(COUPLED_PROCESSING_IMAGE):$(COUPLED_PROCESSING_IMAGE_VERSION)
+
+.PHONY: cm4_cmip6_abrupt_4xCO2_initial_condition_atmosphere
+cm4_cmip6_abrupt_4xCO2_initial_condition_atmosphere:
+	./compute_dataset.sh --dataset --stats --config configs/CM4-CMIP6-abrupt-4xCO2-initial-condition-atmosphere-$(RESOLUTION)-8layer-2day.yaml
+
+.PHONY: cm4_cmip6_abrupt_4xCO2_initial_condition_ocean_stats
+cm4_cmip6_abrupt_4xCO2_initial_condition_ocean_stats:
+	./compute_stats.sh --config configs/CM4-CMIP6-abrupt-4xCO2-initial-condition-ocean-$(RESOLUTION)-1daily.yaml
+
+.PHONY: cm4_cmip6_abrupt_4xCO2_initial_condition_coupled
+cm4_cmip6_abrupt_4xCO2_initial_condition_coupled:
+	conda run --no-capture-output -n create_coupled_datasets python ./create_coupled_datasets.py --yaml $(CONFIG_CM4_CMIP6_ABRUPT_4XCO2_IC_COUPLED)
+
+.PHONY: cm4_cmip6_abrupt_4xCO2_initial_condition_coupled_argo
+cm4_cmip6_abrupt_4xCO2_initial_condition_coupled_argo:
+	./create_coupled_datasets.sh --config $(CONFIG_CM4_CMIP6_ABRUPT_4XCO2_IC_COUPLED) --image $(COUPLED_PROCESSING_IMAGE):$(COUPLED_PROCESSING_IMAGE_VERSION)
 
 .PHONY: shield_amip_constant_co2_c96_dataset
 shield_amip_constant_co2_c96_dataset:

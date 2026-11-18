@@ -1,8 +1,5 @@
 FROM continuumio/miniconda3:24.1.2-0
 
-RUN apt-get update && \
-    apt-get install -y apt-transport-https ca-certificates gnupg curl
-
 # Solve strictly from conda-forge: mixing the defaults base channel with
 # -c conda-forge can drop the env-local OpenMP runtime (libgomp) that
 # conda-forge's esmf links against, leaving libgomp.so.1 unresolvable.
