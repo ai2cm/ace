@@ -1,8 +1,8 @@
 """Generate the 2026-11-18 FM v3 per-grid-cell normalization runs (wandb group
 ace2-fm-sfno-v3-2026-11-18).
 
-12 runs ace2-fm-nc-sfno-v3-fm-e3sm-balanced-{c1,c2}-{scalarloss,cellloss}-
-s{0,1,2}-maskoff: 2 network normalizations x 2 loss normalizations x 3 seeds,
+18 runs ace2-fm-nc-sfno-v3-fm-e3sm-balanced-{c1,c2,c3}-{scalarloss,cellloss}-
+s{0,1,2}-maskoff: 3 network normalizations x 2 loss normalizations x 3 seeds,
 each derived from the v2 `fm-e3sm-balanced` maskoff SFNO run config of the same
 seed (create_fm_v2_jobs.py, run_configs/ace-train-config-4deg-nc-sfno-v2-
 fm-e3sm-balanced-s{seed}-maskoff.yaml; the "parent"). Everything not listed
@@ -63,6 +63,36 @@ Changes from the parent:
      are scored in per-cell tendency-std units, diagnostics in per-cell
      full-field units; pooled, not grouped, in both c1 and c2.
 
+   - Network, `c3`: per-cell normalization grouped per config. The pooled
+     block as c1/c2, plus `grouped` with one per-cell group per C3 label from
+     STATS_DIR_C3/groups/<label>/ (--stats-dir-c3; its timestep-pooled root
+     files are not used), default_label era5, the parent's pinned_variables.
+     Labels drive both grouping and conditioning, so the datasets are
+     relabelled (loss blocks as for c1/c2):
+       c96 -> amip    (2026-01-28-...-c96-...-shield-amip-ensemble-dataset:
+                       ic_0001, ic_0002 x 2 year splits; 4 entries)
+              ramped  (2026-06-08-...-ramped-climSST-random-CO2-...: 6)
+              som     (2026-06-08-...-c96-shield-som-ensemble-...: 14)
+       cm4 -> cm4-picontrol (2025-03-21-CM4-piControl-...: 1)
+              cm4-1pctco2   (2025-06-18-CM4-1pctCO2-...: 1)
+              am4-randco2   (2026-10-11-CM4-like-AM4-random-CO2-...: 9)
+       era5, xshield, e3sm unchanged (2, 1, 1 entries).
+     The assignment is by data_path and matches the C3 stats config
+     (scripts/data_process/configs/fm-v3-e3sm-balanced-percell-c3-stats.yaml)
+     entry for entry (validate_fm_v3_configs.py checks). val_c96 (C96 AMIP
+     ic_0001) is labelled amip; the inline inference datasets are ERA5.
+     label_sampling keeps each source's 0.2 and splits c96 and cm4 across
+     their labels in proportion to training timesteps (C3_TIMESTEPS: amip
+     21186, ramped 10968, som 51142; cm4-picontrol 73000, cm4-1pctco2 51100,
+     am4-randco2 17253): amip 0.050869, ramped 0.026335, som 0.122796,
+     cm4-picontrol 0.103288, cm4-1pctco2 0.072301, am4-randco2 0.024411.
+     Within a label the sampler draws uniformly over its samples (time_buffer
+     windows, one per 9 timesteps of the concatenated dataset), so c1/c2 draw
+     each sub-source in proportion to its windows only in expectation (the
+     split varies per epoch); c3 fixes it at the timestep proportions, which
+     differ from the window proportions by the few windows lost at entry
+     boundaries.
+
 3. Seeds 0, 1, 2 (submit_fm_v3_jobs.py: s0 at Beaker priority high, s1/s2
    normal).
 
@@ -88,7 +118,9 @@ with the LR cooldown, validation, inline inference and checkpointing:
 - samples_per_epoch 256 (288 iterations per epoch: 64 windows per rank x 9 /
   2), the smallest that fills each rank's time_buffer_pool_size 32 pool.
 - log_train_every_n_batches 20.
-- Validation subsets end on 03-31 of each year (1994, 2014).
+- Validation is as in the real runs (full years 1994, 2014): with
+  time_buffer 16 and 8 samples per rank per batch, shorter subsets leave the
+  validation loaders with no batches (the first smoke job failed so).
 - Inline inference every epoch: aimip_checkpoint_era5 (weight 1) with 100
   forward steps (1825 in the real runs) and weather_2020_era5 (weight 0); the
   10yr/46yr and weather_1950 entries are dropped.
@@ -100,6 +132,7 @@ Usage:
 
 import argparse
 import copy
+import datetime
 import math
 import pathlib
 from dataclasses import dataclass
@@ -141,12 +174,79 @@ PARENT_ARCH = "nc-sfno-v2"
 ARCH = "nc-sfno-v3"
 ARM = "fm-e3sm-balanced"
 V2_DIR = STATS_ROOTS[ARM]
-NETWORKS = ("c1", "c2")
+NETWORKS = ("c1", "c2", "c3")
 LOSSES = ("scalarloss", "cellloss")
 GROUP_LABELS = ("c96", "era5", "cm4", "xshield", "e3sm")
 PARENT_GROUP_DIRS = {label: label for label in GROUP_LABELS} | {"e3sm": "e3sm-filled"}
 DEFAULT_LABEL = "era5"
 NETWORK_MIN_STD_FRACTION = 0.01  # NormalizationConfig's default
+
+# C3: per-config groups (see the module docstring). Only STATS_DIR_C3/groups/
+# is used; its root files are timestep-pooled and are not read.
+STATS_DIR_C3 = (
+    "/climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-c3-stats-legy/"
+    "2026-11-18-fm-v3-e3sm-balanced-percell-c3"
+)
+# Parent label -> {last data_path component: C3 label}; other labels keep
+# their name.
+C3_SPLITS = {
+    "c96": {
+        "2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset": (
+            "amip"
+        ),
+        "2026-06-08-vertically-resolved-c96-shield-ramped-climSST-random-CO2-"
+        "ensemble-fme-dataset-4deg-daily": "ramped",
+        "2026-06-08-vertically-resolved-4deg-daily-c96-shield-som-ensemble-"
+        "fme-dataset": "som",
+    },
+    "cm4": {
+        "2025-03-21-CM4-piControl-atmosphere-land-4deg-8layer-200yr-daily": (
+            "cm4-picontrol"
+        ),
+        "2025-06-18-CM4-1pctCO2-atmosphere-land-4deg-8layer-140yr-daily": (
+            "cm4-1pctco2"
+        ),
+        "2026-10-11-CM4-like-AM4-random-CO2-4deg-daily": "am4-randco2",
+    },
+}
+C3_LABELS = (
+    "era5",
+    "amip",
+    "ramped",
+    "som",
+    "cm4-picontrol",
+    "cm4-1pctco2",
+    "am4-randco2",
+    "xshield",
+    "e3sm",
+)
+# Training entries per C3 label, as in the C3 stats config
+# (scripts/data_process/configs/fm-v3-e3sm-balanced-percell-c3-stats.yaml).
+C3_ENTRIES = {
+    "era5": 2,
+    "amip": 4,
+    "ramped": 6,
+    "som": 14,
+    "cm4-picontrol": 1,
+    "cm4-1pctco2": 1,
+    "am4-randco2": 9,
+    "xshield": 1,
+    "e3sm": 1,
+}
+# Training timesteps per C3 label (inclusive subset windows, whole stores
+# otherwise), counted by the C3 stats job; the subset-windowed ones are
+# re-counted from the configs by c3_window_timesteps.
+C3_TIMESTEPS = {
+    "era5": 24836,
+    "amip": 21186,
+    "ramped": 10968,
+    "som": 51142,
+    "cm4-picontrol": 73000,
+    "cm4-1pctco2": 51100,
+    "am4-randco2": 17253,
+    "xshield": 4020,
+    "e3sm": 38690,
+}
 LOSS_MIN_STD_FRACTION = 0.1
 
 N_GPUS = 4
@@ -161,8 +261,6 @@ SMOKE_MAX_EPOCHS = 2
 SMOKE_COOLDOWN_EPOCHS = 1
 SMOKE_SAMPLES_PER_EPOCH = 256
 SMOKE_LOG_TRAIN_EVERY_N_BATCHES = 20
-VALIDATION_YEARS = (1994, 2014)
-SMOKE_VALIDATION_STOP = "03-31"
 SELECTION_INFERENCE = "aimip_checkpoint_era5"
 SMOKE_SELECTION_N_FORWARD_STEPS = 100
 SMOKE_WEATHER_INFERENCE = "weather_2020_era5"
@@ -231,7 +329,13 @@ def runs() -> list[Run]:
 
 
 def smoke_run() -> Run:
+    """The main smoke test (c2-cellloss)."""
     return Run(SMOKE_NETWORK, SMOKE_LOSS, SMOKE_SEED, smoke=True)
+
+
+def smoke_runs() -> list[Run]:
+    """The main smoke test and the C3 one (c3-cellloss)."""
+    return [smoke_run(), Run("c3", SMOKE_LOSS, SMOKE_SEED, smoke=True)]
 
 
 # --- normalization ---------------------------------------------------------------
@@ -271,7 +375,11 @@ def check_parent_normalization(normalization: dict) -> None:
 
 
 def make_normalization(
-    parent_normalization: dict, network: str, loss: str, stats_dir: str
+    parent_normalization: dict,
+    network: str,
+    loss: str,
+    stats_dir: str,
+    stats_dir_c3: str = STATS_DIR_C3,
 ) -> dict:
     check_parent_normalization(parent_normalization)
     normalization: dict = {
@@ -291,16 +399,19 @@ def make_normalization(
         )
     else:
         raise ValueError(loss)
-    if network == "c2":
+    if network in ("c2", "c3"):
         parent_grouped = parent_normalization["grouped"]
+        groups_root, labels = (
+            (stats_dir, GROUP_LABELS) if network == "c2" else (stats_dir_c3, C3_LABELS)
+        )
         normalization["grouped"] = {
             "groups": {
                 label: _per_cell(
-                    f"{stats_dir}/groups/{label}",
+                    f"{groups_root}/groups/{label}",
                     "scaling-full-field",
                     NETWORK_MIN_STD_FRACTION,
                 )
-                for label in GROUP_LABELS
+                for label in labels
             },
             "default_label": DEFAULT_LABEL,
             "pinned_variables": list(parent_grouped["pinned_variables"]),
@@ -313,7 +424,78 @@ def make_normalization(
 # --- configs ---------------------------------------------------------------------
 
 
-def make_config(run: Run, stats_dir: str) -> dict:
+def _c3_label(dataset: dict) -> str:
+    (label,) = dataset["labels"]
+    if label not in C3_SPLITS:
+        return label
+    return C3_SPLITS[label][dataset["data_path"].rstrip("/").split("/")[-1]]
+
+
+def _relabel(concat: list[dict]) -> None:
+    for dataset in concat:
+        dataset["labels"] = [_c3_label(dataset)]
+
+
+def _inclusive_days(subset: dict) -> int:
+    start = datetime.date.fromisoformat(subset["start_time"])
+    stop = datetime.date.fromisoformat(subset["stop_time"])
+    return (stop - start).days + 1
+
+
+def c3_window_timesteps(concat: list[dict]) -> dict[str, int]:
+    """Daily timesteps per C3 label of the subset-windowed entries (labels
+    whose entries all have a subset).
+    """
+    totals: dict[str, int] = {}
+    windowed: dict[str, bool] = {}
+    for dataset in concat:
+        label = _c3_label(dataset)
+        subset = dataset.get("subset")
+        windowed[label] = windowed.get(label, True) and subset is not None
+        if subset is not None:
+            totals[label] = totals.get(label, 0) + _inclusive_days(subset)
+    return {label: n for label, n in totals.items() if windowed[label]}
+
+
+def c3_weights(parent_weights: dict[str, float]) -> dict[str, float]:
+    """Each parent label's weight, split across its C3 labels in proportion
+    to their training timesteps.
+    """
+    weights = {}
+    for parent_label, weight in parent_weights.items():
+        children = list(
+            C3_SPLITS.get(parent_label, {parent_label: parent_label}).values()
+        )
+        total = sum(C3_TIMESTEPS[c] for c in children)
+        for child in children:
+            weights[child] = round(weight * C3_TIMESTEPS[child] / total, 6)
+    return {label: weights[label] for label in C3_LABELS}
+
+
+def make_c3_data(cfg: dict) -> None:
+    """Relabel the training and validation datasets per config (C3) and split
+    the label sampling weights.
+    """
+    loader = cfg["train_loader"]
+    concat = loader["dataset"]["concat"]
+    _relabel(concat)
+    counts: dict[str, int] = {}
+    for dataset in concat:
+        (label,) = dataset["labels"]
+        counts[label] = counts.get(label, 0) + 1
+    assert counts == C3_ENTRIES, counts
+    for label, n in c3_window_timesteps(concat).items():
+        assert n == C3_TIMESTEPS[label], (label, n)
+    sampling = loader["label_sampling"]
+    assert sampling["weights"] == {label: 0.2 for label in GROUP_LABELS}
+    sampling["weights"] = c3_weights(sampling["weights"])
+    for entry in cfg["validation"]:
+        _relabel(entry["loader"]["dataset"]["concat"])
+    for entry in cfg["inference"]:
+        assert entry["loader"]["dataset"]["labels"] == ["era5"], entry["name"]
+
+
+def make_config(run: Run, stats_dir: str, stats_dir_c3: str = STATS_DIR_C3) -> dict:
     parent = yaml.safe_load(run.parent_config.read_text())
     cfg = copy.deepcopy(parent)
     check_iterations_per_epoch(cfg)
@@ -355,24 +537,13 @@ def make_config(run: Run, stats_dir: str) -> dict:
         run.network,
         run.loss,
         stats_dir,
+        stats_dir_c3,
     )
+    if run.network == "c3":
+        make_c3_data(cfg)
     if run.smoke:
         _make_smoke(cfg)
     return cfg
-
-
-def _smoke_validation(parent_validation: list[dict]) -> list[dict]:
-    validation = copy.deepcopy(parent_validation)
-    for entry in validation:
-        concat = entry["loader"]["dataset"]["concat"]
-        assert len(concat) == len(VALIDATION_YEARS)
-        for dataset, year in zip(concat, VALIDATION_YEARS):
-            assert dataset["subset"] == {
-                "start_time": f"{year}-01-01",
-                "stop_time": f"{year}-12-31",
-            }
-            dataset["subset"]["stop_time"] = f"{year}-{SMOKE_VALIDATION_STOP}"
-    return validation
 
 
 def _smoke_inference(parent_inference: list[dict]) -> list[dict]:
@@ -405,7 +576,6 @@ def _make_smoke(cfg: dict) -> None:
         SMOKE_COOLDOWN_EPOCHS,
         iterations_per_epoch=iterations_per_epoch(SMOKE_SAMPLES_PER_EPOCH),
     )
-    cfg["validation"] = _smoke_validation(cfg["validation"])
     cfg["inference"] = _smoke_inference(cfg["inference"])
 
 
@@ -413,6 +583,8 @@ def describe(run: Run) -> str:
     network = {
         "c1": "pooled per-cell network normalization",
         "c2": "pooled + grouped per-cell network normalization",
+        "c3": "pooled + per-config grouped per-cell network normalization "
+        "(9 relabelled datasets)",
     }[run.network]
     loss = {
         "scalarloss": "v2 scalar loss normalization",
@@ -444,9 +616,9 @@ def header(run: Run) -> str:
     return "".join(f"# {line}\n" for line in lines)
 
 
-def write_config(run: Run, stats_dir: str) -> None:
+def write_config(run: Run, stats_dir: str, stats_dir_c3: str) -> None:
     body = yaml.safe_dump(
-        make_config(run, stats_dir),
+        make_config(run, stats_dir, stats_dir_c3),
         sort_keys=False,
         default_flow_style=False,
         width=1000,
@@ -464,12 +636,19 @@ def main() -> None:
         default=STATS_DIR,
         help=f"Per-grid-cell stats root (default: {STATS_DIR}).",
     )
+    parser.add_argument(
+        "--stats-dir-c3",
+        default=STATS_DIR_C3,
+        help=f"C3 per-config stats root, groups/ only (default: {STATS_DIR_C3}).",
+    )
     args = parser.parse_args()
     stats_dir = args.stats_dir.rstrip("/")
-    if not stats_dir.startswith("/climate-default/"):
-        parser.error("--stats-dir must be a /climate-default/ path")
-    for run in runs() + [smoke_run()]:
-        write_config(run, stats_dir)
+    stats_dir_c3 = args.stats_dir_c3.rstrip("/")
+    for path in (stats_dir, stats_dir_c3):
+        if not path.startswith("/climate-default/"):
+            parser.error(f"{path} is not a /climate-default/ path")
+    for run in runs() + smoke_runs():
+        write_config(run, stats_dir, stats_dir_c3)
 
 
 if __name__ == "__main__":

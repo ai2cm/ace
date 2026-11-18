@@ -1,11 +1,11 @@
 """Progress table for the FM training runs currently tracked.
 
 Rows (ROWS), 3 seeds each unless noted:
-- The 12 FM v3 per-grid-cell normalization runs (create_fm_v3_jobs.py, 120
+- The 18 FM v3 per-grid-cell normalization runs (create_fm_v3_jobs.py, 120
   epochs, 4 GPUs), one row per network x loss normalization:
-  sfno-v3-{c1,c2}-{scalarloss,cellloss}.
-- Their smoke test (sfno-v3-smoke, c2-cellloss s0, 2 epochs), while its config
-  exists.
+  sfno-v3-{c1,c2,c3}-{scalarloss,cellloss}.
+- Their smoke tests (sfno-v3-smoke-{c2,c3}-cellloss, s0, 2 epochs), while
+  their configs exist.
 - The 6 1deg, 6-hourly FM runs of create_fm_1deg_jobs (120 epochs, 8 GPUs),
   one row per arm: sfno-v2-1deg-fm-e3sm-balanced, sfno-v2-1deg-fm-era5.
 
@@ -79,7 +79,7 @@ from create_fm_1deg_jobs import run_config_name as run_config_name_1deg  # noqa:
 from create_fm_v3_jobs import LOSSES, NETWORKS, SMOKE_MAX_EPOCHS  # noqa: E402
 from create_fm_v3_jobs import MAX_EPOCHS as MAX_EPOCHS_V3  # noqa: E402
 from create_fm_v3_jobs import runs as v3_runs  # noqa: E402
-from create_fm_v3_jobs import smoke_run as v3_smoke_run  # noqa: E402
+from create_fm_v3_jobs import smoke_runs as v3_smoke_runs  # noqa: E402
 from submit_fm_jobs import config_to_job_name  # noqa: E402
 
 EXP_DIR = pathlib.Path(__file__).parent.parent
@@ -156,9 +156,10 @@ def _rows() -> list[Row]:
                 r.job_name for r in v3 if (r.network, r.loss) == (network, loss)
             )
             rows.append(Row(f"sfno-v3-{network}-{loss}", names, MAX_EPOCHS_V3, True))
-    smoke = v3_smoke_run()
-    if smoke.path.exists():
-        rows.append(Row("sfno-v3-smoke", (smoke.job_name,), SMOKE_MAX_EPOCHS, True))
+    for smoke in v3_smoke_runs():
+        if smoke.path.exists():
+            label = f"sfno-v3-smoke-{smoke.network}-{smoke.loss}"
+            rows.append(Row(label, (smoke.job_name,), SMOKE_MAX_EPOCHS, True))
     for arm in ARMS_1DEG:
         names = tuple(
             config_to_job_name(run_config_name_1deg(arm, seed, False))

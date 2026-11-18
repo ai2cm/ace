@@ -43,7 +43,8 @@ Usage:
                                 [--resubmit]
 
 --only takes job names (ace2-fm-nc-sfno-v3-...) or their unique substrings
-(e.g. c1-cellloss-s0). --smoke submits only the smoke-test config. --dry-run
+(e.g. c1-cellloss-s0). --smoke selects from the smoke tests (c2-cellloss,
+the main one, and c3-cellloss) instead of the 18 runs. --dry-run
 prints each gantry command and the request the shim would send (gantry run
 --dry-run), and submits nothing.
 """
@@ -64,7 +65,7 @@ from create_fm_v3_jobs import (  # noqa: E402
     Run,
     describe,
     runs,
-    smoke_run,
+    smoke_runs,
 )
 
 HERE = pathlib.Path(__file__).parent
@@ -194,7 +195,9 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--only", nargs="+", metavar="NAME")
     parser.add_argument(
-        "--smoke", action="store_true", help="Submit the smoke-test config only."
+        "--smoke",
+        action="store_true",
+        help="Submit the smoke tests (c2-cellloss, c3-cellloss) instead.",
     )
     parser.add_argument(
         "--resubmit",
@@ -203,7 +206,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    selected = select([smoke_run()] if args.smoke else runs(), args.only)
+    selected = select(smoke_runs() if args.smoke else runs(), args.only)
     record = read_record()
     pending = []
     for run in selected:

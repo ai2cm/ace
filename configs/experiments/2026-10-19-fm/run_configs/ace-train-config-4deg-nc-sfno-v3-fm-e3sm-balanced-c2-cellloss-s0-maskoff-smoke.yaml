@@ -738,7 +738,7 @@ validation:
         engine: zarr
         subset:
           start_time: '1994-01-01'
-          stop_time: '1994-03-31'
+          stop_time: '1994-12-31'
         labels:
         - era5
       - data_path: /climate-default
@@ -746,7 +746,7 @@ validation:
         engine: zarr
         subset:
           start_time: '2014-01-01'
-          stop_time: '2014-03-31'
+          stop_time: '2014-12-31'
         labels:
         - era5
 - name: val_c96
@@ -765,7 +765,7 @@ validation:
         engine: zarr
         subset:
           start_time: '1994-01-01'
-          stop_time: '1994-03-31'
+          stop_time: '1994-12-31'
         labels:
         - c96
       - data_path: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset
@@ -773,7 +773,7 @@ validation:
         engine: zarr
         subset:
           start_time: '2014-01-01'
-          stop_time: '2014-03-31'
+          stop_time: '2014-12-31'
         labels:
         - c96
 optimization:

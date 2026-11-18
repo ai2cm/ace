@@ -45,6 +45,7 @@ import yaml
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[4]))
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from create_fm_v3_jobs import (  # noqa: E402
+    C3_LABELS,
     COOLDOWN_EPOCHS,
     GROUP_LABELS,
     ITERATIONS_PER_EPOCH,
@@ -52,11 +53,13 @@ from create_fm_v3_jobs import (  # noqa: E402
     SMOKE_COOLDOWN_EPOCHS,
     SMOKE_MAX_EPOCHS,
     SMOKE_SAMPLES_PER_EPOCH,
+    STATS_DIR_C3,
     V2_DIR,
     Run,
     iterations_per_epoch,
     runs,
     smoke_run,
+    smoke_runs,
 )
 from submit_fm_v3_jobs import AGENT_OUTPUT_ROOT  # noqa: E402
 
@@ -88,7 +91,16 @@ STATS_DIMS = ("grid_yt", "grid_xt")
 LAT = np.linspace(-78.75, 78.75, N_LAT)
 LON = np.arange(N_LON) * 360.0 / N_LON
 N_LEVELS = 8
-SAMPLE_LABELS = ("c96", "era5", "e3sm", "xshield")
+# Labels of the 4 samples of the synthetic batch, per network arm.
+SAMPLE_LABELS = {
+    "c1": ("c96", "era5", "e3sm", "xshield"),
+    "c2": ("c96", "era5", "e3sm", "xshield"),
+    "c3": ("amip", "era5", "e3sm", "cm4-1pctco2"),
+}
+C3_STATS_CONFIG = (
+    pathlib.Path(__file__).resolve().parents[4]
+    / "scripts/data_process/configs/fm-v3-e3sm-balanced-percell-c3-stats.yaml"
+)
 N_STEPS = 3
 LR = 1e-4
 
@@ -174,7 +186,8 @@ def write_synthetic_stats(root: pathlib.Path, names: list[str]) -> dict[str, str
     cell, v2 = root / "percell", root / "v2"
     for directory, per_cell in ((cell, True), (v2, False)):
         subdirs = [directory] + [
-            directory / "groups" / label for label in (*GROUP_LABELS, "e3sm-filled")
+            directory / "groups" / label
+            for label in (*GROUP_LABELS, *C3_LABELS, "e3sm-filled")
         ]
         for subdir in subdirs:
             for name in FILES:
@@ -191,6 +204,8 @@ def _replace_roots(node, stats_dir: str, roots: dict[str, str]):
         return roots["percell"] + node[len(stats_dir) :]
     if isinstance(node, str) and node.startswith(V2_DIR + "/"):
         return roots["v2"] + node[len(V2_DIR) :]
+    if isinstance(node, str) and node.startswith(STATS_DIR_C3 + "/"):
+        return roots["percell"] + node[len(STATS_DIR_C3) :]
     return node
 
 
@@ -201,7 +216,7 @@ def stats_dir_of(cfg: dict) -> str:
     return path.removesuffix("/centering.nc")
 
 
-def dataset_info() -> DatasetInfo:
+def dataset_info(labels: list[str]) -> DatasetInfo:
     return DatasetInfo(
         horizontal_coordinates=LatLonCoordinates(
             lat=torch.tensor(LAT, dtype=torch.float32),
@@ -212,13 +227,15 @@ def dataset_info() -> DatasetInfo:
             bk=torch.linspace(0, 1, N_LEVELS + 1),
         ),
         timestep=__import__("datetime").timedelta(days=1),
-        all_labels=set(GROUP_LABELS),
+        all_labels=set(labels),
     )
 
 
-def batch(names: list[str], epoch: int) -> BatchData:
+def batch(
+    names: list[str], epoch: int, labels: list[str], sample_labels: tuple[str, ...]
+) -> BatchData:
     device = get_device()
-    n = len(SAMPLE_LABELS)
+    n = len(sample_labels)
     shape = (n, N_STEPS + 1, N_LAT, N_LON)
     generator = torch.Generator().manual_seed(0)
     data = {}
@@ -231,13 +248,58 @@ def batch(names: list[str], epoch: int) -> BatchData:
         data[name] = value.to(device)
     index = xr.date_range("2000", freq="1D", periods=N_STEPS + 1, use_cftime=True)
     time = xr.DataArray(np.stack(n * [index]), dims=["sample", "time"])
-    labels = BatchLabels(
+    batch_labels = BatchLabels(
         tensor=torch.tensor(
-            [[float(lab == g) for g in GROUP_LABELS] for lab in SAMPLE_LABELS]
+            [[float(lab == g) for g in labels] for lab in sample_labels]
         ).to(device),
-        names=list(GROUP_LABELS),
+        names=list(labels),
     )
-    return BatchData.new_on_device(data=data, time=time, epoch=epoch, labels=labels)
+    return BatchData.new_on_device(
+        data=data, time=time, epoch=epoch, labels=batch_labels
+    )
+
+
+def _concat_labels(cfg: dict) -> set[str]:
+    """Labels carried by any training, validation or inference dataset."""
+    datasets = list(cfg["train_loader"]["dataset"]["concat"])
+    for entry in cfg["validation"]:
+        datasets += entry["loader"]["dataset"]["concat"]
+    datasets += [entry["loader"]["dataset"] for entry in cfg["inference"]]
+    return {label for d in datasets for label in d["labels"]}
+
+
+def check_labels(run: Run) -> None:
+    """Every dataset label has a sampling weight (training) and, under grouped
+    normalization, a group; C3 labels match the C3 stats config entry for
+    entry.
+    """
+    cfg = load(run)
+    weights = cfg["train_loader"]["label_sampling"]["weights"]
+    train = {d["labels"][0] for d in cfg["train_loader"]["dataset"]["concat"]}
+    assert set(weights) == train, (weights, train)
+    assert abs(sum(weights.values()) - 1) < 1e-5
+    grouped = cfg["stepper"]["step"]["config"]["normalization"].get("grouped")
+    if grouped is not None:
+        missing = _concat_labels(cfg) - set(grouped["groups"])
+        assert not missing, missing
+    if run.network != "c3":
+        return
+    assert set(grouped["groups"]) == set(C3_LABELS) == train
+    pairs = yaml.safe_load(C3_STATS_CONFIG.read_text())["dataset_pairs"]
+    expected = [
+        (p["dataset"], p.get("start_time"), p.get("end_time"), p["group"])
+        for p in pairs
+    ]
+    actual = []
+    for d in cfg["train_loader"]["dataset"]["concat"]:
+        subset = d.get("subset") or {}
+        path = f"{d['data_path'].rstrip('/')}/{d['file_pattern']}"
+        actual.append(
+            (path, subset.get("start_time"), subset.get("stop_time"), d["labels"][0])
+        )
+    assert sorted(actual, key=str) == sorted(expected, key=str), set(actual) ^ set(
+        expected
+    )
 
 
 def check_build(run: Run, tmp: pathlib.Path) -> None:
@@ -259,8 +321,9 @@ def check_build(run: Run, tmp: pathlib.Path) -> None:
     )
     # A run config builds its stepper from a StepperConfig, never a checkpoint.
     assert isinstance(config.stepper, StepperConfig)
+    labels = sorted(cfg["train_loader"]["label_sampling"]["weights"])
     train_stepper = config.stepper_training.get_train_stepper(
-        config.stepper, dataset_info()
+        config.stepper, dataset_info(labels)
     )
     stepper = train_stepper._stepper
     step = stepper._step_obj
@@ -270,7 +333,7 @@ def check_build(run: Run, tmp: pathlib.Path) -> None:
     for name in SCALAR_NAMES:
         assert network.means[name].ndim == 0, name
     grouped = getattr(step, "_grouped_normalizer", None)
-    if run.network == "c2":
+    if run.network in ("c2", "c3"):
         assert grouped is not None and grouped.is_per_grid_cell
     else:
         assert grouped is None
@@ -313,7 +376,8 @@ def check_build(run: Run, tmp: pathlib.Path) -> None:
     # Epochs are 1-based (Trainer passes epochs_trained + 1).
     for epoch, expected_steps in ((multi_step_from - 1, 1), (multi_step_from, 3)):
         train_stepper.set_epoch(epoch)
-        output = train_stepper.train_on_batch(batch(names, epoch), optimization)
+        data = batch(names, epoch, labels, SAMPLE_LABELS[run.network])
+        output = train_stepper.train_on_batch(data, optimization)
         loss = float(output.metrics["loss"])
         assert np.isfinite(loss), loss
         # gen_data is [sample, ensemble member, time, lat, lon], with the
@@ -333,7 +397,7 @@ def check_build(run: Run, tmp: pathlib.Path) -> None:
 
 
 def check_real_stats(stats_dir: pathlib.Path) -> None:
-    cfg = load(runs()[-1])  # a c2 config: has the pinned variables
+    cfg = load(smoke_run())  # a c2 config: has the pinned variables
     step_config = cfg["stepper"]["step"]["config"]
     names = _names(step_config)
     pinned = set(step_config["normalization"]["grouped"]["pinned_variables"])
@@ -359,7 +423,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stats-dir-local", type=pathlib.Path)
     args = parser.parse_args()
-    all_runs = runs() + [smoke_run()]
+    all_runs = runs() + smoke_runs()
 
     print("1. Strict TrainConfig parse (also with the job's experiment_dir):")
     override = [f"experiment_dir={AGENT_OUTPUT_ROOT}/agent-alexeyy-example-abcd"]
@@ -367,7 +431,11 @@ def main() -> None:
         parse(load(run))
         overridden = parse(dict(update_dict_with_dotlist(load(run), override)))
         assert overridden.experiment_dir == override[0].split("=", 1)[1]
-    print(f"  {len(all_runs)} configs parse")
+        check_labels(run)
+    print(
+        f"  {len(all_runs)} configs parse; every dataset label has a sampling "
+        "weight and a group; C3 labels match the C3 stats config entry for entry"
+    )
 
     print("2. LR schedule:")
     check_schedule(load(runs()[0]), MAX_EPOCHS, COOLDOWN_EPOCHS, ITERATIONS_PER_EPOCH)
@@ -379,7 +447,7 @@ def main() -> None:
     )
 
     print("3. Stepper build + a 1-step and a 3-step training batch on synthetic stats:")
-    builds = [r for r in runs() if r.seed == 0] + [smoke_run()]
+    builds = [r for r in runs() if r.seed == 0] + smoke_runs()
     with tempfile.TemporaryDirectory() as tmp:
         for run in builds:
             check_build(run, pathlib.Path(tmp))
