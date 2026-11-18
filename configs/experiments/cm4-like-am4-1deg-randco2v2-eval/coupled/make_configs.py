@@ -185,12 +185,12 @@ PICONTROL_COMMENT = """
 
 
 CMIP6_LIKE_IC_RUN_COMMENT = """
-# Both forcing datasets are repeated in time to cover 0251-0351:
+# Both forcing datasets are repeated in time to cover 0251-{end_year:04d}:
 # - the piControl atmosphere stores end in 0350, so they are repeated once; the
 #   remaining atmosphere forcings are periodic in the noleap calendar and CO2 is
 #   overwritten with a constant, so the repeat introduces no discontinuity.
 # - the ocean's time-constant forcings file only spans 150 days on a 5-day
-#   axis, so it is tiled well past the 7301 times needed.
+#   axis, so it is tiled well past the {n_times} times needed.
 # experiment_dir is set per run with an override in experiments.txt."""
 
 PICONTROL_IC = dict(
@@ -199,14 +199,34 @@ PICONTROL_IC = dict(
     ocean_ic=PICONTROL_OCEAN_IC,
     atmos_ic=PICONTROL_ATMOS_IC,
 )
-HUNDRED_YEAR = dict(
-    n_coupled_steps=7300,
-    duration="100-year",
-    steps_comment="100 years of 5-day ocean steps",
-    in_memory=4,
-    ocean_repeats="\n      n_repeats: 500",
-    atmos_repeats="\n          n_repeats: 2",
-)
+
+
+def _n_years(years: int, in_memory: int = 4) -> dict:
+    """Template fields for a run of whole noleap years of 5-day ocean steps.
+
+    The repeats cover up to 150 years: the 30-record ocean forcing file tiled
+    500 times gives 15000 times, and the 200-year piControl atmosphere stores
+    repeated twice cover 400 years from 0151.
+    """
+    n_steps = 365 * years // 5
+    assert (365 * years) % 5 == 0 and years <= 150, years
+    # inference requires n_coupled_steps divisible by coupled_steps_in_memory
+    assert n_steps % in_memory == 0, (years, in_memory)
+    return dict(
+        n_coupled_steps=n_steps,
+        duration=f"{years}-year",
+        steps_comment=f"{years} years of 5-day ocean steps",
+        in_memory=in_memory,
+        ocean_repeats="\n      n_repeats: 500",
+        atmos_repeats="\n          n_repeats: 2",
+    )
+
+
+HUNDRED_YEAR = _n_years(100)
+# Lengths of the CMIP6-like IC runs in years, with coupled_steps_in_memory:
+# 10950 steps (150 years) is not divisible by 4, so that run uses 6, as the
+# 90-day ensemble members do.
+CMIP6_LIKE_IC_YEARS = {100: 4, 150: 6}
 
 
 def _extension_comment(scenario: dict) -> str:
@@ -283,25 +303,29 @@ def main():
         )
         (HERE / f"inference-config-{tag}.yaml").write_text(text)
     t = CMIP6_LIKE_IC_START
-    text = TEMPLATE.format(
-        **ABRUPT,
-        description="run",
-        origin="CM4's own CMIP6 abrupt-4xCO2 simulation",
-        ic_comment=CMIP6_LIKE_IC_COMMENT,
-        ocean_ic=CMIP6_LIKE_IC_OCEAN_IC,
-        atmos_ic=CMIP6_LIKE_IC_ATMOS_IC,
-        time=format_time(t),
-        extra_comment=CMIP6_LIKE_IC_RUN_COMMENT + MONTHLY_COMMENT,
-        static_forcing=CMIP6_LIKE_IC_STATIC_FORCING,
-        forcing_file=f"ic_{t.year:04d}-{t.month:02d}-{t.day:02d}.nc",
-        **HUNDRED_YEAR,
-        experiment_dir="/results",
-        ocean_files=_monthly_files_yaml(MONTHLY_OCEAN_NAMES),
-        atmos_files=_monthly_files_yaml(MONTHLY_ATMOS_NAMES),
-    )
-    (
-        HERE / "inference-config-cm4-cmip6-like-ic-abrupt4xCO2-0251-100yr-monthly.yaml"
-    ).write_text(text)
+    for years, in_memory in CMIP6_LIKE_IC_YEARS.items():
+        length = _n_years(years, in_memory)
+        run_comment = CMIP6_LIKE_IC_RUN_COMMENT.format(
+            end_year=t.year + years, n_times=length["n_coupled_steps"] + 1
+        )
+        text = TEMPLATE.format(
+            **ABRUPT,
+            description="run",
+            origin="CM4's own CMIP6 abrupt-4xCO2 simulation",
+            ic_comment=CMIP6_LIKE_IC_COMMENT,
+            ocean_ic=CMIP6_LIKE_IC_OCEAN_IC,
+            atmos_ic=CMIP6_LIKE_IC_ATMOS_IC,
+            time=format_time(t),
+            extra_comment=run_comment + MONTHLY_COMMENT,
+            static_forcing=CMIP6_LIKE_IC_STATIC_FORCING,
+            forcing_file=f"ic_{t.year:04d}-{t.month:02d}-{t.day:02d}.nc",
+            **length,
+            experiment_dir="/results",
+            ocean_files=_monthly_files_yaml(MONTHLY_OCEAN_NAMES),
+            atmos_files=_monthly_files_yaml(MONTHLY_ATMOS_NAMES),
+        )
+        name = f"inference-config-cm4-cmip6-like-ic-abrupt4xCO2-0251-{years}yr-monthly"
+        (HERE / f"{name}.yaml").write_text(text)
 
 
 if __name__ == "__main__":
