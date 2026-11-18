@@ -166,10 +166,15 @@ only subsample the 6-hourly ice streams.
 
 The CM4 CMIP6 abrupt-4xCO2 initial-condition configs
 (`configs/cm4-cmip6-abrupt-4xCO2-initial-condition-{1,4}deg-1daily.yaml`)
-process the two-day piControl "bridge" run (0251-01-01 to 0251-01-03), whose
-end state initializes the CMIP6 abrupt-4xCO2 simulation, into one 1-daily
-store per resolution with two timesteps. They reuse the piControl face-mask
-artifact (the bridge continues piControl on the same grid and bathymetry).
+process the two-day piControl "bridge" run (0251-01-01 to 0251-01-03). This
+run was initialized from the exact state used to initialize the CMIP6
+abrupt 4xCO2 simulation; therefore, the state output at 0251-01-02
+approximately aligns with the piControl state used to initialize the CM4
+abrupt 4xCO2 simulation in CMIP6. The configurations reuse the piControl
+face-mask artifact (the bridge continues piControl on the same grid and
+bathymetry). This short run was merely used as a way to generate
+CMIP6-like initial conditions for SamudrACE without having to derive all
+the necessary prognostic variables from raw restart files.
 
 ### Running
 
