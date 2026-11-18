@@ -18,7 +18,6 @@ class CappedGELU(torch.nn.Module):
 
     def forward(self, inputs: torch.Tensor):
         x = self.gelu(inputs)
-        # Convert cap to a scalar value for clamping (ignores grad)
-        cap_value = self.cap.item()
-        x = torch.clamp(x, max=cap_value)
+        # clamp on the 0-d buffer: no .item() graph break, bound is cast to x.dtype
+        x = torch.clamp(x, max=self.cap)
         return x

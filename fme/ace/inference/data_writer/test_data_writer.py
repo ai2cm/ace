@@ -1,11 +1,14 @@
 import datetime
+import warnings
 
 import cftime
+import dacite
 import numpy as np
 import numpy.typing as npt
 import pytest
 import torch
 import xarray as xr
+import yaml
 from netCDF4 import Dataset
 from xarray.coding.times import CFDatetimeCoder
 
@@ -63,6 +66,7 @@ def get_initial_condition_times(
     return np.array(initial_condition_times)
 
 
+@pytest.mark.filterwarnings("ignore:.*enabled in DataWriterConfig:FutureWarning")
 def test_data_writer_config_save_names():
     variable_names = ["temp", "humidity"]
     kwargs = dict(save_prediction_files=False, save_monthly_files=False)
@@ -90,6 +94,7 @@ def get_paired_data(
     )
 
 
+@pytest.mark.filterwarnings("ignore:.*enabled in DataWriterConfig:FutureWarning")
 class TestDataWriter:
     @pytest.fixture(params=["julian", "proleptic_gregorian", "noleap"])
     def calendar(self, request):
@@ -500,7 +505,7 @@ class TestDataWriter:
             names=None,
             time_coarsen=TimeCoarsenConfig(coarsen_factor),
             files=[region_config],
-        ).build(
+        ).build_paired(
             experiment_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
@@ -550,9 +555,15 @@ class TestDataWriter:
             expected_shape = (n_samples, n_timesteps // coarsen_factor, 4, 5)
             assert ds.temp.shape == expected_shape
             assert ds.valid_time.shape == expected_shape[:2]
-            assert set(ds.data_vars) == {"temp", "pressure", "insolation"}
+            assert set(ds.data_vars) == {"temp", "pressure"}
             assert ds.attrs["title"] == "ACE autoregressive predictions data file"
             assert ds.attrs["source.inference_version"] == "1.0"
+
+        with xr.open_dataset(
+            tmp_path / "autoregressive_target.nc",
+            decode_timedelta=False,
+        ) as ds:
+            assert set(ds.data_vars) == {"insolation"}
 
         with xr.open_dataset(
             tmp_path / "monthly_mean_predictions.nc", decode_timedelta=False
@@ -563,7 +574,7 @@ class TestDataWriter:
             assert np.all(ds.init_time.dt.year.values > 0)
             assert np.all(ds.init_time.dt.year.values >= 0)
             assert np.all(ds.valid_time.dt.month.values >= 0)
-            assert set(ds.data_vars) == {"temp", "pressure", "insolation"}
+            assert set(ds.data_vars) == {"temp", "pressure"}
             assert set(ds.coords) == {
                 "init_time",
                 "valid_time",
@@ -576,7 +587,7 @@ class TestDataWriter:
             assert ds.attrs["source.inference_version"] == "1.0"
 
         with xr.open_dataset(
-            tmp_path / "test_region.zarr", decode_timedelta=False
+            tmp_path / "test_region_predictions.zarr", decode_timedelta=False
         ) as ds:
             assert "pressure" in ds
             assert "temp" not in ds
@@ -586,7 +597,7 @@ class TestDataWriter:
                 assert key in ds.coords and key not in ds.data_vars
             assert ds.pressure.encoding["shards"][1] == batch_time.shape[1]
             assert ds.pressure.encoding["chunks"] == (1, 1, 2, 3)
-            assert ds.attrs["title"] == "ACE test region data"
+            assert ds.attrs["title"] == "ACE test region predictions data"
             assert ds.attrs["source.inference_version"] == "1.0"
 
     def test_append_batch_separate_ics(
@@ -631,7 +642,7 @@ class TestDataWriter:
             names=None,
             time_coarsen=None,
             files=[region_config],
-        ).build(
+        ).build_paired(
             experiment_dir=str(tmp_path),
             initial_condition_times=initial_condition_times,
             n_timesteps=n_timesteps,
@@ -683,13 +694,16 @@ class TestDataWriter:
                 )
                 + datetime.timedelta(hours=6) * i
             )
-            with xr.open_dataset(tmp_path / f"test_region_ic000{i}.zarr") as ds:
+            with xr.open_dataset(
+                tmp_path / f"test_region_predictions_ic000{i}.zarr"
+            ) as ds:
                 assert "pressure" in ds
                 assert "temp" in ds
                 assert ds.pressure.shape == (n_timesteps, n_lat, n_lon)
                 np.testing.assert_equal(ds.time.values, expected_time)
 
 
+@pytest.mark.filterwarnings("ignore:.*enabled in DataWriterConfig:FutureWarning")
 def test_default_netcdf_writers_record_data_writer_io(tmp_path):
     """The default config writes netCDF only, so its storage calls must be timed
     for the data_writer breakdown to account for them."""
@@ -705,7 +719,7 @@ def test_default_netcdf_writers_record_data_writer_io(tmp_path):
         ),
         dims=["sample", "time"],
     )
-    writer = DataWriterConfig().build(
+    writer = DataWriterConfig().build_paired(
         experiment_dir=str(tmp_path),
         initial_condition_times=initial_condition_times,
         n_timesteps=n_times,
@@ -717,7 +731,7 @@ def test_default_netcdf_writers_record_data_writer_io(tmp_path):
     data = {"var": torch.rand(shape, device=get_device())}
     with GlobalTimer():
         timer = GlobalTimer.get_instance()
-        writer.append_batch(get_paired_data(data, {}, batch_time))
+        writer.append_batch(get_paired_data(data, data, batch_time))
         writer.finalize()
         durations = timer.get_durations()
     assert durations["data_writer_io"] > 0.0
@@ -736,6 +750,118 @@ def test_data_writer_validate_filenames_duplicate():
         DataWriterConfig(
             files=[config1, config2],
         )
+
+
+@pytest.mark.parametrize(
+    "kwargs, expected_flags",
+    [
+        pytest.param({}, ["save_prediction_files", "save_monthly_files"], id="default"),
+        pytest.param(
+            {"save_monthly_files": False}, ["save_prediction_files"], id="prediction"
+        ),
+        pytest.param(
+            {"save_prediction_files": False}, ["save_monthly_files"], id="monthly"
+        ),
+    ],
+)
+def test_legacy_file_flags_warn_when_enabled(kwargs, expected_flags):
+    with pytest.warns(FutureWarning, match="deprecated") as record:
+        DataWriterConfig(**kwargs)
+    message = str(record[0].message)
+    for flag in ["save_prediction_files", "save_monthly_files"]:
+        assert (flag in message) == (flag in expected_flags)
+    assert "files:" in message
+
+
+@pytest.mark.parametrize(
+    "files", [None, [FileWriterConfig(label="region")]], ids=["no_files", "files"]
+)
+def test_legacy_file_flags_disabled_do_not_warn(files):
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        DataWriterConfig(
+            save_prediction_files=False, save_monthly_files=False, files=files
+        )
+
+
+def _legacy_files_snippet(message: str) -> dict:
+    snippet = message.split(":\n\n", 1)[1].split("\nEach entry", 1)[0]
+    return yaml.safe_load(snippet)
+
+
+def _write_two_batches(config: DataWriterConfig, path: str):
+    n_samples, n_times_per_batch, n_lat, n_lon = 2, 4, 4, 5
+    writer = config.build_paired(
+        experiment_dir=path,
+        initial_condition_times=get_initial_condition_times(
+            (2020, 1, 1, 0, 0, 0), "julian", n_samples
+        ),
+        n_timesteps=2 * n_times_per_batch,
+        timestep=TIMESTEP,
+        variable_metadata={},
+        coords={"lat": np.arange(n_lat), "lon": np.arange(n_lon)},
+        dataset_metadata=DatasetMetadata(source={"inference_version": "1.0"}),
+    )
+    generator = torch.Generator().manual_seed(0)
+    shape = (n_samples, n_times_per_batch, n_lat, n_lon)
+    for i_batch in range(2):
+        start = cftime.DatetimeJulian(2020, 1, 1) + i_batch * n_times_per_batch * (
+            TIMESTEP
+        )
+        batch_time = xr.DataArray(
+            np.array(
+                [[start + i * TIMESTEP for i in range(n_times_per_batch)]] * n_samples
+            ),
+            dims=["sample", "time"],
+        )
+        prediction = {
+            name: torch.rand(shape, generator=generator)
+            for name in ["temp", "pressure", "precipitation"]
+        }
+        reference = {
+            name: torch.rand(shape, generator=generator)
+            for name in ["temp", "pressure", "humidity"]
+        }
+        writer.append_batch(get_paired_data(prediction, reference, batch_time))
+    writer.finalize()
+
+
+def test_legacy_file_flags_migration_advice_writes_identical_files(tmp_path):
+    with pytest.warns(FutureWarning) as record:
+        legacy_config = DataWriterConfig(
+            names=["temp", "pressure"], time_coarsen=TimeCoarsenConfig(2)
+        )
+    migrated_config = dacite.from_dict(
+        DataWriterConfig,
+        {
+            **_legacy_files_snippet(str(record[0].message)),
+            "save_prediction_files": False,
+            "save_monthly_files": False,
+        },
+        config=dacite.Config(strict=True),
+    )
+    legacy_dir, migrated_dir = tmp_path / "legacy", tmp_path / "migrated"
+    legacy_dir.mkdir()
+    migrated_dir.mkdir()
+    _write_two_batches(legacy_config, str(legacy_dir))
+    _write_two_batches(migrated_config, str(migrated_dir))
+
+    filenames = sorted(p.name for p in legacy_dir.iterdir())
+    assert filenames == [
+        "autoregressive_predictions.nc",
+        "autoregressive_target.nc",
+        "monthly_mean_predictions.nc",
+        "monthly_mean_target.nc",
+    ]
+    assert sorted(p.name for p in migrated_dir.iterdir()) == filenames
+    for filename in filenames:
+        with (
+            xr.open_dataset(legacy_dir / filename, decode_timedelta=False) as legacy,
+            xr.open_dataset(
+                migrated_dir / filename, decode_timedelta=False
+            ) as migrated,
+        ):
+            xr.testing.assert_identical(legacy, migrated)
 
 
 @pytest.mark.parametrize(

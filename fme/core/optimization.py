@@ -2,7 +2,7 @@ import contextlib
 import dataclasses
 import itertools
 import warnings
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, Literal, TypeAlias
 
 import numpy as np
@@ -11,7 +11,10 @@ from torch import nn
 
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
+from fme.core.muon import ADJUST_LR_FNS as MUON_ADJUST_LR_FNS
+from fme.core.muon import Muon, check_muon_state_dict_compatible
 from fme.core.scheduler import LRScheduler, SchedulerConfig, SequentialSchedulerConfig
+from fme.core.spectral_filter_parameter import SpectralFilterParameter
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -72,12 +75,100 @@ class CheckpointConfig:
             return NoCheckpoint()
 
 
+_MUON_KWARGS = frozenset(
+    {
+        "momentum",
+        "nesterov",
+        "weight_decay",
+        "ns_steps",
+        "adjust_lr_fn",
+        "adamw_lr",
+        "adamw_betas",
+        "adamw_eps",
+        "adamw_weight_decay",
+    }
+)
+
+
+def _split_muon_parameters(
+    named_parameters: Iterable[tuple[str, torch.nn.Parameter]],
+    adamw_names: Sequence[str],
+) -> tuple[
+    list[torch.nn.Parameter],
+    list[SpectralFilterParameter],
+    list[torch.nn.Parameter],
+]:
+    """Split parameters into (Muon, spectral Muon, AdamW) lists.
+
+    Parameters whose name contains one of ``adamw_names`` go to AdamW.
+    Of the rest, :class:`SpectralFilterParameter` instances go to spectral
+    Muon, other parameters with ``ndim >= 2`` to Muon, and all others to
+    AdamW.
+
+    Raises:
+        ValueError: If an entry of ``adamw_names`` matches no parameter name.
+    """
+    muon_params: list[torch.nn.Parameter] = []
+    spectral_params: list[SpectralFilterParameter] = []
+    adamw_params: list[torch.nn.Parameter] = []
+    unmatched = set(adamw_names)
+    for name, param in named_parameters:
+        matches = {pattern for pattern in adamw_names if pattern in name}
+        unmatched -= matches
+        if matches:
+            adamw_params.append(param)
+        elif isinstance(param, SpectralFilterParameter):
+            spectral_params.append(param)
+        elif param.ndim >= 2:
+            muon_params.append(param)
+        else:
+            adamw_params.append(param)
+    if unmatched:
+        raise ValueError(
+            "OptimizationConfig.adamw_names entries matched no parameter "
+            f"name: {sorted(unmatched)}"
+        )
+    return muon_params, spectral_params, adamw_params
+
+
+def _default_foreach(
+    parameters: Sequence[torch.nn.Parameter], kwargs: Mapping[str, Any]
+) -> Mapping[str, Any]:
+    """Keep torch's multi-tensor ("foreach") Adam default for models with
+    SpectralFilterParameter weights.
+
+    torch only defaults to the faster foreach implementation when every
+    parameter's type is exactly ``Tensor`` or ``Parameter``, so a single
+    ``SpectralFilterParameter`` would silently select the per-tensor loop.
+    """
+    if "foreach" in kwargs or "fused" in kwargs:
+        return kwargs
+    if not any(isinstance(p, SpectralFilterParameter) for p in parameters):
+        return kwargs
+    return {**kwargs, "foreach": all(p.is_cuda for p in parameters)}
+
+
 def _build_optimizer(
-    optimizer_type: Literal["Adam", "FusedAdam", "AdamW"],
-    parameters: Iterable[torch.nn.Parameter],
+    optimizer_type: Literal["Adam", "FusedAdam", "AdamW", "Muon"],
+    named_parameters: Iterable[tuple[str, torch.nn.Parameter]],
     lr: float,
     kwargs: Mapping[str, Any],
+    adamw_names: Sequence[str] = (),
 ) -> torch.optim.Optimizer:
+    if optimizer_type == "Muon":
+        muon_params, spectral_params, adamw_params = _split_muon_parameters(
+            named_parameters, adamw_names
+        )
+        return Muon(
+            muon_params,
+            adamw_params,
+            lr=lr,
+            spectral_params=spectral_params,
+            **kwargs,
+        )
+    parameters = [param for _, param in named_parameters]
+    if optimizer_type in ("Adam", "AdamW"):
+        kwargs = _default_foreach(parameters, kwargs)
     if optimizer_type == "FusedAdam":
         return torch.optim.AdamW(parameters, lr=lr, fused=True, **kwargs)
     elif optimizer_type == "Adam":
@@ -208,8 +299,18 @@ class Optimization(OptimizationABC):
         self._accumulated_loss = torch.tensor(0.0, device=get_device())
 
     def set_learning_rate(self, lr: float):
+        """Set the learning rate of the first parameter group to ``lr``.
+
+        Any other parameter groups (e.g. Muon's AdamW group) are rescaled by
+        the same factor, preserving their ratio to the first group. If the
+        first group's learning rate is zero, every group is set to ``lr``.
+        """
+        current = self.optimizer.param_groups[0]["lr"]
         for param_group in self.optimizer.param_groups:
-            param_group["lr"] = lr
+            if current == 0:
+                param_group["lr"] = lr
+            else:
+                param_group["lr"] = param_group["lr"] * (lr / current)
 
     def load_optimizer_state_for_finetuning(self, state: dict):
         """Load per-parameter optimizer running state and grad scaler state from a
@@ -231,8 +332,11 @@ class Optimization(OptimizationABC):
         Raises:
             ValueError: If the checkpoint's parameter groups are not
                 structurally compatible with the freshly-built optimizer
-                (e.g. different group count or per-group parameter count).
+                (e.g. different group count or per-group parameter count),
+                or if one but not both of the checkpoint and the current
+                optimizer is Muon.
         """
+        check_muon_state_dict_compatible(self.optimizer, state["optimizer_state_dict"])
         fresh_hparams = [
             {k: v for k, v in g.items() if k != "params"}
             for g in self.optimizer.param_groups
@@ -273,8 +377,20 @@ class Optimization(OptimizationABC):
     def load_state(self, state):
         """
         Loads state from a serializable data structure.
+
+        Raises:
+            ValueError: If one but not both of the saved and the current
+                optimizer is Muon.
         """
+        check_muon_state_dict_compatible(self.optimizer, state["optimizer_state_dict"])
+        # load_state_dict restores each group's saved hyperparameters, but
+        # foreach is an implementation choice of this run, not training state:
+        # keep the freshly-built value (see _default_foreach).
+        fresh_foreach = [g.get("foreach") for g in self.optimizer.param_groups]
         self.optimizer.load_state_dict(state["optimizer_state_dict"])
+        for group, foreach in zip(self.optimizer.param_groups, fresh_foreach):
+            if "foreach" in group:
+                group["foreach"] = foreach
         self.scheduler.load_state_dict(state["scheduler_state_dict"])
         if self.gscaler is not None:
             self.gscaler.load_state_dict(state["gscaler_state_dict"])
@@ -291,9 +407,41 @@ class OptimizationConfig:
     Configuration for optimization.
 
     Parameters:
-        optimizer_type: The type of optimizer to use.
-        lr: The learning rate.
-        kwargs: Additional keyword arguments to pass to the optimizer.
+        optimizer_type: The type of optimizer to use. ``"Muon"`` updates every
+            parameter with ``ndim >= 2`` (conv kernels are flattened to
+            ``(out_channels, -1)``) with Muon's orthogonalized momentum, and
+            all other parameters (biases, norm affines) plus those selected
+            by ``adamw_names`` with AdamW, in a separate parameter group.
+            Spectral filter weights
+            (:class:`fme.core.spectral_filter_parameter.SpectralFilterParameter`,
+            used by the SFNO implementations) not selected by ``adamw_names``
+            get a third group, which orthogonalizes each spectral mode's
+            complex channel matrix separately instead of flattening the
+            weight.
+            Grouping is by ``ndim`` alone, so a norm affine over several
+            dimensions (e.g. ``LayerNorm([C, H, W])``) goes to Muon unless
+            listed in ``adamw_names``.
+        lr: The learning rate. For Muon, the Muon group's learning rate; the
+            AdamW group's is ``kwargs["adamw_lr"]``. The logged learning rate
+            and LR tuning act on the first (Muon) group, and LR tuning
+            rescales the AdamW group by the same factor; LR schedulers
+            scale each group from its own initial learning rate.
+        kwargs: Additional keyword arguments to pass to the optimizer. For
+            Muon the allowed keys are ``momentum`` (default 0.95),
+            ``nesterov`` (default True), ``weight_decay`` (decoupled, Muon
+            group, default 0.0), ``ns_steps`` (Newton-Schulz iterations,
+            default 5), ``adjust_lr_fn`` (Muon step-size rule, ``None``/
+            ``"original"`` or ``"match_rms_adamw"``, default None; see
+            :class:`fme.core.muon.Muon`), ``adamw_lr`` (required),
+            ``adamw_betas`` (default ``[0.9, 0.999]``), ``adamw_eps``
+            (default 1e-8) and ``adamw_weight_decay`` (decoupled, default
+            0.0).
+        adamw_names: Muon only. Substrings of parameter names (as given by
+            ``named_parameters()``, prefixed by the module index, e.g.
+            ``"0.module.film.W_scale.weight"``) whose matrix parameters are
+            routed to the AdamW group instead of Muon, e.g. zero-initialized
+            projections that Muon's unit-scale first step would move off
+            zero. Every entry must match at least one parameter.
         enable_automatic_mixed_precision: Whether to use automatic mixed
             precision.
         scheduler: The type of scheduler to use. If none is given, no scheduler
@@ -309,7 +457,10 @@ class OptimizationConfig:
             norm before each optimizer step. Compatible with automatic mixed
             precision. When use_gradient_accumulation is enabled, clipping is
             applied to the full N-step accumulated gradient (i.e. the gradient
-            the optimizer sees), not per accumulation sub-step.
+            the optimizer sees), not per accumulation sub-step. With Muon the
+            clip is applied unchanged to the global norm over all
+            parameters, but Muon normalizes each matrix's update, so the
+            clip changes the size of only the AdamW group's update.
         resume_optimizer_ckpt_path: Optional path to a training checkpoint
             (``ckpt.tar``) whose per-parameter optimizer running state (e.g.
             Adam moment estimates) and grad scaler state should be loaded into
@@ -318,9 +469,11 @@ class OptimizationConfig:
             ``betas``, ...) and scheduler are kept; only the running state is
             transferred. Intended for non-resuming jobs; preemption resume in
             the Trainer overrides this state via ``Optimization.load_state``.
+            Loading a non-Muon optimizer state into Muon, or vice versa, is
+            an error.
     """
 
-    optimizer_type: Literal["Adam", "AdamW", "FusedAdam"] = "Adam"
+    optimizer_type: Literal["Adam", "AdamW", "FusedAdam", "Muon"] = "Adam"
     lr: float = 0.001
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     enable_automatic_mixed_precision: bool = False
@@ -333,12 +486,36 @@ class OptimizationConfig:
         default_factory=lambda: CheckpointConfig()
     )
     resume_optimizer_ckpt_path: str | None = None
+    adamw_names: list[str] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         if self.optimizer_type == "FusedAdam":
             warnings.warn(
                 "FusedAdam is deprecated. Use AdamW with fused=True in kwargs instead.",
                 DeprecationWarning,
+            )
+        if self.optimizer_type == "Muon":
+            unknown = set(self.kwargs) - _MUON_KWARGS
+            if unknown:
+                raise ValueError(
+                    f"Unknown kwargs for Muon: {sorted(unknown)}. "
+                    f"Allowed: {sorted(_MUON_KWARGS)}."
+                )
+            adjust_lr_fn = self.kwargs.get("adjust_lr_fn")
+            if adjust_lr_fn not in MUON_ADJUST_LR_FNS:
+                raise ValueError(
+                    "Muon kwargs['adjust_lr_fn'] must be one of "
+                    f"{list(MUON_ADJUST_LR_FNS)}, got {adjust_lr_fn!r}."
+                )
+            if "adamw_lr" not in self.kwargs:
+                raise ValueError(
+                    "Muon requires kwargs['adamw_lr'], the learning rate of "
+                    "its AdamW parameter group."
+                )
+        elif len(self.adamw_names) > 0:
+            raise ValueError(
+                "adamw_names is only used with optimizer_type='Muon', got "
+                f"optimizer_type={self.optimizer_type!r}."
             )
 
     @property
@@ -349,9 +526,17 @@ class OptimizationConfig:
         return self.scheduler.type is not None
 
     def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
-        parameters = itertools.chain(*[module.parameters() for module in modules])
+        named_parameters = [
+            (f"{i}.{name}", param)
+            for i, module in enumerate(modules)
+            for name, param in module.named_parameters()
+        ]
         optimizer = _build_optimizer(
-            self.optimizer_type, parameters, self.lr, self.kwargs
+            self.optimizer_type,
+            named_parameters,
+            self.lr,
+            self.kwargs,
+            adamw_names=self.adamw_names,
         )
         scheduler = self.scheduler.build(optimizer, max_epochs)
         optimization = Optimization(

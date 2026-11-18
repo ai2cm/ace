@@ -3,7 +3,6 @@ from typing import TypeAlias
 
 import numpy as np
 import torch
-import torch_harmonics
 
 from fme.core.constants import GRAVITY, LATENT_HEAT_OF_FREEZING
 
@@ -385,9 +384,7 @@ def quantile(bins: np.ndarray, hist: np.ndarray, probability: float) -> float:
     return c0 + (c1 - c0) * (probability - p0) / (p1 - p0)
 
 
-def spherical_power_spectrum(
-    field: torch.Tensor, sht: torch_harmonics.RealSHT
-) -> torch.Tensor:
+def spherical_power_spectrum(field: torch.Tensor, sht: torch.nn.Module) -> torch.Tensor:
     """Compute the spherical power spectrum of a field.
 
     Args:

@@ -21,12 +21,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 tl.set_backend("pytorch")
-import torch_harmonics as th
-import torch_harmonics.distributed as thd
+import fme.core.sht as th
 
 # from tensorly.plugins import use_opt_einsum
 # use_opt_einsum('optimal')
 from tltorch.factorized_tensors.core import FactorizedTensor
+
+from fme.core.spectral_filter_parameter import SpectralFilterParameter
 
 # import convenience functions for factorized tensors
 from .activations import ComplexReLU
@@ -105,7 +106,7 @@ class SpectralConvS2(nn.Module):
         if not self.separable:
             weight_shape += [out_channels]
 
-        if isinstance(self.inverse_transform, thd.DistributedInverseRealSHT):
+        if isinstance(self.inverse_transform, th.DistributedInverseRealSHT):
             self.modes_lat_local = self.inverse_transform.lmax_local
             self.modes_lon_local = self.inverse_transform.mmax_local
             self.lpad_local = self.inverse_transform.lpad_local
@@ -145,7 +146,13 @@ class SpectralConvS2(nn.Module):
             self.weight.normal_(0, scale)
         else:
             assert factorization == "ComplexDense"
-            self.weight = nn.Parameter(scale * torch.randn(*weight_shape, 2))
+            weight = scale * torch.randn(*weight_shape, 2)
+            if self.separable:
+                # a per-channel scale per mode, not a channel matrix
+                self.weight = nn.Parameter(weight)
+            else:
+                # (C_in, C_out, modes...), contracted as "bixy,ioxy->boxy"
+                self.weight = SpectralFilterParameter(weight, in_dim=0, out_dim=1)
             if self.operator_type == "dhconv":
                 self.weight.is_shared_mp = ["matmul", "w"]
             else:
@@ -334,13 +341,28 @@ class SpectralAttentionS2(nn.Module):
             self.mul_handle = compl_mul2d_fwd
 
             # weights
-            w = [self.scale * torch.randn(self.embed_dim, hidden_size, 2)]
+            # contracted as "bixy,io->boxy"
+            w = [
+                SpectralFilterParameter(
+                    self.scale * torch.randn(self.embed_dim, hidden_size, 2),
+                    in_dim=0,
+                    out_dim=1,
+                )
+            ]
             for l in range(1, self.spectral_layers):
-                w.append(self.scale * torch.randn(hidden_size, hidden_size, 2))
+                w.append(
+                    SpectralFilterParameter(
+                        self.scale * torch.randn(hidden_size, hidden_size, 2),
+                        in_dim=0,
+                        out_dim=1,
+                    )
+                )
             self.w = nn.ParameterList(w)
 
-            self.wout = nn.Parameter(
-                self.scale * torch.randn(hidden_size, self.embed_dim, 2)
+            self.wout = SpectralFilterParameter(
+                self.scale * torch.randn(hidden_size, self.embed_dim, 2),
+                in_dim=0,
+                out_dim=1,
             )
 
             if bias:
@@ -366,13 +388,23 @@ class SpectralAttentionS2(nn.Module):
             self.mul_handle = compl_exp_mul2d_fwd
 
             # weights
+            # contracted as "bixy,xio->boxy"
             w = [
-                self.scale * torch.randn(self.modes_lat, self.embed_dim, hidden_size, 2)
+                SpectralFilterParameter(
+                    self.scale
+                    * torch.randn(self.modes_lat, self.embed_dim, hidden_size, 2),
+                    in_dim=1,
+                    out_dim=2,
+                )
             ]
             for l in range(1, self.spectral_layers):
                 w.append(
-                    self.scale
-                    * torch.randn(self.modes_lat, hidden_size, hidden_size, 2)
+                    SpectralFilterParameter(
+                        self.scale
+                        * torch.randn(self.modes_lat, hidden_size, hidden_size, 2),
+                        in_dim=1,
+                        out_dim=2,
+                    )
                 )
             self.w = nn.ParameterList(w)
 
@@ -384,8 +416,11 @@ class SpectralAttentionS2(nn.Module):
                     ]
                 )
 
-            self.wout = nn.Parameter(
-                self.scale * torch.randn(self.modes_lat, hidden_size, self.embed_dim, 2)
+            self.wout = SpectralFilterParameter(
+                self.scale
+                * torch.randn(self.modes_lat, hidden_size, self.embed_dim, 2),
+                in_dim=1,
+                out_dim=2,
             )
 
             self.activations = nn.ModuleList([])

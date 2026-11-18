@@ -6,7 +6,7 @@ import warnings
 from collections.abc import Mapping
 from typing import Any
 
-from fme.core.cloud import is_local
+from fme.core.cloud import is_local, is_relative
 from fme.core.device import get_device
 from fme.core.dicts import to_flat_dict
 from fme.core.distributed import Distributed
@@ -40,8 +40,10 @@ class LoggingConfig:
         log_to_screen: Whether to log to the screen.
         log_to_file: Whether to log to a file.
         log_to_wandb: Whether to log to Weights & Biases.
-        metrics_log_dir: Directory to write scalar metrics to disk as JSONL.
-            If None, disk metric logging is disabled.
+        metrics_log_dir: Subdirectory of the experiment directory to write
+            scalar metrics to disk as JSONL. Required so a resumed job can
+            recover any that wandb lost. Ignored with a warning if the
+            experiment directory is remote.
         log_format: Format of the log messages.
         level: Sets the logging level.
         wandb_dir_in_experiment_dir: Whether to create the wandb_dir in the
@@ -54,13 +56,22 @@ class LoggingConfig:
     log_to_screen: bool = True
     log_to_file: bool = True
     log_to_wandb: bool = True
-    metrics_log_dir: str | None = None
+    metrics_log_dir: str = "metrics"
     log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     level: str | int = logging.INFO
     wandb_dir_in_experiment_dir: bool = False
 
     def __post_init__(self):
+        if not is_relative(self.metrics_log_dir):
+            raise ValueError(
+                "metrics_log_dir must be a relative path, a subdirectory of the "
+                f"experiment directory, got {self.metrics_log_dir!r}"
+            )
         self._dist = Distributed.get_instance()
+
+    def get_metrics_log_dir(self, experiment_dir: str) -> str:
+        """The full path of the metrics directory under ``experiment_dir``."""
+        return os.path.join(experiment_dir, self.metrics_log_dir)
 
     def configure_logging(
         self,
@@ -151,7 +162,7 @@ class LoggingConfig:
         wandb = WandB.get_instance()
         wandb.configure(
             log_to_wandb=self.log_to_wandb,
-            metrics_log_dir=self.metrics_log_dir,
+            metrics_log_dir=self.get_metrics_log_dir(experiment_dir),
         )
         notes = _get_wandb_notes(_get_beaker_id())
         wandb.init(
