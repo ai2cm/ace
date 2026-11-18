@@ -1,0 +1,7 @@
+group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime|results_dataset_ocean|results_dataset_atmos
+
+# X5r = X1c0 (coupled_randco2ft_x1c0 row) with the coupled helical `repeat` LR schedules (U33).
+# results_dataset_{ocean,atmos} pinned to the datasets X1 (beaker 01M7HN1PK8CQZV6ADZ413SN0X6) mounted.
+# Row is 'deferred': set skip_or_train to 'train' only on the maintainer's launch go.
+
+1deg-hybridsstdiag-randco2ft-x5r-pclr-replayonly-tb6xf0ju||ace-samudra-cm4|jrgclj2f|best_inference_ckpt|ace2-cm4-atmos-noLSM|tb6xf0ju|best_inference_ckpt|train|urgent|titan|8||3|ai2/ace|seed=0|8h|01M626JPB247BQWSE0GN35SAXR|01M5JJTWWGYYSACGH3VY6GN6RF
