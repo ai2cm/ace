@@ -1,6 +1,6 @@
 import copy
 import os
-from typing import Literal
+from typing import Any, Literal
 
 import pytest
 import torch
@@ -10,6 +10,7 @@ import yaml
 
 import fme
 from fme.core.optimization import (
+    OPTIMIZER_PARAM_GROUP_ATTR,
     Checkpoint,
     CheckpointConfig,
     NoCheckpoint,
@@ -1339,3 +1340,156 @@ def test_build_optimization_dict_resume_from_uncoupled_ckpt(tmp_path: str):
                 target_state[param_id][key], source_state[param_id][key]
             )
     assert optimization.learning_rates["b"] == 0.05
+
+
+class _ModelWithLogit(nn.Module):
+    """A matrix (Muon under Muon), optionally a bias, and a 1-d ``logit``
+    carrying optional optimizer overrides, like the OHC level-weight logit."""
+
+    def __init__(self, override: dict[str, float], bias: bool = True):
+        super().__init__()
+        self.linear = nn.Linear(3, 4, bias=bias)
+        self.logit = nn.Parameter(torch.zeros(3))
+        if override:
+            setattr(self.logit, OPTIMIZER_PARAM_GROUP_ATTR, override)
+
+
+_MUON_KWARGS: dict[str, Any] = {
+    "adamw_lr": 2e-3,
+    "adamw_betas": [0.8, 0.95],
+    "adamw_eps": 1e-6,
+    "adamw_weight_decay": 0.03,
+}
+
+
+def _optimization_config(
+    optimizer_type: Literal["Adam", "AdamW", "Muon"],
+) -> OptimizationConfig:
+    if optimizer_type == "Muon":
+        return OptimizationConfig(
+            optimizer_type="Muon", lr=0.02, kwargs=dict(_MUON_KWARGS)
+        )
+    return OptimizationConfig(
+        optimizer_type=optimizer_type, lr=1e-3, kwargs={"weight_decay": 0.01}
+    )
+
+
+def _group_of(optimizer: torch.optim.Optimizer, param: nn.Parameter) -> int:
+    (index,) = [
+        i
+        for i, group in enumerate(optimizer.param_groups)
+        if any(p is param for p in group["params"])
+    ]
+    return index
+
+
+def _hparams(group: dict) -> dict:
+    return {k: v for k, v in group.items() if k not in ("params", "initial_lr")}
+
+
+@pytest.mark.parametrize("optimizer_type", ["Adam", "AdamW", "Muon"])
+def test_optimization_config_build_param_group_override_unset(
+    optimizer_type: Literal["Adam", "AdamW", "Muon"],
+):
+    """A logit without overrides falls into the group it would without the
+    mechanism: the single group, or Muon's AdamW group (by ndim)."""
+    model = _ModelWithLogit({})
+    optimizer = (
+        _optimization_config(optimizer_type).build(nn.ModuleList([model]), 1).optimizer
+    )
+    groups = optimizer.param_groups
+    if optimizer_type == "Muon":
+        assert len(groups) == 2
+        assert _group_of(optimizer, model.logit) == 1
+        assert _group_of(optimizer, model.linear.bias) == 1
+        assert groups[1]["use_muon"] is False
+    else:
+        assert len(groups) == 1
+
+
+@pytest.mark.parametrize("override", [{"lr": 0.5}, {"lr": 0.5, "weight_decay": 0.2}])
+@pytest.mark.parametrize("optimizer_type", ["Adam", "AdamW", "Muon"])
+def test_optimization_config_build_param_group_override_set(
+    optimizer_type: Literal["Adam", "AdamW", "Muon"], override: dict[str, float]
+):
+    """With overrides, logit gets its own last group: set keys override,
+    unset keys are those of the group it would otherwise be in."""
+    config = _optimization_config(optimizer_type)
+    model = _ModelWithLogit(override)
+    optimizer = config.build(nn.ModuleList([model]), 1).optimizer
+    plain = (
+        _optimization_config(optimizer_type)
+        .build(nn.ModuleList([_ModelWithLogit({})]), 1)
+        .optimizer
+    )
+    groups = optimizer.param_groups
+    assert len(groups) == len(plain.param_groups) + 1
+    assert [p is model.logit for p in groups[-1]["params"]] == [True]
+    for group, plain_group in zip(groups[:-1], plain.param_groups):
+        assert _hparams(group) == _hparams(plain_group)
+    fallback = plain.param_groups[-1]  # logit's group without overrides
+    assert _hparams(groups[-1]) == {**_hparams(fallback), **override}
+    if optimizer_type == "Muon":
+        assert groups[-1]["use_muon"] is False
+        assert groups[-1]["betas"] == tuple(_MUON_KWARGS["adamw_betas"])
+
+
+def test_optimization_config_build_param_group_override_muon_without_adamw_group():
+    """With no AdamW group, unset keys come from Muon's adamw_* defaults."""
+    model = _ModelWithLogit({"lr": 0.5}, bias=False)
+    config = OptimizationConfig(
+        optimizer_type="Muon", lr=0.02, kwargs={"adamw_lr": 1e-3}
+    )
+    groups = config.build(nn.ModuleList([model]), 1).optimizer.param_groups
+    assert len(groups) == 2
+    assert _hparams(groups[1]) == {
+        "lr": 0.5,
+        "betas": (0.9, 0.999),
+        "eps": 1e-8,
+        "weight_decay": 0.0,
+        "use_muon": False,
+    }
+
+
+@pytest.mark.parametrize("optimizer_type", ["Adam", "AdamW", "Muon"])
+def test_param_group_override_set_learning_rate_keeps_ratio(
+    optimizer_type: Literal["Adam", "AdamW", "Muon"],
+):
+    config = _optimization_config(optimizer_type)
+    optimization = config.build(nn.ModuleList([_ModelWithLogit({"lr": 0.5})]), 1)
+    assert optimization.learning_rate == config.lr
+    optimization.set_learning_rate(4 * config.lr)
+    assert optimization.learning_rate == pytest.approx(4 * config.lr)
+    assert optimization.optimizer.param_groups[-1]["lr"] == pytest.approx(2.0)
+
+
+def _step(optimization: Optimization, model: _ModelWithLogit, seed: int) -> None:
+    torch.manual_seed(seed)
+    x = torch.randn(5, 3)
+    loss = ((model.linear(x)[:, :3] - model.logit) ** 2).sum()
+    optimization.accumulate_loss(loss)
+    optimization.step_weights()
+
+
+@pytest.mark.parametrize("optimizer_type", ["Adam", "AdamW", "Muon"])
+def test_param_group_override_steps_and_reloads(
+    optimizer_type: Literal["Adam", "AdamW", "Muon"],
+):
+    """logit moves in a step, and a reloaded optimizer continues identically."""
+    config = _optimization_config(optimizer_type)
+    torch.manual_seed(0)
+    model = _ModelWithLogit({"lr": 0.5, "weight_decay": 0.2})
+    optimization = config.build(nn.ModuleList([model]), 1)
+    _step(optimization, model, seed=1)
+    assert model.logit.detach().abs().sum() > 0
+    state = optimization.get_state()
+    model_copy = copy.deepcopy(model)
+    setattr(
+        model_copy.logit, OPTIMIZER_PARAM_GROUP_ATTR, {"lr": 0.5, "weight_decay": 0.2}
+    )
+    reloaded = config.build(nn.ModuleList([model_copy]), 1)
+    reloaded.load_state(copy.deepcopy(state))
+    _step(optimization, model, seed=2)
+    _step(reloaded, model_copy, seed=2)
+    for p, q in zip(model.parameters(), model_copy.parameters()):
+        torch.testing.assert_close(p, q, rtol=0, atol=0)
