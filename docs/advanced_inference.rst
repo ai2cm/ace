@@ -7,16 +7,28 @@ Advanced inference
 Data writer configuration
 =========================
 
-This section provides an example of how to use the
-:class:`fme.ace.DataWriterConfig` section of the inference configuration.
-The data writer configuration is used to specify how the output from an
-inference run is saved to disk. For flexibility, it is recommended to use
-the ``files`` section, which allows for different output files to be written
-with different frequencies and different variables. For example, the following
-configuration will write the monthly means of all available variables to a
-netCDF file called ``monthly_means.nc``, while also writing the daily mean
-(assuming a 6-hour time step model) values of the ``total_water_path``
-and ``TMP2m`` variables to a zarr dataset called ``daily_mean.zarr``:
+The :class:`fme.ace.DataWriterConfig` section of the inference configuration
+specifies how the output from an inference run is saved to disk. Output files
+are configured through ``files``, a list of :class:`fme.ace.FileWriterConfig`
+entries. Each entry chooses its variables (``names``), time aggregation
+(``time_coarsen``) and format (netCDF or zarr). By default an entry writes
+both the predictions and the target data, to ``<label>_predictions`` and
+``<label>_target``. With ``save_reference: false`` it writes only the
+predictions, to a file named after its ``label``.
+
+The ``save_prediction_files`` and ``save_monthly_files`` options are
+deprecated and will be removed in a future release. They default to ``true``,
+so set them to ``false`` when configuring outputs through ``files``.
+
+The following configuration writes:
+
+- monthly means of all available variables to the netCDF files
+  ``monthly_mean_predictions.nc`` and ``monthly_mean_target.nc``;
+- daily means (for a model with a 6-hour time step) of ``total_water_path``
+  and ``TMP2m`` to the zarr stores ``daily_mean_predictions.zarr`` and
+  ``daily_mean_target.zarr``;
+- uncoarsened ``PRATEsfc`` predictions at every time step to the zarr store
+  ``precip_6hourly.zarr``, without the target data.
 
 .. literalinclude:: data-writer-example.yaml
    :language: yaml
