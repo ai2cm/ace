@@ -56,6 +56,10 @@ Changes made directly on this branch (not from a PR), outside
   global_mean_co2 copied from the v2 stats, and TMP850 / h500 placeholders in
   the e3sm group. Checked by
   `configs/experiments/2026-10-19-fm/scripts/verify_percell_stats.py`.
+- `scripts/data_process/configs/fm-v3-e3sm-balanced-percell-c3-stats.yaml`: the
+  same stores grouped per dataset configuration (era5, amip, ramped, som,
+  cm4-picontrol, cm4-1pctco2, am4-randco2, xshield, e3sm) for the C3 runs, which
+  use only its groups; computed from the per-store stats of the config above.
 
 ## Deferred
 
