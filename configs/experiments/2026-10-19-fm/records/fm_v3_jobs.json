@@ -1,16 +1,31 @@
 {
   "ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s0-maskoff-smoke": {
-    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s0-maskoff-smoke-hvno/training_checkpoints/best_ckpt.tar",
-    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s0-maskoff-smoke-hvno/training_checkpoints/best_inference_ckpt.tar",
-    "commit": "af7b03d3484599e65ecd86f5757662cae1e13f43",
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s0-maskoff-smoke-1l02/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s0-maskoff-smoke-1l02/training_checkpoints/best_inference_ckpt.tar",
+    "commit": "3782504575bd51163173126272a1ad4093a0078a",
     "config": "run_configs/ace-train-config-4deg-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s0-maskoff-smoke.yaml",
-    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s0-maskoff-smoke-hvno/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
-    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s0-maskoff-smoke-hvno",
-    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s0-maskoff-smoke-hvno",
-    "id": "01M7P879YYWP692C3M6DA4FBRY",
-    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s0-maskoff-smoke-hvno/training_checkpoints/ckpt.tar",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s0-maskoff-smoke-1l02/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s0-maskoff-smoke-1l02",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s0-maskoff-smoke-1l02",
+    "id": "01M7P8QXDAVMVQ8JSDG7XBXVMA",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s0-maskoff-smoke-1l02/training_checkpoints/ckpt.tar",
     "priority": "high",
-    "submitted": "2026-11-18T02:36:53+00:00",
-    "url": "https://beaker.org/ex/01M7P879YYWP692C3M6DA4FBRY"
+    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s0-maskoff-smoke-hvno",
+    "submitted": "2026-11-18T02:45:58+00:00",
+    "url": "https://beaker.org/ex/01M7P8QXDAVMVQ8JSDG7XBXVMA"
+  },
+  "ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s0-maskoff-smoke": {
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s0-maskoff-smoke-69gp/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s0-maskoff-smoke-69gp/training_checkpoints/best_inference_ckpt.tar",
+    "commit": "3782504575bd51163173126272a1ad4093a0078a",
+    "config": "run_configs/ace-train-config-4deg-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s0-maskoff-smoke.yaml",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s0-maskoff-smoke-69gp/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s0-maskoff-smoke-69gp",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s0-maskoff-smoke-69gp",
+    "id": "01M7P8R005ADEDJXB2FG4DQ0JS",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s0-maskoff-smoke-69gp/training_checkpoints/ckpt.tar",
+    "priority": "high",
+    "submitted": "2026-11-18T02:46:00+00:00",
+    "url": "https://beaker.org/ex/01M7P8R005ADEDJXB2FG4DQ0JS"
   }
 }
