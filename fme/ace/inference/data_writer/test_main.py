@@ -33,6 +33,7 @@ _WRITER_ENABLING_FIELDS = {
 }
 
 
+@pytest.mark.filterwarnings("ignore:.*enabled in DataWriterConfig:FutureWarning")
 @pytest.mark.parametrize("field", sorted(_WRITER_ENABLING_FIELDS))
 def test_has_subwriters_enabled_covers_field(field: str):
     """Turning on one writer-enabling field makes has_subwriters_enabled True."""
@@ -70,6 +71,7 @@ def test_has_subwriters_enabled_field_set_is_current():
     )
 
 
+@pytest.mark.filterwarnings("ignore:.*enabled in DataWriterConfig:FutureWarning")
 @pytest.mark.parametrize("build_method", ["build_paired", "build"])
 def test_spatial_parallelism_raises_with_gathered_writers(build_method: str):
     """Gathered writers must raise under spatial parallelism."""
@@ -398,6 +400,7 @@ def test_gather_time_single_rank():
     xr.testing.assert_equal(result, time)
 
 
+@pytest.mark.filterwarnings("ignore:.*enabled in DataWriterConfig:FutureWarning")
 def test_netcdf_build_paired_under_multi_gpu_builds_writers_on_root():
     """build_paired with netCDF-only config succeeds and creates subwriters
     under simulated single-rank (root). This verifies the zarr guard is not

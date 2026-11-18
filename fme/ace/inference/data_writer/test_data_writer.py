@@ -66,6 +66,7 @@ def get_initial_condition_times(
     return np.array(initial_condition_times)
 
 
+@pytest.mark.filterwarnings("ignore:.*enabled in DataWriterConfig:FutureWarning")
 def test_data_writer_config_save_names():
     variable_names = ["temp", "humidity"]
     kwargs = dict(save_prediction_files=False, save_monthly_files=False)
@@ -93,6 +94,7 @@ def get_paired_data(
     )
 
 
+@pytest.mark.filterwarnings("ignore:.*enabled in DataWriterConfig:FutureWarning")
 class TestDataWriter:
     @pytest.fixture(params=["julian", "proleptic_gregorian", "noleap"])
     def calendar(self, request):
@@ -693,6 +695,7 @@ class TestDataWriter:
                 np.testing.assert_equal(ds.time.values, expected_time)
 
 
+@pytest.mark.filterwarnings("ignore:.*enabled in DataWriterConfig:FutureWarning")
 def test_default_netcdf_writers_record_data_writer_io(tmp_path):
     """The default config writes netCDF only, so its storage calls must be timed
     for the data_writer breakdown to account for them."""
