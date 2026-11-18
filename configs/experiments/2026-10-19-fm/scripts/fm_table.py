@@ -24,14 +24,27 @@ Two backends, chosen by whether the `beaker` CLI is on PATH:
   submit_fm_c96amip_jobs.py), else from `gantry list --all` (experiment names are
   agent-alexeyy-<job name>-<suffix>; the newest wins); status from `gantry
   list --all` (a job it calls running counts as queued until `gantry status`
-  gives it a start time), logs from `gantry logs <id>`, which hold every retry of the
-  experiment. A retry starts at fme's "Resuming training from" line, so
-  "Preemptions" counts those (restarts from a checkpoint, whatever their
-  cause). Rows of runs submitted outside this VM (the 1deg runs) are left out,
-  with a note.
+  gives it a start time). `gantry logs <id>` holds only the experiment's
+  CURRENT attempt (a resumed attempt starts at fme's "Resuming training from"
+  line), so per-epoch timings, train time and restarts come from W&B instead
+  (read-only wandb.Api, project ai2cm/FM): the run whose config.experiment_dir
+  is the experiment's $AGENT_OUTPUT_DIR, which every attempt resumes. Its
+  history has one row per completed epoch, across all attempts, with fme's
+  epoch_{total,train,inference}_seconds. "Preemptions" counts the restarts
+  W&B shows (a jump of more than RESTART_GAP_SECONDS between the wall-clock
+  _timestamp and the run's own _runtime from one epoch to the next), plus 1
+  if the current attempt has resumed and not finished an epoch yet (its log
+  starts with "Resuming training from"); a restart counts whatever its cause.
+  `gantry status` gives no start time to a preempted experiment waiting for
+  its retry either, so a queued job whose W&B run shows progress is counted
+  as queued and listed under the tables as "queued (preempted, epoch N)",
+  not as never started. Without a W&B run (not started, no epoch done yet,
+  or W&B unreachable) a job falls back to its current-attempt log. Rows of
+  runs submitted outside this VM (the 1deg runs) are left out, with a note.
 
-Epochs done and per-phase timings come from the logs of every run
-(preemption retry) of each finished or running experiment. Epochs done is the
+Beaker backend (gantry backend: see above for W&B): epochs done and
+per-phase timings come from the logs of every run (preemption retry) of each
+finished or running experiment. Epochs done is the
 highest N in "Starting training step for model trained for N complete
 epochs", so an epoch counts only once its training, validation and inline
 inference are all done. Finished jobs count as their max_epochs; never-started
@@ -41,8 +54,9 @@ summed over an experiment's runs (preemption retries): each run counts from
 its first training step to its exit (or now, if running), except that a
 preempted or failed run counts only up to its last checkpoint save, since the
 work after it is redone by the next retry. Queueing, startup and lost work are
-excluded, so preemptions do not inflate it. (gantry backend: a run's exit is
-its last timestamped log line.) Epoch columns cover unfinished (running or
+excluded, so preemptions do not inflate it. (gantry backend: the sum of
+W&B's epoch_total_seconds over the completed epochs, i.e. the same kept
+work, minus the epoch in progress.) Epoch columns cover unfinished (running or
 queued) jobs only, "-" when none; train-time and timing columns cover finished
 and running jobs. The "inference, every 10" column is the inline inference
 after epochs 10, 20, ..., when the every-10th-epoch entries run too; "-" until
@@ -103,6 +117,23 @@ RECORDS = (V3_RECORD, C96AMIP_RECORD)
 GANTRY = "/usr/local/bin/gantry"
 AGENT_PREFIX = "agent-alexeyy-"
 GANTRY_LIST_LIMIT = 500
+# W&B (gantry backend): the runs' project, and where the jobs write
+# ($AGENT_OUTPUT_DIR = AGENT_OUTPUT_ROOT/<experiment>, the runs'
+# config.experiment_dir).
+WANDB_PATH = "ai2cm/FM"
+AGENT_OUTPUT_ROOT = "/climate-default/agents/alexeyy"
+WANDB_HISTORY_KEYS = (
+    "epoch",
+    "_timestamp",
+    "_runtime",
+    "epoch_total_seconds",
+    "epoch_train_seconds",
+    "epoch_inference_seconds",
+)
+# Between two epochs of one W&B run, wall time beyond the run's own runtime:
+# a restart (the run was down while Beaker requeued the job). Within an
+# attempt the two agree to ~2 minutes.
+RESTART_GAP_SECONDS = 600
 
 # "Starting training step for model trained for N complete epochs" marks that
 # epochs 0..N-1 are done, including their validation and inline inference.
@@ -205,6 +236,8 @@ class Tracked:
     status: str  # OK, "running", or how it ended
     queued: bool
     preemptions: int
+    # Queued after progress (preempted, waiting for its retry): epochs done.
+    preempted_at_epoch: int | None = None
 
 
 Seconds = tuple[float | None, float | None, float | None, float | None]
@@ -535,13 +568,18 @@ def _split_runs(log: str) -> list[str]:
     return ["\n".join(run) for run in runs if run]
 
 
-def _gantry_progress(job: GantryJob | None, max_epochs: int) -> tuple[Progress, int]:
-    """(progress, restarts) of one experiment from its gantry logs."""
+def _gantry_progress(
+    job: GantryJob | None, max_epochs: int
+) -> tuple[Progress, int, bool]:
+    """(progress, restarts, pending restart) of one experiment from the log of
+    its current attempt (`gantry logs`); pending: the attempt resumed and has
+    not finished an epoch since.
+    """
     if job is None:
-        return (0, NO_SECONDS, 0.0), 0
+        return (0, NO_SECONDS, 0.0), 0, False
     status, queued = _gantry_status(job.status)
     if queued:
-        return (0, NO_SECONDS, 0.0), 0
+        return (0, NO_SECONDS, 0.0), 0, False
     log = _filter_log(_gantry("logs", job.id))
     runs = _split_runs(log)
     entries = []
@@ -555,7 +593,65 @@ def _gantry_progress(job: GantryJob | None, max_epochs: int) -> tuple[Progress, 
             kind, exited = "lost", None
         entries.append((run_log, kind, exited))
     restarts = sum(RESUME_MARK in run for run in runs)
-    return _progress_from_runs(entries, status == OK, max_epochs), restarts
+    epochs = {int(m.group(1)) for m in EPOCH_RE.finditer(runs[-1])} if runs else set()
+    pending = bool(runs) and RESUME_MARK in runs[-1] and len(epochs) <= 1
+    progress = _progress_from_runs(entries, status == OK, max_epochs)
+    return progress, restarts, pending
+
+
+def _wandb_histories(experiments: dict[str, str]) -> dict[str, list[dict]]:
+    """Job name -> per-epoch W&B history rows (WANDB_HISTORY_KEYS, sorted by
+    epoch, last row per epoch) of the run of each experiment (job name ->
+    experiment name) that has completed an epoch. {} if W&B is unreachable.
+    """
+    if not experiments:
+        return {}
+    try:
+        import wandb
+
+        api = wandb.Api(timeout=60)
+        dirs = {f"{AGENT_OUTPUT_ROOT}/{exp}": name for name, exp in experiments.items()}
+        found: dict[str, object] = {}
+        filters = {"config.experiment_dir": {"$in": list(dirs)}}
+        for run in api.runs(WANDB_PATH, filters=filters, per_page=100):
+            name = dirs.get(run.config.get("experiment_dir"))
+            if name is not None:
+                found[name] = run
+
+        def history(run) -> list[dict]:
+            rows = run.history(
+                keys=list(WANDB_HISTORY_KEYS), samples=10000, pandas=False
+            )
+            by_epoch = {int(row["epoch"]): row for row in rows}
+            return [by_epoch[e] for e in sorted(by_epoch)]
+
+        with ThreadPoolExecutor(13) as ex:
+            histories = dict(zip(found, ex.map(history, found.values())))
+    except Exception as err:  # noqa: BLE001 (any W&B failure: fall back to logs)
+        print(f"W&B unavailable ({err!r}); timings from current-attempt logs only.")
+        return {}
+    return {name: rows for name, rows in histories.items() if rows}
+
+
+def _wandb_progress(
+    rows: list[dict], finished: bool, max_epochs: int
+) -> tuple[Progress, int]:
+    """(progress, restarts seen) from one run's per-epoch W&B history."""
+    full = [float(r["epoch_total_seconds"]) for r in rows]
+    train = [float(r["epoch_train_seconds"]) for r in rows]
+    light: list[float] = []
+    heavy: list[float] = []
+    for r in rows:
+        heavy_epoch = _is_heavy_inference(int(r["epoch"]), HEAVY_INFERENCE_RESIDUE)
+        (heavy if heavy_epoch else light).append(float(r["epoch_inference_seconds"]))
+    restarts = sum(
+        (b["_timestamp"] - a["_timestamp"]) - (b["_runtime"] - a["_runtime"])
+        > RESTART_GAP_SECONDS
+        for a, b in zip(rows, rows[1:])
+    )
+    done = max_epochs if finished else int(rows[-1]["epoch"])
+    seconds = (_median(full), _median(train), _median(light), _median(heavy))
+    return (done, seconds, sum(full)), restarts
 
 
 def gantry_backend(rows: list[Row]) -> tuple[dict[str, Tracked], dict[str, Progress]]:
@@ -595,11 +691,27 @@ def gantry_backend(rows: list[Row]) -> tuple[dict[str, Tracked], dict[str, Progr
                 ),
             )
         )
+    histories = _wandb_histories({name: job.name for name, job in newest.items()})
     tracked = {}
+    progress = {name: result[0] for name, result in results.items()}
     for name, job in newest.items():
         status, queued = _gantry_status(job.status)
-        tracked[name] = Tracked(status, queued, results[name][1])
-    return tracked, {name: result[0] for name, result in results.items()}
+        log_progress, log_restarts, pending = results[name]
+        if name not in histories:
+            tracked[name] = Tracked(status, queued, log_restarts)
+            continue
+        progress[name], restarts = _wandb_progress(
+            histories[name], status == OK, max_epochs[name]
+        )
+        # The log's epoch count is ahead while an epoch is being logged.
+        if not queued and status != OK:
+            done, seconds, kept = progress[name]
+            progress[name] = (max(done, log_progress[0]), seconds, kept)
+        preempted_at = progress[name][0] if queued else None
+        tracked[name] = Tracked(
+            status, queued, restarts + int(pending), preempted_at_epoch=preempted_at
+        )
+    return tracked, progress
 
 
 # --- table -----------------------------------------------------------------------
@@ -659,12 +771,22 @@ def main() -> None:
     _print_table(COUNT_COLUMNS, count_rows)
     print()
     _print_table(TIMING_COLUMNS, timing_rows)
+    preempted = [
+        f"{n} (epoch {t.preempted_at_epoch})"
+        for row in rows
+        for n in row.names
+        if (t := tracked.get(n)) is not None and t.preempted_at_epoch is not None
+    ]
+    if preempted:
+        print()
+        print("Queued (preempted, waiting for a retry): " + ", ".join(preempted) + ".")
     if not use_beaker:
         hidden = [row.label for row in ROWS if not row.agent_vm]
         print()
         print(
-            "Source: gantry shim (no beaker CLI here); it sees only jobs "
-            "submitted from this VM. Not shown: " + ", ".join(hidden) + "."
+            "Source: gantry shim (no beaker CLI here; it sees only jobs "
+            "submitted from this VM) and W&B (timings, train time, restarts). "
+            "Not shown: " + ", ".join(hidden) + "."
         )
 
 
