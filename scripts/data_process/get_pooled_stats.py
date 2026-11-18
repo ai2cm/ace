@@ -799,41 +799,70 @@ COORD_RTOL = 1e-5
 COORD_ATOL = 1e-4
 
 
+def _grid_dims(ds: xr.Dataset, store: str) -> tuple[str, ...]:
+    """The dims of the per-cell variables of a store's stats, which must all
+    be the same."""
+    dims = {da.dims for da in ds.data_vars.values() if da.ndim > 0}
+    if len(dims) > 1:
+        raise ValueError(f"{store}: per-cell stats have different dims {dims}.")
+    return dims.pop() if dims else ()
+
+
 def align_grids(per_pair: list[dict]) -> None:
-    """Give every store's per-cell stats the horizontal coordinates of the
-    first store, after checking that they agree to within the tolerance fme
-    uses when checking per-grid-cell constants against the data. Raises if
-    the grids differ (in size, order or values), so that stores on different
-    grids are never pooled cell by cell."""
-    reference: dict[str, xr.DataArray] = {}
-    reference_store: dict[str, str] = {}
+    """Put every store's per-cell stats on the grid of the first store: its
+    horizontal dim names and coordinates.
+
+    Stores may name their horizontal dims differently (e.g. grid_yt / grid_xt
+    or lat / lon); fme matches per-grid-cell constants to the data by the
+    position of the dims, not their names, so the dims are matched by
+    position too. Their coordinates must agree to within the tolerance fme
+    uses when checking per-grid-cell constants against the data; otherwise
+    this raises, so that stores on different grids (or with the dims in
+    another order or orientation) are never pooled cell by cell.
+    """
+    reference: xr.Dataset | None = None
+    reference_dims: tuple[str, ...] = ()
+    reference_store = ""
     for pair in per_pair:
         for key in STAT_KEYS:
             ds = pair[key]
-            for dim in HORIZONTAL_DIMS:
-                if dim not in ds.coords:
-                    continue
-                if dim not in reference:
-                    reference[dim] = ds[dim]
-                    reference_store[dim] = pair["store"]
-                    continue
+            dims = _grid_dims(ds, pair["store"])
+            if not dims:
+                continue
+            if reference is None:
+                reference = ds.coords.to_dataset()[list(dims)]
+                reference_dims = dims
+                reference_store = pair["store"]
+                continue
+            if len(dims) != len(reference_dims):
+                raise ValueError(
+                    f"Per-cell stats of {pair['store']} have dims {dims}, but "
+                    f"those of {reference_store} have {reference_dims}; cannot "
+                    "pool per grid cell across different grids."
+                )
+            for dim, reference_dim in zip(dims, reference_dims):
                 values = ds[dim].values
-                expected = reference[dim].values
+                expected = reference[reference_dim].values
                 if values.shape != expected.shape or not np.allclose(
                     values, expected, rtol=COORD_RTOL, atol=COORD_ATOL
                 ):
                     raise ValueError(
                         f"Coordinates of {dim!r} in {pair['store']} differ from "
-                        f"those in {reference_store[dim]}; cannot pool per grid "
-                        "cell across different grids."
+                        f"those of {reference_dim!r} in {reference_store}; "
+                        "cannot pool per grid cell across different grids."
                     )
                 if not np.array_equal(values, expected) and key == "centering":
                     logging.warning(
                         f"Coordinates of {dim!r} in {pair['store']} differ "
-                        f"slightly from those in {reference_store[dim]} (max "
+                        f"slightly from those of {reference_dim!r} in "
+                        f"{reference_store} (max "
                         f"{np.abs(values - expected).max():.3g}); using the latter."
                     )
-                pair[key] = ds = ds.assign_coords({dim: reference[dim]})
+            renames = {d: r for d, r in zip(dims, reference_dims) if d != r}
+            ds = ds.drop_vars(list(dims)).rename(renames)
+            pair[key] = ds.assign_coords(
+                {dim: reference[dim] for dim in reference_dims}
+            )
 
 
 def _read_stats_file(path: str) -> xr.Dataset:

@@ -11,7 +11,11 @@
 #
 # Relative to v2:
 # - per_grid_cell: every file holds a mean / std per grid cell (reduced over
-#   time only), on the stores' lat/lon grid.
+#   time only), on the stores' 4deg grid. The c96 and xshield stores name the
+#   horizontal dims grid_yt/grid_xt, the others lat/lon, with the same values
+#   (xshield's in float32); stores are matched by dim position, as fme matches
+#   per-cell constants to the data, and the files use the dim names and
+#   float64 coordinates of the first (c96) store.
 # - scalar_variables stay scalars, copied from the v2 stats (root from root,
 #   groups/{name} from groups/{name}, e3sm from groups/e3sm-filled), so they are
 #   exactly the v2 constants. These are the grouped normalization's pinned

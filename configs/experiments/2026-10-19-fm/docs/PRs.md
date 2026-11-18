@@ -39,8 +39,10 @@ Changes made directly on this branch (not from a PR), outside
 
 - `scripts/data_process/get_pooled_stats.py` gains opt-in config keys:
   `per_grid_cell` (reduce over time only, writing per-cell `centering.nc`,
-  `scaling-full-field.nc` and `scaling-residual.nc` on the stores' lat/lon grid,
-  pooled and per group as before), `scalar_variables` (kept scalar in per-cell
+  `scaling-full-field.nc` and `scaling-residual.nc` on the stores' grid,
+  pooled and per group as before; stores naming their horizontal dims
+  differently, e.g. grid_yt/grid_xt vs lat/lon, are matched by dim position and
+  coordinate values), `scalar_variables` (kept scalar in per-cell
   mode), `scalar_reference` (copy those scalars from an existing stats
   directory, per group, so they equal a baseline's constants), `pooling:
   label_equal` (root stats give each group equal total weight, timestep-weighted

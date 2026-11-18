@@ -467,9 +467,17 @@ LAT = np.array([-45.0, 0.0, 45.0])
 LON = np.array([0.0, 90.0, 180.0, 270.0])
 
 
-def _write_grid_store(path, seed: int, n_time: int, with_t850: bool = True, lat=LAT):
-    """A store on a small lat/lon grid with per-cell varying fields, a static
-    `hgt`, and optionally a `t850` field."""
+def _write_grid_store(
+    path,
+    seed: int,
+    n_time: int,
+    with_t850: bool = True,
+    lat=LAT,
+    dims: tuple[str, str] = ("lat", "lon"),
+):
+    """A store on a small lat/lon grid (with horizontal dims named `dims`)
+    with per-cell varying fields, a static `hgt`, and optionally a `t850`
+    field."""
     rng = np.random.default_rng(seed)
     time = pd.date_range("2000-01-01", periods=n_time, freq="D")
     shape = (n_time, len(lat), len(LON))
@@ -484,7 +492,7 @@ def _write_grid_store(path, seed: int, n_time: int, with_t850: bool = True, lat=
     if with_t850:
         data["t850"] = (("time", "lat", "lon"), 250 + rng.normal(size=shape))
     ds = xr.Dataset(data, coords={"time": time, "lat": lat, "lon": LON})
-    ds.to_zarr(path, mode="w")
+    ds.rename({"lat": dims[0], "lon": dims[1]}).to_zarr(path, mode="w")
     return ds
 
 
@@ -533,8 +541,13 @@ def test_compute_per_grid_cell_label_equal(tmp_path):
     stores = {
         "a0": _write_grid_store(tmp_path / "a0.zarr", seed=0, n_time=12),
         "a1": _write_grid_store(tmp_path / "a1.zarr", seed=1, n_time=30),
+        # Named like the c96 stores, unlike the others: dims match by position.
         "b0": _write_grid_store(
-            tmp_path / "b0.zarr", seed=5, n_time=8, with_t850=False
+            tmp_path / "b0.zarr",
+            seed=5,
+            n_time=8,
+            with_t850=False,
+            dims=("grid_yt", "grid_xt"),
         ),
     }
     reference = tmp_path / "reference"

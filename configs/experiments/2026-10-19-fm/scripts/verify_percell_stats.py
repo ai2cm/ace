@@ -9,8 +9,9 @@ each group under OUT/groups/, it checks that:
 - per-cell means are finite and stds positive in every cell, and counts the
   cells whose std would be floored at 1% and 10% of the variable's mean std
   over cells (fme's per_grid_cell_min_std_fraction);
-- the per-cell lat/lon equal those of every store of the training config's
-  train_loader;
+- the per-cell horizontal coordinates equal, dim by dim in order, those of
+  every store of the training config's train_loader (stores name their dims
+  lat/lon or grid_yt/grid_xt; fme matches them by position);
 - the scalar-kept variables are scalars equal to the reference (v2) values;
 - the files load and build with `NormalizationConfig(per_grid_cell=True)`.
 
@@ -39,7 +40,6 @@ FILES = ("centering.nc", "scaling-full-field.nc", "scaling-residual.nc")
 STD_FILES = FILES[1:]
 FLOOR_FRACTIONS = (0.01, 0.1)
 PLOT_VARIABLES = ("TMP2m", "PRATEsfc", "air_temperature_7")
-HORIZONTAL = ("lat", "lon")
 
 
 def _find_key(tree, key: str):
@@ -80,10 +80,17 @@ def _check_directory(
     names: list[str],
     scalar_names: list[str],
     reference: dict[str, xr.Dataset],
-    grids: dict[str, dict[str, np.ndarray]],
+    grids: dict[str, list[tuple[str, np.ndarray]]],
 ):
     print(f"\n=== {label} ===")
     files = _load(directory)
+    per_cell = [
+        name
+        for name in names
+        if name not in scalar_names and name in files["centering.nc"]
+    ]
+    horizontal = files["centering.nc"][per_cell[0]].dims
+    print(f"per-cell dims: {horizontal}")
     floored: dict[float, dict[tuple[str, str], int]] = {
         fraction: {} for fraction in FLOOR_FRACTIONS
     }
@@ -107,7 +114,7 @@ def _check_directory(
                 )
                 continue
             checker.check(
-                da.dims == HORIZONTAL, f"{label}/{filename}: {name} has dims {da.dims}"
+                da.dims == horizontal, f"{label}/{filename}: {name} has dims {da.dims}"
             )
             values = da.values.astype(np.float64)
             n_bad = int((~np.isfinite(values)).sum())
@@ -126,21 +133,29 @@ def _check_directory(
                     count = int((values < fraction * mean_std).sum())
                     if count:
                         floored[fraction][(filename, name)] = count
-        for dim in HORIZONTAL:
-            if dim not in ds.coords:
-                continue
-            for store, grid in grids.items():
-                same = np.array_equal(ds[dim].values, grid[dim])
-                close = ds[dim].shape == grid[dim].shape and np.allclose(
-                    ds[dim].values, grid[dim], rtol=1e-5, atol=1e-4
+        for store, grid in grids.items():
+            checker.check(
+                len(grid) == len(horizontal),
+                f"{label}/{filename}: dims {horizontal} vs {store} {grid}",
+            )
+            for dim, (store_dim, store_values) in zip(horizontal, grid):
+                values = ds[dim].values
+                same = np.array_equal(values, store_values)
+                close = values.shape == store_values.shape and np.allclose(
+                    values, store_values, rtol=1e-5, atol=1e-4
                 )
                 checker.check(
-                    close, f"{label}/{filename}: {dim} does not match {store}"
+                    close,
+                    f"{label}/{filename}: {dim} does not match {store_dim} of {store}",
                 )
                 if close and not same:
-                    print(f"note: {label}/{filename}: {dim} only close to {store}")
+                    print(
+                        f"note: {label}/{filename}: {dim} only close to "
+                        f"{store_dim} of {store} (max abs diff "
+                        f"{np.abs(values - store_values).max():.3g})"
+                    )
 
-    n_cells = int(np.prod([files["centering.nc"].sizes[d] for d in HORIZONTAL]))
+    n_cells = int(np.prod([files["centering.nc"].sizes[d] for d in horizontal]))
     print(f"grid cells: {n_cells}")
     for fraction in FLOOR_FRACTIONS:
         counts = floored[fraction]
@@ -163,10 +178,10 @@ def _check_directory(
                 global_stds_path=str(directory / std_file),
                 per_grid_cell=True,
             ).build(names)
-            per_cell = sum(1 for v in normalizer.means.values() if v.numel() > 1)
+            n_per_cell = sum(1 for v in normalizer.means.values() if v.numel() > 1)
             print(
                 f"built NormalizationConfig(per_grid_cell=True) with {std_file}: "
-                f"{len(normalizer.means)} variables, {per_cell} per-cell"
+                f"{len(normalizer.means)} variables, {n_per_cell} per-cell"
             )
         except Exception as error:  # report every failure, not just the first
             checker.check(False, f"{label}: building with {std_file} failed: {error}")
@@ -180,11 +195,12 @@ def _plot(files: dict[str, xr.Dataset], out_dir: pathlib.Path):
             axes, (("centering.nc", "mean"), ("scaling-full-field.nc", "std"))
         ):
             da = files[filename][name]
-            mesh = ax.pcolormesh(da["lon"], da["lat"], da.values, shading="auto")
+            y, x = da.dims
+            mesh = ax.pcolormesh(da[x], da[y], da.values, shading="auto")
             fig.colorbar(mesh, ax=ax)
             ax.set_title(f"pooled {name} per-cell {title}")
-            ax.set_xlabel("lon")
-            ax.set_ylabel("lat")
+            ax.set_xlabel(x)
+            ax.set_ylabel(y)
         path = out_dir / f"pooled-{name}.png"
         fig.savefig(path, dpi=100)
         plt.close(fig)
@@ -213,7 +229,13 @@ def main():
         store = f"{entry['data_path']}/{entry['file_pattern']}"
         if store not in grids:
             with xr.open_zarr(store) as ds:
-                grids[store] = {dim: ds[dim].values for dim in HORIZONTAL}
+                # The horizontal dims of the first time-varying field.
+                field = next(
+                    da
+                    for da in ds.data_vars.values()
+                    if da.ndim == 3 and da.dims[0] == "time"
+                )
+                grids[store] = [(dim, ds[dim].values) for dim in field.dims[1:]]
     print(f"compared coordinates against {len(grids)} training stores")
 
     checker = Checker()
@@ -239,7 +261,7 @@ def main():
         for filename, ds in e3sm.items():
             expected = 0.0 if filename == "centering.nc" else 1.0
             checker.check(
-                ds[name].dims == HORIZONTAL and bool((ds[name] == expected).all()),
+                ds[name].ndim == 2 and bool((ds[name] == expected).all()),
                 f"groups/e3sm/{filename}: {name} is not a per-cell {expected} "
                 "placeholder",
             )
