@@ -1,0 +1,3 @@
+group|tag|wandb_project|wandb_id|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|results_dataset_ocean|results_dataset_atmos|min_runtime|config
+
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr50e-4|ace-samudra-cm4|zmjnw6ix|train|urgent|jupiter|4||3|ai2/ace|resume_results.resume_wandb=true||||8h|
