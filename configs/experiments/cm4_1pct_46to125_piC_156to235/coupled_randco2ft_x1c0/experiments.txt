@@ -8,12 +8,12 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # running_/ran_/failed_* rows are already launched (queue_evals.py mark prefixes).
 # launch: ./job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_randco2ft_x1c0 . --config-dir configs/experiments/cm4_eval/coupled
 # --config-dir configs/experiments/cm4_eval/coupled
-1deg-hybridsstdiag-randco2ft-x1c0-pclr-replayonly-tb6xf0ju||01M7M917SHWF6DRECZGP4JAE8R|running_1pct-ic0001-130yr|ema_ckpt_0001|high|--min-runtime 8h||01M7M917SRT94JTMPH6JHN6D84
-1deg-hybridsstdiag-randco2ft-x1c0-pclr-replayonly-tb6xf0ju||01M7M917SHWF6DRECZGP4JAE8R|running_piC-ic0151-200yr|ema_ckpt_0001|high|--min-runtime 8h||01M7M917SRT94JTMPH6JHN6D84
-1deg-hybridsstdiag-randco2ft-x1c0-pclr-replayonly-tb6xf0ju||01M7M917SHWF6DRECZGP4JAE8R|running_1pct-ic0001-130yr|ema_ckpt_0002|high|--min-runtime 8h||01M7M917SRT94JTMPH6JHN6D84
-1deg-hybridsstdiag-randco2ft-x1c0-pclr-replayonly-tb6xf0ju||01M7M917SHWF6DRECZGP4JAE8R|running_piC-ic0151-200yr|ema_ckpt_0002|high|--min-runtime 8h||01M7M917SRT94JTMPH6JHN6D84
-1deg-hybridsstdiag-randco2ft-x1c0-pclr-replayonly-tb6xf0ju||01M7M917SHWF6DRECZGP4JAE8R|running_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 8h||01M7M917SRT94JTMPH6JHN6D84
-1deg-hybridsstdiag-randco2ft-x1c0-pclr-replayonly-tb6xf0ju||01M7M917SHWF6DRECZGP4JAE8R|running_piC-ic0151-200yr|ema_ckpt_0003|high|--min-runtime 8h||01M7M917SRT94JTMPH6JHN6D84
-1deg-hybridsstdiag-randco2ft-x1c0-pclr-replayonly-tb6xf0ju||01M7M917SHWF6DRECZGP4JAE8R|running_1pct-ic0001-130yr|ema_ckpt_0004|high|--min-runtime 8h||01M7M917SRT94JTMPH6JHN6D84
-1deg-hybridsstdiag-randco2ft-x1c0-pclr-replayonly-tb6xf0ju||01M7M917SHWF6DRECZGP4JAE8R|running_piC-ic0151-200yr|ema_ckpt_0004|high|--min-runtime 8h||01M7M917SRT94JTMPH6JHN6D84
+1deg-hybridsstdiag-randco2ft-x1c0-pclr-replayonly-tb6xf0ju||01M7M917SHWF6DRECZGP4JAE8R|ran_1pct-ic0001-130yr|ema_ckpt_0001|high|--min-runtime 8h||01M7M917SRT94JTMPH6JHN6D84
+1deg-hybridsstdiag-randco2ft-x1c0-pclr-replayonly-tb6xf0ju||01M7M917SHWF6DRECZGP4JAE8R|ran_piC-ic0151-200yr|ema_ckpt_0001|high|--min-runtime 8h||01M7M917SRT94JTMPH6JHN6D84
+1deg-hybridsstdiag-randco2ft-x1c0-pclr-replayonly-tb6xf0ju||01M7M917SHWF6DRECZGP4JAE8R|ran_1pct-ic0001-130yr|ema_ckpt_0002|high|--min-runtime 8h||01M7M917SRT94JTMPH6JHN6D84
+1deg-hybridsstdiag-randco2ft-x1c0-pclr-replayonly-tb6xf0ju||01M7M917SHWF6DRECZGP4JAE8R|ran_piC-ic0151-200yr|ema_ckpt_0002|high|--min-runtime 8h||01M7M917SRT94JTMPH6JHN6D84
+1deg-hybridsstdiag-randco2ft-x1c0-pclr-replayonly-tb6xf0ju||01M7M917SHWF6DRECZGP4JAE8R|ran_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 8h||01M7M917SRT94JTMPH6JHN6D84
+1deg-hybridsstdiag-randco2ft-x1c0-pclr-replayonly-tb6xf0ju||01M7M917SHWF6DRECZGP4JAE8R|ran_piC-ic0151-200yr|ema_ckpt_0003|high|--min-runtime 8h||01M7M917SRT94JTMPH6JHN6D84
+1deg-hybridsstdiag-randco2ft-x1c0-pclr-replayonly-tb6xf0ju||01M7M917SHWF6DRECZGP4JAE8R|ran_1pct-ic0001-130yr|ema_ckpt_0004|high|--min-runtime 8h||01M7M917SRT94JTMPH6JHN6D84
+1deg-hybridsstdiag-randco2ft-x1c0-pclr-replayonly-tb6xf0ju||01M7M917SHWF6DRECZGP4JAE8R|ran_piC-ic0151-200yr|ema_ckpt_0004|high|--min-runtime 8h||01M7M917SRT94JTMPH6JHN6D84
 # U10 end X1c0
