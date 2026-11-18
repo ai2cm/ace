@@ -3,3 +3,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 SamudrACEv2-hybridSSTdiag-muon|mae-null-lr10e-4|01M7PQCE6PHPK3H7FJF0PDCZH2|training|best_inference_ckpt|normal|--min-runtime 8h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-null-lr15e-4|01M7PQCSPGGQC852G08P9M13TK|training|best_inference_ckpt|normal|--min-runtime 8h
+
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr20e-4|01M7PQD59JT7ER82NGSM23WYSA|training|best_inference_ckpt|normal|--min-runtime 8h
