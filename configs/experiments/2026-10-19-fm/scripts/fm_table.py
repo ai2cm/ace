@@ -6,6 +6,10 @@ Rows (ROWS), 3 seeds each unless noted:
   sfno-v3-{c1,c2,c3}-{scalarloss,cellloss}.
 - Their smoke tests (sfno-v3-smoke-{c2,c3}-cellloss, s0, 2 epochs), while
   their configs exist.
+- The 6 FM C96 AMIP-only runs (create_fm_c96amip_jobs.py, 120 epochs, 4
+  GPUs), one row per architecture: sfno-v2-c96amip, swin-v2.2-v2-c96amip;
+  and their smoke tests (sfno-v2-c96amip-smoke, swin-v2.2-v2-c96amip-smoke,
+  s0, 2 epochs), while their configs exist.
 - The 6 1deg, 6-hourly FM runs of create_fm_1deg_jobs (120 epochs, 8 GPUs),
   one row per arm: sfno-v2-1deg-fm-e3sm-balanced, sfno-v2-1deg-fm-era5.
 
@@ -15,8 +19,9 @@ Two backends, chosen by whether the `beaker` CLI is on PATH:
   each experiment, as before.
 - gantry (agent VMs, which have no beaker CLI): the gantry shim
   (/usr/local/bin/gantry), which sees only jobs submitted from this VM. Job
-  name -> Beaker id comes from records/fm_v3_jobs.json (written by
-  submit_fm_v3_jobs.py), else from `gantry list --all` (experiment names are
+  name -> Beaker id comes from records/fm_v3_jobs.json and
+  records/fm_c96amip_jobs.json (written by submit_fm_v3_jobs.py and
+  submit_fm_c96amip_jobs.py), else from `gantry list --all` (experiment names are
   agent-alexeyy-<job name>-<suffix>; the newest wins); status from `gantry
   list --all` (a job it calls running counts as queued until `gantry status`
   gives it a start time), logs from `gantry logs <id>`, which hold every retry of the
@@ -77,6 +82,13 @@ from _beaker_listing import (  # noqa: E402
 from create_fm_1deg_jobs import ARMS as ARMS_1DEG  # noqa: E402
 from create_fm_1deg_jobs import SEEDS as SEEDS_1DEG  # noqa: E402
 from create_fm_1deg_jobs import run_config_name as run_config_name_1deg  # noqa: E402
+from create_fm_c96amip_jobs import ARCHS as C96AMIP_ARCHS  # noqa: E402
+from create_fm_c96amip_jobs import MAX_EPOCHS as MAX_EPOCHS_C96AMIP  # noqa: E402
+from create_fm_c96amip_jobs import (
+    SMOKE_MAX_EPOCHS as C96AMIP_SMOKE_EPOCHS,  # noqa: E402
+)
+from create_fm_c96amip_jobs import runs as c96amip_runs  # noqa: E402
+from create_fm_c96amip_jobs import smoke_runs as c96amip_smoke_runs  # noqa: E402
 from create_fm_v3_jobs import LOSSES, NETWORKS, SMOKE_MAX_EPOCHS  # noqa: E402
 from create_fm_v3_jobs import MAX_EPOCHS as MAX_EPOCHS_V3  # noqa: E402
 from create_fm_v3_jobs import runs as v3_runs  # noqa: E402
@@ -85,6 +97,9 @@ from submit_fm_jobs import config_to_job_name  # noqa: E402
 
 EXP_DIR = pathlib.Path(__file__).parent.parent
 V3_RECORD = EXP_DIR / "records" / "fm_v3_jobs.json"
+C96AMIP_RECORD = EXP_DIR / "records" / "fm_c96amip_jobs.json"
+# The submit scripts' records, each naming the latest submission of its jobs.
+RECORDS = (V3_RECORD, C96AMIP_RECORD)
 GANTRY = "/usr/local/bin/gantry"
 AGENT_PREFIX = "agent-alexeyy-"
 GANTRY_LIST_LIMIT = 500
@@ -161,6 +176,16 @@ def _rows() -> list[Row]:
         if smoke.path.exists():
             label = f"sfno-v3-smoke-{smoke.network}-{smoke.loss}"
             rows.append(Row(label, (smoke.job_name,), SMOKE_MAX_EPOCHS, True))
+    c96amip = c96amip_runs()
+    for arch in C96AMIP_ARCHS:
+        names = tuple(r.job_name for r in c96amip if r.arch == arch)
+        label = f"{arch.removeprefix('nc-')}-c96amip"
+        rows.append(Row(label, names, MAX_EPOCHS_C96AMIP, True))
+    for c96amip_smoke in c96amip_smoke_runs():
+        if c96amip_smoke.path.exists():
+            label = f"{c96amip_smoke.arch.removeprefix('nc-')}-c96amip-smoke"
+            names = (c96amip_smoke.job_name,)
+            rows.append(Row(label, names, C96AMIP_SMOKE_EPOCHS, True))
     for arm in ARMS_1DEG:
         names = tuple(
             config_to_job_name(run_config_name_1deg(arm, seed, False))
@@ -546,8 +571,10 @@ def gantry_backend(rows: list[Row]) -> tuple[dict[str, Tracked], dict[str, Progr
         ):
             newest[name] = job
     # The submit script's record names the latest submission of each job.
-    if V3_RECORD.exists():
-        for name, entry in json.loads(V3_RECORD.read_text()).items():
+    for record in RECORDS:
+        if not record.exists():
+            continue
+        for name, entry in json.loads(record.read_text()).items():
             if name in names and entry.get("id") in by_id:
                 newest[name] = by_id[entry["id"]]
     # `gantry list` can report a job as running before its container has
