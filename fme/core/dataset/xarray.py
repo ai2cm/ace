@@ -388,6 +388,10 @@ class OverwriteConfig:
                 fill_value, dtype=data.dtype, device=data.device
             )
         for var, multiplier in self.multiply_scalar.items():
+            if var not in tensors:
+                # the variable was not requested from this dataset (e.g. an
+                # output-only field of a component with no training steps)
+                continue
             data = tensors[var]
             tensors[var] = data * torch.tensor(
                 multiplier, dtype=data.dtype, device=data.device
