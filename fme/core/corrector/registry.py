@@ -1,9 +1,10 @@
 import abc
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Protocol, Self, final
 
 import dacite
+from torch import nn
 
 from fme.core.corrector.output import CorrectorOutput, build_corrector_diagnostics
 from fme.core.corrector.state import CorrectorState
@@ -112,7 +113,38 @@ class Correction(Protocol):
         ...
 
 
+class LearnedCorrectorModule(Protocol):
+    """A trainable part of a corrector.
+
+    The step trains ``torch_module`` with its own modules, wraps it for
+    distributed training with ``wrap_module``, and checkpoints it through
+    ``get_state`` / ``load_state``.
+    """
+
+    @property
+    def torch_module(self) -> nn.Module:
+        """The module to optimize, wrapped if ``wrap_module`` was called."""
+        ...
+
+    def wrap_module(self, wrapper: Callable[[nn.Module], nn.Module]) -> None: ...
+
+    def get_state(self) -> dict[str, Any]: ...
+
+    def load_state(self, state: dict[str, Any]) -> None: ...
+
+    def get_logs(self) -> dict[str, float]:
+        """Scalars to log once per epoch."""
+        ...
+
+
 class CorrectorABC(abc.ABC):
+    def learned_modules(self) -> dict[str, LearnedCorrectorModule]:
+        """Trainable parts of the corrector, by a name stable across builds.
+
+        Default implementation returns none.
+        """
+        return {}
+
     def train(self, mode: bool = True) -> "CorrectorABC":
         """Set the corrector to training or evaluation mode.
 
@@ -169,6 +201,16 @@ class CorrectorABC(abc.ABC):
         ...
 
 
+def require_no_learned_modules(corrector: CorrectorABC, step_type: str) -> None:
+    """For steps that do not train corrector modules."""
+    names = sorted(corrector.learned_modules())
+    if names:
+        raise ValueError(
+            f"The {step_type!r} step does not train corrector modules, but the "
+            f"corrector has {names}."
+        )
+
+
 class CorrectionSequence(CorrectorABC):
     """A corrector that applies an ordered sequence of ``Correction`` objects.
 
@@ -177,8 +219,16 @@ class CorrectionSequence(CorrectorABC):
     apply each correction in turn.
     """
 
-    def __init__(self, corrections: list[Correction]):
+    def __init__(
+        self,
+        corrections: list[Correction],
+        learned_modules: dict[str, LearnedCorrectorModule] | None = None,
+    ):
         self._corrections = corrections
+        self._learned_modules = dict(learned_modules or {})
+
+    def learned_modules(self) -> dict[str, LearnedCorrectorModule]:
+        return dict(self._learned_modules)
 
     def __call__(
         self,
@@ -226,6 +276,9 @@ class EpochScheduledCorrector(CorrectorABC):
         # signals an epoch boundary.
         self._corrector_disabled = disabled_epochs > 0
         self._training = True
+
+    def learned_modules(self) -> dict[str, LearnedCorrectorModule]:
+        return self._wrapped.learned_modules()
 
     def train(self, mode: bool = True) -> "EpochScheduledCorrector":
         self._training = mode

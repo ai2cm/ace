@@ -9,7 +9,7 @@ from torch import nn
 
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
 from fme.core.corrector.output import CorrectorDiagnostics
-from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.registry import CorrectorABC, LearnedCorrectorModule
 from fme.core.corrector.state import CorrectorState
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo
@@ -372,6 +372,8 @@ class SingleModuleStep(StepABC):
             init_weights: Function to initialize the weights of the module.
         """
         super().__init__()
+        self._corrector = corrector
+        self._corrector_modules = corrector.learned_modules()
         if config.global_mean_removal is not None:
             self._global_mean_removal: GlobalMeanRemoval = (
                 config.global_mean_removal.build(
@@ -455,9 +457,10 @@ class SingleModuleStep(StepABC):
 
         self.module = self.module.wrap_module(dist.wrap_module)
         self.secondary_decoder = self.secondary_decoder.wrap_module(dist.wrap_module)
+        for corrector_module in self._corrector_modules.values():
+            corrector_module.wrap_module(dist.wrap_module)
         self._timestep = dataset_info.timestep
 
-        self._corrector = corrector
         self.in_names = config.in_names
         self.out_names = config.out_names
 
@@ -502,6 +505,12 @@ class SingleModuleStep(StepABC):
         """
         modules = [self.module.torch_module]
         modules.extend(self.secondary_decoder.torch_modules)
+        # appended last, so parameter_init's positional match against a parent
+        # without them leaves them at their initial values
+        modules.extend(
+            self._corrector_modules[name].torch_module
+            for name in sorted(self._corrector_modules)
+        )
         return nn.ModuleList(modules)
 
     def step(
@@ -604,6 +613,12 @@ class SingleModuleStep(StepABC):
     def set_epoch(self, epoch: int) -> None:
         self._corrector.set_epoch(epoch)
 
+    def get_corrector_logs(self) -> dict[str, float]:
+        logs: dict[str, float] = {}
+        for corrector_module in self._corrector_modules.values():
+            logs.update(corrector_module.get_logs())
+        return logs
+
     def get_state(self):
         """
         Returns:
@@ -616,6 +631,11 @@ class SingleModuleStep(StepABC):
         corrector_state = self._corrector.get_state()
         if len(corrector_state) > 0:
             state["corrector"] = corrector_state
+        if len(self._corrector_modules) > 0:
+            state["corrector_modules"] = {
+                name: corrector_module.get_state()
+                for name, corrector_module in self._corrector_modules.items()
+            }
         return state
 
     def load_state(self, state: dict[str, Any]) -> None:
@@ -633,6 +653,32 @@ class SingleModuleStep(StepABC):
         if "secondary_decoder" in state:
             self.secondary_decoder.load_module_state(state["secondary_decoder"])
         self._corrector.load_state(state.get("corrector", {}))
+        _load_corrector_modules(
+            self._corrector_modules, state.get("corrector_modules", {})
+        )
+
+
+def _load_corrector_modules(
+    corrector_modules: Mapping[str, LearnedCorrectorModule],
+    state: Mapping[str, dict[str, Any]],
+) -> None:
+    """A module missing from the state keeps its initial values, so a
+    checkpoint saved without it (e.g. a parent trained before the module
+    existed) still loads.
+    """
+    for name, corrector_module in corrector_modules.items():
+        if name in state:
+            corrector_module.load_state(state[name])
+        else:
+            logging.warning(
+                f"Checkpoint has no state for corrector module {name!r}; "
+                "it keeps its initial values."
+            )
+    for name in state.keys() - corrector_modules.keys():
+        logging.warning(
+            f"Checkpoint state for corrector module {name!r} is not used by the "
+            "configured corrector and is dropped."
+        )
 
 
 def _raise_input_nan_error(input_norm: TensorMapping) -> None:
