@@ -7,7 +7,7 @@ import torch
 from torch import nn
 
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
-from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.registry import CorrectorABC, require_no_learned_modules
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
 from fme.core.distributed import Distributed
@@ -244,6 +244,7 @@ class SecondaryModuleStepConfig(StepConfigABC):
     ) -> "SecondaryModuleStep":
         logging.info("Initializing stepper from provided config")
         corrector = self.corrector.get_corrector(dataset_info)
+        require_no_learned_modules(corrector, "secondary_module")
         normalizer = self.normalization.get_network_normalizer(
             sorted(self._normalize_names)
         )

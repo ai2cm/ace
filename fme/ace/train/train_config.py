@@ -785,6 +785,8 @@ class TrainConfig:
             aggregator_builder=aggregator_builder,
             validation_callback=validation_callback,
             end_of_batch_callback=end_of_batch_ops,
+            # inside validation_context: EMA weights when validate_using_ema
+            end_of_epoch_callback=lambda _: stepper.get_corrector_logs(),
             inference_callback=inference_callback,
             validate_stepper=validate_stepper,
             do_gc_collect=do_gc_collect,

@@ -43,6 +43,11 @@ class HasOceanDepthIntegral(Protocol):
         integrand: torch.Tensor,
     ) -> torch.Tensor: ...
 
+    @property
+    def mask(self) -> torch.Tensor:
+        """Per-level validity; the last dimension is the vertical."""
+        ...
+
 
 class HasCellAreaInMetersSquared(Protocol):
     """Protocol for objects that can provide cell areas in square meters."""

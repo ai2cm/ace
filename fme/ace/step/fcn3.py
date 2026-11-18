@@ -11,7 +11,7 @@ from fme.ace.models.makani_fcn3.models.networks.fourcastnet3 import (  # type: i
     AtmoSphericNeuralOperatorNet,
 )
 from fme.core.corrector.atmosphere import AtmosphereCorrectorConfig
-from fme.core.corrector.registry import CorrectorABC
+from fme.core.corrector.registry import CorrectorABC, require_no_learned_modules
 from fme.core.dataset.utils import encode_timestep
 from fme.core.dataset_info import DatasetInfo
 from fme.core.device import get_device
@@ -314,6 +314,7 @@ class FCN3StepConfig(StepConfigABC):
     ) -> "FCN3Step":
         logging.info("Initializing stepper from provided config")
         corrector = self.corrector.get_corrector(dataset_info)
+        require_no_learned_modules(corrector, "FCN3")
         normalizer = self.normalization.get_network_normalizer(
             sorted(self._normalize_names)
         )
