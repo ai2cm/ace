@@ -105,3 +105,4 @@ data_writer:
           - total_frozen_precipitation_rate
           - PRATEsfc
           - net_energy_flux_toa_into_atmosphere
+          - TMP2m

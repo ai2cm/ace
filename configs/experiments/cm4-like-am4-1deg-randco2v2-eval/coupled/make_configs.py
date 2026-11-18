@@ -223,6 +223,10 @@ def _n_years(years: int, in_memory: int = 4) -> dict:
 
 
 HUNDRED_YEAR = _n_years(100)
+# The CMIP6-like IC runs also write monthly-mean 2m air temperature; the
+# earlier monthly runs, already run, keep MONTHLY_ATMOS_NAMES as it was.
+CMIP6_LIKE_IC_MONTHLY_ATMOS_NAMES = MONTHLY_ATMOS_NAMES + ["TMP2m"]
+
 # Lengths of the CMIP6-like IC runs in years, with coupled_steps_in_memory:
 # 10950 steps (150 years) is not divisible by 4, so that run uses 6, as the
 # 90-day ensemble members do.
@@ -322,7 +326,7 @@ def main():
             **length,
             experiment_dir="/results",
             ocean_files=_monthly_files_yaml(MONTHLY_OCEAN_NAMES),
-            atmos_files=_monthly_files_yaml(MONTHLY_ATMOS_NAMES),
+            atmos_files=_monthly_files_yaml(CMIP6_LIKE_IC_MONTHLY_ATMOS_NAMES),
         )
         name = f"inference-config-cm4-cmip6-like-ic-abrupt4xCO2-0251-{years}yr-monthly"
         (HERE / f"{name}.yaml").write_text(text)
