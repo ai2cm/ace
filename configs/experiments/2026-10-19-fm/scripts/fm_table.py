@@ -18,7 +18,8 @@ Two backends, chosen by whether the `beaker` CLI is on PATH:
   name -> Beaker id comes from records/fm_v3_jobs.json (written by
   submit_fm_v3_jobs.py), else from `gantry list --all` (experiment names are
   agent-alexeyy-<job name>-<suffix>; the newest wins); status from `gantry
-  list --all`, logs from `gantry logs <id>`, which hold every retry of the
+  list --all` (a job it calls running counts as queued until `gantry status`
+  gives it a start time), logs from `gantry logs <id>`, which hold every retry of the
   experiment. A retry starts at fme's "Resuming training from" line, so
   "Preemptions" counts those (restarts from a checkpoint, whatever their
   cause). Rows of runs submitted outside this VM (the 1deg runs) are left out,
@@ -471,6 +472,11 @@ def _gantry_list() -> list[GantryJob]:
     return jobs
 
 
+def _gantry_started(job: GantryJob) -> bool:
+    """Whether `gantry status` gives the job a start time."""
+    return bool(json.loads(_gantry("status", job.id)).get("started"))
+
+
 def _job_name_of(experiment: str, names: set[str]) -> str | None:
     """The tracked job name of an experiment agent-alexeyy-<name>-<suffix>."""
     if not experiment.startswith(AGENT_PREFIX):
@@ -544,6 +550,14 @@ def gantry_backend(rows: list[Row]) -> tuple[dict[str, Tracked], dict[str, Progr
         for name, entry in json.loads(V3_RECORD.read_text()).items():
             if name in names and entry.get("id") in by_id:
                 newest[name] = by_id[entry["id"]]
+    # `gantry list` can report a job as running before its container has
+    # started (it then shows up as queued again); only a job with a start time
+    # in `gantry status` counts as running.
+    running = [job for job in newest.values() if job.status in GANTRY_RUNNING]
+    with ThreadPoolExecutor(13) as ex:
+        for job, started in zip(running, ex.map(_gantry_started, running)):
+            if not started:
+                job.status = "queued"
     ordered = list(max_epochs)
     with ThreadPoolExecutor(13) as ex:
         results = dict(
@@ -583,7 +597,9 @@ def main() -> None:
         live = [n for n, _ in live_pairs]
         # Epoch columns cover unfinished (running or queued) jobs only.
         eps = [prog[n][0] for n, s in live_pairs if s == "running"]
-        times = [prog[n][2] for n in live]
+        # Train time covers finished and running jobs; a queued job has none
+        # yet and would pull the median toward 0.
+        times = [prog[n][2] for n in live if not tracked[n].queued]
 
         def median_column(i: int) -> str:
             values = [s for n in live if (s := prog[n][1][i]) is not None]
