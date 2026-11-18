@@ -23,6 +23,10 @@ if [[ -z "$SCRIPT_PATH" ]]; then
 fi
 
 LAUNCH_FILTERS=("$@")
+# Space-separated cluster list; override e.g. CLUSTERS="ai2/jupiter" to avoid a wedged cluster.
+read -r -a CLUSTER_LIST <<< "${CLUSTERS:-ai2/jupiter ai2/titan}"
+CLUSTER_ARGS=()
+for c in "${CLUSTER_LIST[@]}"; do CLUSTER_ARGS+=(--cluster "$c"); done
 should_run() {
   [[ ${#LAUNCH_FILTERS[@]} -eq 0 ]] && return 0
   local f
@@ -51,8 +55,7 @@ run_evaluate() {
     --workspace ai2/ace \
     --priority "${PRIORITY:-high}" \
     --not-preemptible \
-    --cluster ai2/jupiter \
-    --cluster ai2/titan \
+    "${CLUSTER_ARGS[@]}" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=inference \
