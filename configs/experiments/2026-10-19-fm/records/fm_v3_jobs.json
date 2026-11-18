@@ -14,38 +14,60 @@
     "url": "https://beaker.org/ex/01M7P9QB41HVBANBR50SHW66Z0"
   },
   "ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff": {
-    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff-kh6d/training_checkpoints/best_ckpt.tar",
-    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff-kh6d/training_checkpoints/best_inference_ckpt.tar",
-    "commit": "b66f03c59750b410fed464bdcf8ddb7039aac05d",
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff-mxkt/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff-mxkt/training_checkpoints/best_inference_ckpt.tar",
+    "commit": "91a301912827c764819b3836512006574933b2ff",
     "config": "run_configs/ace-train-config-4deg-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff.yaml",
-    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff-kh6d/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
-    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff-kh6d",
-    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff-kh6d",
-    "id": "01M7R41QTXE0NXQK6P0QT9QJ6F",
-    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff-kh6d/training_checkpoints/ckpt.tar",
-    "note": "Requeued 2026-11-18 with ai2/saturn added; the replaced job was stopped while still queued (never started).",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff-mxkt/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff-mxkt",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff-mxkt",
+    "id": "01M7R4WE2ND5Q4WWKDKJQVNQ1E",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff-mxkt/training_checkpoints/ckpt.tar",
+    "note": "Resumes wandb run iwx977sd (crashed at epoch 29 when preempted) by copying resumed_from into its own experiment_dir. The 2026-11-18 requeue with ai2/saturn (superseded[1]) wrongly took superseded[0], queued again after a preemption, for never started, and would have restarted from epoch 0.",
     "priority": "normal",
-    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff-ckkx",
-    "replaces_id": "01M7P9QDPBAM4NHZ5PM1AWJSNK",
-    "submitted": "2026-11-18T20:02:26+00:00",
-    "url": "https://beaker.org/ex/01M7R41QTXE0NXQK6P0QT9QJ6F"
+    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff-kh6d",
+    "replaces_id": "01M7R41QTXE0NXQK6P0QT9QJ6F",
+    "resumed_from": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff-ckkx",
+    "submitted": "2026-11-18T20:17:00+00:00",
+    "superseded": [
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff-ckkx",
+        "id": "01M7P9QDPBAM4NHZ5PM1AWJSNK"
+      },
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s1-maskoff-kh6d",
+        "id": "01M7R41QTXE0NXQK6P0QT9QJ6F"
+      }
+    ],
+    "url": "https://beaker.org/ex/01M7R4WE2ND5Q4WWKDKJQVNQ1E"
   },
   "ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff": {
-    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff-hlbz/training_checkpoints/best_ckpt.tar",
-    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff-hlbz/training_checkpoints/best_inference_ckpt.tar",
-    "commit": "b66f03c59750b410fed464bdcf8ddb7039aac05d",
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff-l3ie/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff-l3ie/training_checkpoints/best_inference_ckpt.tar",
+    "commit": "91a301912827c764819b3836512006574933b2ff",
     "config": "run_configs/ace-train-config-4deg-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff.yaml",
-    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff-hlbz/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
-    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff-hlbz",
-    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff-hlbz",
-    "id": "01M7R422HFB8M13FNSE8XRWZXF",
-    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff-hlbz/training_checkpoints/ckpt.tar",
-    "note": "Requeued 2026-11-18 with ai2/saturn added; the replaced job was stopped while still queued (never started).",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff-l3ie/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff-l3ie",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff-l3ie",
+    "id": "01M7R4WXAZ3Z7QERV8054Z6WC0",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff-l3ie/training_checkpoints/ckpt.tar",
+    "note": "Resumes wandb run 3kgyj5zg (crashed at epoch 30 when preempted) by copying resumed_from into its own experiment_dir. The 2026-11-18 requeue with ai2/saturn (superseded[1]) wrongly took superseded[0], queued again after a preemption, for never started, and would have restarted from epoch 0.",
     "priority": "normal",
-    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff-bln6",
-    "replaces_id": "01M7P9QG6H3EGXJ3FQXM1EXPQ1",
-    "submitted": "2026-11-18T20:02:37+00:00",
-    "url": "https://beaker.org/ex/01M7R422HFB8M13FNSE8XRWZXF"
+    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff-hlbz",
+    "replaces_id": "01M7R422HFB8M13FNSE8XRWZXF",
+    "resumed_from": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff-bln6",
+    "submitted": "2026-11-18T20:17:16+00:00",
+    "superseded": [
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff-bln6",
+        "id": "01M7P9QG6H3EGXJ3FQXM1EXPQ1"
+      },
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-cellloss-s2-maskoff-hlbz",
+        "id": "01M7R422HFB8M13FNSE8XRWZXF"
+      }
+    ],
+    "url": "https://beaker.org/ex/01M7R4WXAZ3Z7QERV8054Z6WC0"
   },
   "ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-scalarloss-s0-maskoff": {
     "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c1-scalarloss-s0-maskoff-jh43/training_checkpoints/best_ckpt.tar",
@@ -119,38 +141,60 @@
     "url": "https://beaker.org/ex/01M7P8QXDAVMVQ8JSDG7XBXVMA"
   },
   "ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff": {
-    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff-axv6/training_checkpoints/best_ckpt.tar",
-    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff-axv6/training_checkpoints/best_inference_ckpt.tar",
-    "commit": "b66f03c59750b410fed464bdcf8ddb7039aac05d",
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff-nbyt/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff-nbyt/training_checkpoints/best_inference_ckpt.tar",
+    "commit": "91a301912827c764819b3836512006574933b2ff",
     "config": "run_configs/ace-train-config-4deg-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff.yaml",
-    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff-axv6/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
-    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff-axv6",
-    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff-axv6",
-    "id": "01M7R426TVA5GTT55Q56F7Y0YM",
-    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff-axv6/training_checkpoints/ckpt.tar",
-    "note": "Requeued 2026-11-18 with ai2/saturn added; the replaced job was stopped while still queued (never started).",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff-nbyt/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff-nbyt",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff-nbyt",
+    "id": "01M7R4X0YW58AVZ644GYRYGMMT",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff-nbyt/training_checkpoints/ckpt.tar",
+    "note": "Resumes wandb run 26ebtsvb (crashed at epoch 30 when preempted) by copying resumed_from into its own experiment_dir. The 2026-11-18 requeue with ai2/saturn (superseded[1]) wrongly took superseded[0], queued again after a preemption, for never started, and would have restarted from epoch 0.",
     "priority": "normal",
-    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff-2gjx",
-    "replaces_id": "01M7P9QXDX7QQHS6WYPVQB9CPC",
-    "submitted": "2026-11-18T20:02:41+00:00",
-    "url": "https://beaker.org/ex/01M7R426TVA5GTT55Q56F7Y0YM"
+    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff-axv6",
+    "replaces_id": "01M7R426TVA5GTT55Q56F7Y0YM",
+    "resumed_from": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff-2gjx",
+    "submitted": "2026-11-18T20:17:20+00:00",
+    "superseded": [
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff-2gjx",
+        "id": "01M7P9QXDX7QQHS6WYPVQB9CPC"
+      },
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s1-maskoff-axv6",
+        "id": "01M7R426TVA5GTT55Q56F7Y0YM"
+      }
+    ],
+    "url": "https://beaker.org/ex/01M7R4X0YW58AVZ644GYRYGMMT"
   },
   "ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff": {
-    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff-scvi/training_checkpoints/best_ckpt.tar",
-    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff-scvi/training_checkpoints/best_inference_ckpt.tar",
-    "commit": "b66f03c59750b410fed464bdcf8ddb7039aac05d",
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff-ykw5/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff-ykw5/training_checkpoints/best_inference_ckpt.tar",
+    "commit": "91a301912827c764819b3836512006574933b2ff",
     "config": "run_configs/ace-train-config-4deg-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff.yaml",
-    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff-scvi/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
-    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff-scvi",
-    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff-scvi",
-    "id": "01M7R42AKTKQSGQYKVSDC4CGDK",
-    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff-scvi/training_checkpoints/ckpt.tar",
-    "note": "Requeued 2026-11-18 with ai2/saturn added; the replaced job was stopped while still queued (never started).",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff-ykw5/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff-ykw5",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff-ykw5",
+    "id": "01M7R4X4T0W8QPCK0WD7NWY22D",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff-ykw5/training_checkpoints/ckpt.tar",
+    "note": "Resumes wandb run nakybosh (crashed at epoch 30 when preempted) by copying resumed_from into its own experiment_dir. The 2026-11-18 requeue with ai2/saturn (superseded[1]) wrongly took superseded[0], queued again after a preemption, for never started, and would have restarted from epoch 0.",
     "priority": "normal",
-    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff-yc8y",
-    "replaces_id": "01M7P9R02TW7FVVSK6B7JZNF0B",
-    "submitted": "2026-11-18T20:02:45+00:00",
-    "url": "https://beaker.org/ex/01M7R42AKTKQSGQYKVSDC4CGDK"
+    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff-scvi",
+    "replaces_id": "01M7R42AKTKQSGQYKVSDC4CGDK",
+    "resumed_from": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff-yc8y",
+    "submitted": "2026-11-18T20:17:24+00:00",
+    "superseded": [
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff-yc8y",
+        "id": "01M7P9R02TW7FVVSK6B7JZNF0B"
+      },
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s2-maskoff-scvi",
+        "id": "01M7R42AKTKQSGQYKVSDC4CGDK"
+      }
+    ],
+    "url": "https://beaker.org/ex/01M7R4X4T0W8QPCK0WD7NWY22D"
   },
   "ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s0-maskoff": {
     "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s0-maskoff-s9gr/training_checkpoints/best_ckpt.tar",
@@ -167,38 +211,60 @@
     "url": "https://beaker.org/ex/01M7P9QK779QBAG4SJ8QVWSAMF"
   },
   "ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff": {
-    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff-jz5w/training_checkpoints/best_ckpt.tar",
-    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff-jz5w/training_checkpoints/best_inference_ckpt.tar",
-    "commit": "b66f03c59750b410fed464bdcf8ddb7039aac05d",
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff-x3qw/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff-x3qw/training_checkpoints/best_inference_ckpt.tar",
+    "commit": "91a301912827c764819b3836512006574933b2ff",
     "config": "run_configs/ace-train-config-4deg-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff.yaml",
-    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff-jz5w/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
-    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff-jz5w",
-    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff-jz5w",
-    "id": "01M7R42EBZ3H0773CZF66AC2X9",
-    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff-jz5w/training_checkpoints/ckpt.tar",
-    "note": "Requeued 2026-11-18 with ai2/saturn added; the replaced job was stopped while still queued (never started).",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff-x3qw/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff-x3qw",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff-x3qw",
+    "id": "01M7R4X8FSG5856T7JAVEVW1X8",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff-x3qw/training_checkpoints/ckpt.tar",
+    "note": "Resumes wandb run f9pbrjfb (crashed at epoch 29 when preempted) by copying resumed_from into its own experiment_dir. The 2026-11-18 requeue with ai2/saturn (superseded[1]) wrongly took superseded[0], queued again after a preemption, for never started, and would have restarted from epoch 0.",
     "priority": "normal",
-    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff-90mx",
-    "replaces_id": "01M7P9QNSXHQEY0BPN6W3S5HCF",
-    "submitted": "2026-11-18T20:02:49+00:00",
-    "url": "https://beaker.org/ex/01M7R42EBZ3H0773CZF66AC2X9"
+    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff-jz5w",
+    "replaces_id": "01M7R42EBZ3H0773CZF66AC2X9",
+    "resumed_from": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff-90mx",
+    "submitted": "2026-11-18T20:17:27+00:00",
+    "superseded": [
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff-90mx",
+        "id": "01M7P9QNSXHQEY0BPN6W3S5HCF"
+      },
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s1-maskoff-jz5w",
+        "id": "01M7R42EBZ3H0773CZF66AC2X9"
+      }
+    ],
+    "url": "https://beaker.org/ex/01M7R4X8FSG5856T7JAVEVW1X8"
   },
   "ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff": {
-    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff-mxgt/training_checkpoints/best_ckpt.tar",
-    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff-mxgt/training_checkpoints/best_inference_ckpt.tar",
-    "commit": "b66f03c59750b410fed464bdcf8ddb7039aac05d",
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff-gx77/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff-gx77/training_checkpoints/best_inference_ckpt.tar",
+    "commit": "7ae4cea28676c2aee61d8d6dfbbf66050b855780",
     "config": "run_configs/ace-train-config-4deg-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff.yaml",
-    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff-mxgt/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
-    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff-mxgt",
-    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff-mxgt",
-    "id": "01M7R42JG2QJQJS5CS63HCEG0D",
-    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff-mxgt/training_checkpoints/ckpt.tar",
-    "note": "Requeued 2026-11-18 with ai2/saturn added; the replaced job was stopped while still queued (never started).",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff-gx77/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff-gx77",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff-gx77",
+    "id": "01M7R4XBY1KGHBTV78K9MD8HSY",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff-gx77/training_checkpoints/ckpt.tar",
+    "note": "Resumes wandb run 9euurzwa (crashed at epoch 28 when preempted) by copying resumed_from into its own experiment_dir. The 2026-11-18 requeue with ai2/saturn (superseded[1]) wrongly took superseded[0], queued again after a preemption, for never started, and would have restarted from epoch 0.",
     "priority": "normal",
-    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff-qttd",
-    "replaces_id": "01M7P9QRB3PN5B6WQ0FJ0RVD56",
-    "submitted": "2026-11-18T20:02:53+00:00",
-    "url": "https://beaker.org/ex/01M7R42JG2QJQJS5CS63HCEG0D"
+    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff-mxgt",
+    "replaces_id": "01M7R42JG2QJQJS5CS63HCEG0D",
+    "resumed_from": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff-qttd",
+    "submitted": "2026-11-18T20:17:31+00:00",
+    "superseded": [
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff-qttd",
+        "id": "01M7P9QRB3PN5B6WQ0FJ0RVD56"
+      },
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-scalarloss-s2-maskoff-mxgt",
+        "id": "01M7R42JG2QJQJS5CS63HCEG0D"
+      }
+    ],
+    "url": "https://beaker.org/ex/01M7R4XBY1KGHBTV78K9MD8HSY"
   },
   "ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s0-maskoff": {
     "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s0-maskoff-pp24/training_checkpoints/best_ckpt.tar",
@@ -229,38 +295,60 @@
     "url": "https://beaker.org/ex/01M7P8R005ADEDJXB2FG4DQ0JS"
   },
   "ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff": {
-    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff-rbnf/training_checkpoints/best_ckpt.tar",
-    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff-rbnf/training_checkpoints/best_inference_ckpt.tar",
-    "commit": "b66f03c59750b410fed464bdcf8ddb7039aac05d",
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff-ipt2/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff-ipt2/training_checkpoints/best_inference_ckpt.tar",
+    "commit": "7ae4cea28676c2aee61d8d6dfbbf66050b855780",
     "config": "run_configs/ace-train-config-4deg-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff.yaml",
-    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff-rbnf/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
-    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff-rbnf",
-    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff-rbnf",
-    "id": "01M7R42PG4A7M67H7MZAC9MRW4",
-    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff-rbnf/training_checkpoints/ckpt.tar",
-    "note": "Requeued 2026-11-18 with ai2/saturn added; the replaced job was stopped while still queued (never started).",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff-ipt2/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff-ipt2",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff-ipt2",
+    "id": "01M7R4XG88093PXXSGBW622WD6",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff-ipt2/training_checkpoints/ckpt.tar",
+    "note": "Resumes wandb run gcclll5s (crashed at epoch 29 when preempted) by copying resumed_from into its own experiment_dir. The 2026-11-18 requeue with ai2/saturn (superseded[1]) wrongly took superseded[0], queued again after a preemption, for never started, and would have restarted from epoch 0.",
     "priority": "normal",
-    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff-zf85",
-    "replaces_id": "01M7P9RD9SP3ZYE5B0N6WKAGR7",
-    "submitted": "2026-11-18T20:02:57+00:00",
-    "url": "https://beaker.org/ex/01M7R42PG4A7M67H7MZAC9MRW4"
+    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff-rbnf",
+    "replaces_id": "01M7R42PG4A7M67H7MZAC9MRW4",
+    "resumed_from": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff-zf85",
+    "submitted": "2026-11-18T20:17:35+00:00",
+    "superseded": [
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff-zf85",
+        "id": "01M7P9RD9SP3ZYE5B0N6WKAGR7"
+      },
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s1-maskoff-rbnf",
+        "id": "01M7R42PG4A7M67H7MZAC9MRW4"
+      }
+    ],
+    "url": "https://beaker.org/ex/01M7R4XG88093PXXSGBW622WD6"
   },
   "ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff": {
-    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff-n3d7/training_checkpoints/best_ckpt.tar",
-    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff-n3d7/training_checkpoints/best_inference_ckpt.tar",
-    "commit": "b66f03c59750b410fed464bdcf8ddb7039aac05d",
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff-plfq/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff-plfq/training_checkpoints/best_inference_ckpt.tar",
+    "commit": "7ae4cea28676c2aee61d8d6dfbbf66050b855780",
     "config": "run_configs/ace-train-config-4deg-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff.yaml",
-    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff-n3d7/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
-    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff-n3d7",
-    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff-n3d7",
-    "id": "01M7R42TCDMP3T5AKENY4WFG1M",
-    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff-n3d7/training_checkpoints/ckpt.tar",
-    "note": "Requeued 2026-11-18 with ai2/saturn added; the replaced job was stopped while still queued (never started).",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff-plfq/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff-plfq",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff-plfq",
+    "id": "01M7R4XKQ1X2VR04ZH0V0KTBMS",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff-plfq/training_checkpoints/ckpt.tar",
+    "note": "Resumes wandb run cdhjllju (crashed at epoch 29 when preempted) by copying resumed_from into its own experiment_dir. The 2026-11-18 requeue with ai2/saturn (superseded[1]) wrongly took superseded[0], queued again after a preemption, for never started, and would have restarted from epoch 0.",
     "priority": "normal",
-    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff-bno1",
-    "replaces_id": "01M7P9RFXY7Z2X3EN151GQAJKY",
-    "submitted": "2026-11-18T20:03:01+00:00",
-    "url": "https://beaker.org/ex/01M7R42TCDMP3T5AKENY4WFG1M"
+    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff-n3d7",
+    "replaces_id": "01M7R42TCDMP3T5AKENY4WFG1M",
+    "resumed_from": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff-bno1",
+    "submitted": "2026-11-18T20:17:39+00:00",
+    "superseded": [
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff-bno1",
+        "id": "01M7P9RFXY7Z2X3EN151GQAJKY"
+      },
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-cellloss-s2-maskoff-n3d7",
+        "id": "01M7R42TCDMP3T5AKENY4WFG1M"
+      }
+    ],
+    "url": "https://beaker.org/ex/01M7R4XKQ1X2VR04ZH0V0KTBMS"
   },
   "ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s0-maskoff": {
     "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s0-maskoff-c6ab/training_checkpoints/best_ckpt.tar",
@@ -277,37 +365,59 @@
     "url": "https://beaker.org/ex/01M7P9R2KGE2ZPKP7BEBZX27MH"
   },
   "ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff": {
-    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff-l6wr/training_checkpoints/best_ckpt.tar",
-    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff-l6wr/training_checkpoints/best_inference_ckpt.tar",
-    "commit": "b66f03c59750b410fed464bdcf8ddb7039aac05d",
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff-bxuz/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff-bxuz/training_checkpoints/best_inference_ckpt.tar",
+    "commit": "7ae4cea28676c2aee61d8d6dfbbf66050b855780",
     "config": "run_configs/ace-train-config-4deg-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff.yaml",
-    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff-l6wr/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
-    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff-l6wr",
-    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff-l6wr",
-    "id": "01M7R42YCYP4TTM3KS85HNSQK7",
-    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff-l6wr/training_checkpoints/ckpt.tar",
-    "note": "Requeued 2026-11-18 with ai2/saturn added; the replaced job was stopped while still queued (never started).",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff-bxuz/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff-bxuz",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff-bxuz",
+    "id": "01M7R4XQ496RY44S3ASRHE2ZY2",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff-bxuz/training_checkpoints/ckpt.tar",
+    "note": "Resumes wandb run i4swdqfb (crashed at epoch 30 when preempted) by copying resumed_from into its own experiment_dir. The 2026-11-18 requeue with ai2/saturn (superseded[1]) wrongly took superseded[0], queued again after a preemption, for never started, and would have restarted from epoch 0.",
     "priority": "normal",
-    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff-7ga1",
-    "replaces_id": "01M7P9R587AP6PRY03ZE4EQWNN",
-    "submitted": "2026-11-18T20:03:05+00:00",
-    "url": "https://beaker.org/ex/01M7R42YCYP4TTM3KS85HNSQK7"
+    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff-l6wr",
+    "replaces_id": "01M7R42YCYP4TTM3KS85HNSQK7",
+    "resumed_from": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff-7ga1",
+    "submitted": "2026-11-18T20:17:42+00:00",
+    "superseded": [
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff-7ga1",
+        "id": "01M7P9R587AP6PRY03ZE4EQWNN"
+      },
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s1-maskoff-l6wr",
+        "id": "01M7R42YCYP4TTM3KS85HNSQK7"
+      }
+    ],
+    "url": "https://beaker.org/ex/01M7R4XQ496RY44S3ASRHE2ZY2"
   },
   "ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff": {
-    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff-v869/training_checkpoints/best_ckpt.tar",
-    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff-v869/training_checkpoints/best_inference_ckpt.tar",
-    "commit": "b66f03c59750b410fed464bdcf8ddb7039aac05d",
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff-u7w4/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff-u7w4/training_checkpoints/best_inference_ckpt.tar",
+    "commit": "7ae4cea28676c2aee61d8d6dfbbf66050b855780",
     "config": "run_configs/ace-train-config-4deg-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff.yaml",
-    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff-v869/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
-    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff-v869",
-    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff-v869",
-    "id": "01M7R4327B7N8WNTS6598J2KM6",
-    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff-v869/training_checkpoints/ckpt.tar",
-    "note": "Requeued 2026-11-18 with ai2/saturn added; the replaced job was stopped while still queued (never started).",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff-u7w4/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff-u7w4",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff-u7w4",
+    "id": "01M7R4XTFV2WZZDKSQZ4FZCJBH",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff-u7w4/training_checkpoints/ckpt.tar",
+    "note": "Resumes wandb run ypwdanhc (crashed at epoch 30 when preempted) by copying resumed_from into its own experiment_dir. The 2026-11-18 requeue with ai2/saturn (superseded[1]) wrongly took superseded[0], queued again after a preemption, for never started, and would have restarted from epoch 0.",
     "priority": "normal",
-    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff-8mzr",
-    "replaces_id": "01M7P9R7W8PJT78EJJ1GXRFJ6Z",
-    "submitted": "2026-11-18T20:03:09+00:00",
-    "url": "https://beaker.org/ex/01M7R4327B7N8WNTS6598J2KM6"
+    "replaces": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff-v869",
+    "replaces_id": "01M7R4327B7N8WNTS6598J2KM6",
+    "resumed_from": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff-8mzr",
+    "submitted": "2026-11-18T20:17:46+00:00",
+    "superseded": [
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff-8mzr",
+        "id": "01M7P9R7W8PJT78EJJ1GXRFJ6Z"
+      },
+      {
+        "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c3-scalarloss-s2-maskoff-v869",
+        "id": "01M7R4327B7N8WNTS6598J2KM6"
+      }
+    ],
+    "url": "https://beaker.org/ex/01M7R4XTFV2WZZDKSQZ4FZCJBH"
   }
 }

@@ -157,3 +157,16 @@ s0 at Beaker priority high, s1/s2 normal.
 - Smoke tests (`...-c2-cellloss-s0-maskoff-smoke`, `...-c3-cellloss-s0-maskoff-smoke`,
   group `ace2-fm-sfno-v3-2026-11-18-smoke`: 2 epochs of 288 iterations, epoch 2
   3-step with the cooldown) passed under the default reduce-overhead compile.
+- Requeue incident (2026-11-18): 10 s1/s2 runs (c1-cellloss, c2-cellloss,
+  c2-scalarloss, c3-cellloss, c3-scalarloss) were stopped and resubmitted
+  with ai2/saturn added on the wrong belief that they had never started.
+  Each had trained 28-30 epochs and was queued again after a preemption
+  (wandb runs now "crashed"); the resubmissions had new experiment names,
+  hence empty `$AGENT_OUTPUT_DIR`s, and would have restarted from epoch 0.
+  They were replaced before starting by jobs submitted with
+  `submit_fm_v3_jobs.py --resume-from <original experiment>`, whose wrapper
+  copies the original experiment dir (checkpoints, `wandb_run_id`, metrics;
+  read-only on the source) into the job's own `$AGENT_OUTPUT_DIR` behind a
+  completion marker, so fme resumes from the copied `ckpt.tar` and the
+  original wandb run. Each record's `resumed_from` and `superseded` give the
+  chain.
