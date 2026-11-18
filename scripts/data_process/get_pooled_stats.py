@@ -23,6 +23,20 @@
 # time (`renamed_variables`, `derived_variables`, `overwrite.multiply_scalar`),
 # so that every store contributes to the stats of the variables training sees.
 #
+# With `per_grid_cell: true` the stats are reduced over time only, keeping the
+# horizontal dims, so every file holds a mean / std per grid cell (with the
+# source data's lat/lon coordinates), in the format read by fme's
+# `NormalizationConfig(per_grid_cell=True)`. The per-store moments are combined
+# exactly as in the scalar case, cell by cell. Variables listed in
+# `scalar_variables` are still reduced over time and space. Their values can
+# instead be copied from an existing (scalar) stats directory with
+# `scalar_reference`, so that they equal a baseline's constants exactly.
+#
+# `pooling: label_equal` gives each group equal total weight in the root pooled
+# stats (with timestep weighting within a group), matching a training sampler
+# that draws each label with equal probability. `group_placeholders` adds
+# mean 0 / std 1 placeholders for variables a group has no data for.
+#
 # Each store is read once, in blocks of time steps reduced by a pool of worker
 # processes (`--workers`), without dask.
 #
@@ -226,6 +240,32 @@ class DatasetPair:
         return f"{index:02d}_{name}_{start}_{end}"
 
 
+POOLING_TIMESTEP = "timestep"
+POOLING_LABEL_EQUAL = "label_equal"
+
+
+@dataclasses.dataclass
+class ScalarReference:
+    """An existing stats directory to copy the `scalar_variables` from.
+
+    Parameters:
+        directory: Root of the stats directory (local path or gs://), holding
+            centering.nc, scaling-full-field.nc, scaling-residual.nc and
+            groups/{name}/ with the same files.
+        groups: Mapping from a group name of this config to the name of the
+            reference's group directory to copy from, for groups whose
+            reference directory has another name (e.g. `e3sm: e3sm-filled`).
+            Other groups are copied from the same-named directory.
+    """
+
+    directory: str
+    groups: dict[str, str] = dataclasses.field(default_factory=dict)
+
+    def group_directory(self, group: str) -> str:
+        name = self.groups.get(group, group)
+        return self.directory.rstrip("/") + "/groups/" + name
+
+
 @dataclasses.dataclass
 class Config:
     """Stats configuration.
@@ -237,14 +277,66 @@ class Config:
             `groups/{name}/` alongside the root pooled stats. Every name must be
             claimed by at least one dataset pair. Leave empty to write only the
             root pooled stats.
+        per_grid_cell: Reduce over time only, keeping the horizontal dims, so
+            that the stats are per grid cell. The per-cell files keep the
+            source data's horizontal coordinates.
+        scalar_variables: Variables reduced over time and the horizontal dims
+            even with `per_grid_cell`. Requires `per_grid_cell`.
+        scalar_reference: If given, the `scalar_variables` of the root and of
+            every group are copied from this existing stats directory instead
+            of being computed (they are still computed in the per-store files).
+        pooling: How the root stats pool the stores. "timestep" weights each
+            store by its number of timesteps. "label_equal" gives each group
+            equal total weight, with the stores of a group weighted by their
+            number of timesteps; every dataset pair must then belong to exactly
+            one group. Group stats are always timestep-weighted.
+        group_placeholders: Mapping from a group name to variables the group
+            has no data for, for which the group's files get a placeholder mean
+            of 0 and std of 1 (shaped like the root stats of the variable), for
+            a training setup that masks those variables for that group.
     """
 
     dataset_pairs: list[DatasetPair]
     groups: list[str] = dataclasses.field(default_factory=list)
+    per_grid_cell: bool = False
+    scalar_variables: list[str] = dataclasses.field(default_factory=list)
+    scalar_reference: ScalarReference | None = None
+    pooling: str = POOLING_TIMESTEP
+    group_placeholders: dict[str, list[str]] = dataclasses.field(default_factory=dict)
 
     def __post_init__(self):
         if len(self.dataset_pairs) == 0:
             raise ValueError("dataset_pairs must list at least one dataset.")
+        if self.scalar_variables and not self.per_grid_cell:
+            raise ValueError(
+                "scalar_variables requires per_grid_cell; without it every "
+                "variable is already reduced to a scalar."
+            )
+        if self.scalar_reference is not None:
+            if not self.scalar_variables:
+                raise ValueError("scalar_reference requires scalar_variables.")
+            unknown = set(self.scalar_reference.groups) - set(self.groups)
+            if unknown:
+                raise ValueError(
+                    f"scalar_reference.groups names unknown groups {sorted(unknown)}."
+                )
+        if self.pooling not in (POOLING_TIMESTEP, POOLING_LABEL_EQUAL):
+            raise ValueError(
+                f"pooling must be {POOLING_TIMESTEP!r} or {POOLING_LABEL_EQUAL!r}, "
+                f"got {self.pooling!r}."
+            )
+        if self.pooling == POOLING_LABEL_EQUAL:
+            bad = [p.dataset for p in self.dataset_pairs if len(p.group_names) != 1]
+            if bad:
+                raise ValueError(
+                    "pooling: label_equal needs every dataset pair to belong to "
+                    f"exactly one group, but these do not: {bad}."
+                )
+        unknown = set(self.group_placeholders) - set(self.groups)
+        if unknown:
+            raise ValueError(
+                f"group_placeholders names unknown groups {sorted(unknown)}."
+            )
         claimed = {name for pair in self.dataset_pairs for name in pair.group_names}
         missing = set(self.groups) - claimed
         if missing:
@@ -433,14 +525,21 @@ def _time_moments(
 
 
 def _block_moments(
-    store: str, start: int, stop: int, first: int, transforms: DatasetPair | None
+    store: str,
+    start: int,
+    stop: int,
+    first: int,
+    transforms: DatasetPair | None,
+    per_grid_cell: bool = False,
+    scalar_variables: frozenset[str] = frozenset(),
 ) -> dict[str, dict]:
     """Moments of every variable over the time steps [start, stop) of a store,
     and of its time differences ending in those steps. `first` is the first
     step of the whole time slice, which has no time difference ending in it.
 
     Variables are read one at a time, so memory use is that of one variable
-    over the block rather than of the whole block.
+    over the block rather than of the whole block. With `per_grid_cell`, only
+    time is reduced, except for the `scalar_variables`.
     """
     ds = _open_store(store)
     lead = 0 if start == first else 1
@@ -448,10 +547,14 @@ def _block_moments(
     if transforms is not None:
         block = apply_transforms(block, transforms)
     block = block.drop_vars(DROP_VARIABLES, errors="ignore")
-    reduction_dims = _reduction_dims(block)
+    all_reduction_dims = _reduction_dims(block)
 
     result = {}
     for name, da in block.data_vars.items():
+        if per_grid_cell and name not in scalar_variables:
+            reduction_dims = ["time"]
+        else:
+            reduction_dims = all_reduction_dims
         has_time = "time" in da.dims
         if not has_time and start != first:
             continue  # a static variable is the same in every block
@@ -511,6 +614,8 @@ def compute_store_stats(
     transforms: DatasetPair | None = None,
     pool: concurrent.futures.Executor | None = None,
     min_blocks: int = 1,
+    per_grid_cell: bool = False,
+    scalar_variables: Iterable[str] = (),
 ) -> dict:
     """Open one zarr store, slice it in time, and return its centering /
     full-field / residual stats plus the timestep count used as the pooling
@@ -524,6 +629,10 @@ def compute_store_stats(
     reading every variable once; the blocks are computed by `pool` if given
     (see `_init_worker`), else in this process. `min_blocks` is the number of
     blocks to aim for at least, so that a pool has enough tasks for its workers.
+
+    With `per_grid_cell`, only time is reduced (except for the
+    `scalar_variables`), and the stats keep the store's coordinates of the
+    horizontal dims.
     """
     ds = xr.open_zarr(store, chunks=None)
     positions = xr.DataArray(
@@ -553,6 +662,8 @@ def compute_store_stats(
         [block_stop for _, block_stop in blocks],
         itertools.repeat(start),
         itertools.repeat(transforms),
+        itertools.repeat(per_grid_cell),
+        itertools.repeat(frozenset(scalar_variables)),
     )
     if pool is None:
         results: Iterable[dict[str, dict]] = map(_block_moments, *arguments)
@@ -579,9 +690,20 @@ def compute_store_stats(
         variance = np.divide(m2, n, out=np.full_like(m2, np.nan), where=n > 0)
         return np.sqrt(variance).astype(moments["dtype"])
 
+    kept_dims = {dim for m in total.values() for dim in m["dims"]}
+    coords = {}
+    for dim in kept_dims:
+        if dim not in ds.coords or not np.issubdtype(ds[dim].dtype, np.number):
+            raise ValueError(
+                f"{store}: dimension {dim!r} kept in the stats has no numeric "
+                "coordinate, which per-grid-cell normalization needs."
+            )
+        coords[dim] = xr.Variable((dim,), ds[dim].values, attrs=ds[dim].attrs)
+
     def _dataset(function, key: str) -> xr.Dataset:
         return xr.Dataset(
-            {name: (m["dims"], function(m, key)) for name, m in total.items()}
+            {name: (m["dims"], function(m, key)) for name, m in total.items()},
+            coords=coords,
         )
 
     return {
@@ -602,8 +724,14 @@ def _stats_files(stats: dict) -> dict:
     }
 
 
-def pool_stats(per_pair: list[dict]) -> dict:
-    """Pool per-pair stats weighted by timestep count.
+STAT_KEYS = ("centering", "scaling_full_field", "scaling_residual")
+
+
+def pool_stats(per_pair: list[dict], weights: list[float] | None = None) -> dict:
+    """Pool per-pair stats weighted by timestep count, or by `weights` if given.
+
+    A variable missing from some pairs (or NaN in some of their grid cells) is
+    pooled over the others, with their weights renormalized.
 
     - centering: weighted mean of the means.
     - scaling-residual: sqrt of weighted-mean variance.
@@ -612,7 +740,11 @@ def pool_stats(per_pair: list[dict]) -> dict:
       variance) to each pair's within-dataset variance. This is what widens the
       std of near-constant forcings (e.g. global_mean_co2) to span the union.
     """
-    samples = xr.DataArray([float(p["n_samples"]) for p in per_pair], dims=["run"])
+    if weights is None:
+        weights = [float(p["n_samples"]) for p in per_pair]
+    if len(weights) != len(per_pair):
+        raise ValueError(f"Got {len(weights)} weights for {len(per_pair)} pairs.")
+    samples = xr.DataArray(weights, dims=["run"])
 
     centering = xr.concat([p["centering"] for p in per_pair], dim="run")
     pooled_centering = centering.weighted(samples).mean(dim="run")
@@ -630,6 +762,124 @@ def pool_stats(per_pair: list[dict]) -> dict:
         "scaling-full-field.nc": pooled_full_field,
         "scaling-residual.nc": pooled_residual,
     }
+
+
+def _as_store_layout(files: dict, n_samples: int) -> dict:
+    """Pooled {filename: Dataset} stats in the per-store layout `pool_stats`
+    takes, so that pooled stats can themselves be pooled."""
+    return {
+        "centering": files["centering.nc"],
+        "scaling_full_field": files["scaling-full-field.nc"],
+        "scaling_residual": files["scaling-residual.nc"],
+        "n_samples": n_samples,
+    }
+
+
+def pool_label_equal(group_stats: dict[str, dict], group_samples: dict[str, int]):
+    """Pool the timestep-weighted stats of each group with equal weights.
+
+    This equals pooling the stores directly, each weighted by its share of its
+    group's timesteps divided by the number of groups, since the pooled
+    variance of the groups adds the spread of the group means about the pooled
+    mean, which itself holds the spread of the store means within each group.
+    A variable missing from a group (e.g. TMP850 and h500 for E3SM) is pooled
+    over the groups that have it, with equal renormalized weights, as
+    `pool_stats` skips NaNs.
+    """
+    names = list(group_stats)
+    return pool_stats(
+        [_as_store_layout(group_stats[g], group_samples[g]) for g in names],
+        weights=[1.0] * len(names),
+    )
+
+
+# Tolerance on horizontal coordinates of different stores, as fme's check of
+# per-grid-cell constants against the data's coordinates.
+COORD_RTOL = 1e-5
+COORD_ATOL = 1e-4
+
+
+def align_grids(per_pair: list[dict]) -> None:
+    """Give every store's per-cell stats the horizontal coordinates of the
+    first store, after checking that they agree to within the tolerance fme
+    uses when checking per-grid-cell constants against the data. Raises if
+    the grids differ (in size, order or values), so that stores on different
+    grids are never pooled cell by cell."""
+    reference: dict[str, xr.DataArray] = {}
+    reference_store: dict[str, str] = {}
+    for pair in per_pair:
+        for key in STAT_KEYS:
+            ds = pair[key]
+            for dim in HORIZONTAL_DIMS:
+                if dim not in ds.coords:
+                    continue
+                if dim not in reference:
+                    reference[dim] = ds[dim]
+                    reference_store[dim] = pair["store"]
+                    continue
+                values = ds[dim].values
+                expected = reference[dim].values
+                if values.shape != expected.shape or not np.allclose(
+                    values, expected, rtol=COORD_RTOL, atol=COORD_ATOL
+                ):
+                    raise ValueError(
+                        f"Coordinates of {dim!r} in {pair['store']} differ from "
+                        f"those in {reference_store[dim]}; cannot pool per grid "
+                        "cell across different grids."
+                    )
+                if not np.array_equal(values, expected) and key == "centering":
+                    logging.warning(
+                        f"Coordinates of {dim!r} in {pair['store']} differ "
+                        f"slightly from those in {reference_store[dim]} (max "
+                        f"{np.abs(values - expected).max():.3g}); using the latter."
+                    )
+                pair[key] = ds = ds.assign_coords({dim: reference[dim]})
+
+
+def _read_stats_file(path: str) -> xr.Dataset:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        local_path = os.path.join(tmpdir, os.path.basename(path))
+        copy(path, local_path)
+        with xr.open_dataset(local_path) as ds:
+            return ds.load()
+
+
+def copy_scalar_variables(files: dict, source_directory: str, names: list[str]):
+    """Replace the variables `names` of each {filename: Dataset} in `files`
+    by the scalar values in the same-named files of `source_directory`."""
+    source_directory = source_directory.rstrip("/")
+    for filename, ds in files.items():
+        path = source_directory + "/" + filename
+        source = _read_stats_file(path)
+        for name in names:
+            if name not in source:
+                raise ValueError(f"{path} has no variable {name!r}.")
+            if source[name].ndim != 0:
+                raise ValueError(
+                    f"{name!r} in {path} has dims {source[name].dims}; expected a "
+                    "scalar."
+                )
+            ds[name] = xr.DataArray(
+                source[name].values, attrs={**source[name].attrs, "source": path}
+            )
+        logging.info(f"Copied {names} from {path} into {filename}")
+
+
+def add_placeholders(files: dict, root_files: dict, names: list[str]):
+    """Add mean 0 / std 1 placeholders for the variables `names`, shaped like
+    (and with the coordinates of) the same variables in `root_files`, to each
+    {filename: Dataset} in `files`. Zero stds would be rejected by fme."""
+    for filename, ds in files.items():
+        value = 0.0 if filename == "centering.nc" else 1.0
+        for name in names:
+            if name in ds:
+                raise ValueError(
+                    f"Cannot add a placeholder for {name!r} to {filename}, which "
+                    "already has stats for it."
+                )
+            ds[name] = xr.full_like(root_files[filename][name], value).assign_attrs(
+                description="Placeholder: this group has no data for this variable."
+            )
 
 
 def write_stats(stats: dict, out_dir: str, config_yaml: str, n_samples: int):
@@ -750,6 +1000,8 @@ def compute(
                         transforms=pair,
                         pool=pool,
                         min_blocks=4 * n_workers,
+                        per_grid_cell=config.per_grid_cell,
+                        scalar_variables=config.scalar_variables,
                     )
                     write_stats(
                         _stats_files(stats),
@@ -764,31 +1016,62 @@ def compute(
             logging.info(f"Shard {shard}: wrote {len(per_pair)} stores, not pooling.")
             return
 
+        if config.per_grid_cell:
+            align_grids(per_pair)
+
         total_samples = sum(p["n_samples"] for p in per_pair)
-        pooled = pool_stats(per_pair)
-
-        # Show every variable, not just the first and last few, so the pooled
-        # values can be read from the job logs.
-        with xr.set_options(display_max_rows=10_000):
-            for name, da in pooled.items():
-                logging.info(f"{name}:\n{da}")
-
-        write_stats(pooled, output_directory, config_yaml, n_samples=total_samples)
-
         # Pool each group separately from the same per-store moments, so every
         # grouping strategy is derived from one pass over the data.
+        group_stats = {}
+        group_samples = {}
         for group_name in config.groups:
             members = [p for p in per_pair if group_name in p["groups"]]
-            group_samples = sum(p["n_samples"] for p in members)
+            group_samples[group_name] = sum(p["n_samples"] for p in members)
             logging.info(
                 f"Pooling group {group_name!r} over {len(members)} stores "
-                f"({group_samples} steps)"
+                f"({group_samples[group_name]} steps)"
             )
+            group_stats[group_name] = pool_stats(members)
+
+        if config.pooling == POOLING_LABEL_EQUAL:
+            logging.info(f"Pooling groups {config.groups} with equal weights")
+            pooled = pool_label_equal(group_stats, group_samples)
+        else:
+            pooled = pool_stats(per_pair)
+
+        # Placeholders are added after the root pooling, so they never enter it.
+        for group_name, names in config.group_placeholders.items():
+            logging.info(f"Adding placeholders for {names} to group {group_name!r}")
+            add_placeholders(group_stats[group_name], pooled, names)
+
+        if config.scalar_reference is not None:
+            reference = config.scalar_reference
+            copy_scalar_variables(pooled, reference.directory, config.scalar_variables)
+            for group_name in config.groups:
+                copy_scalar_variables(
+                    group_stats[group_name],
+                    reference.group_directory(group_name),
+                    config.scalar_variables,
+                )
+
+        # Show every variable, not just the first and last few, so the pooled
+        # values can be read from the job logs. Per-cell values are too many to
+        # show usefully, so their means over cells are shown instead.
+        with xr.set_options(display_max_rows=10_000):
+            for name, ds in pooled.items():
+                if config.per_grid_cell:
+                    ds = ds.mean([d for d in HORIZONTAL_DIMS if d in ds.dims])
+                logging.info(f"{name}:\n{ds}")
+
+        for ds in pooled.values():
+            ds.attrs["pooling"] = config.pooling
+        write_stats(pooled, output_directory, config_yaml, n_samples=total_samples)
+        for group_name in config.groups:
             write_stats(
-                pool_stats(members),
+                group_stats[group_name],
                 output_directory + "/groups/" + group_name,
                 config_yaml,
-                n_samples=group_samples,
+                n_samples=group_samples[group_name],
             )
 
         # Save the input config alongside the stats so the output is reproducible.

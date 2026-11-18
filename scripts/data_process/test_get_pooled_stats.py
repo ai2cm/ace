@@ -461,3 +461,210 @@ def test_time_block_size_is_halved_to_give_enough_blocks(tmp_path):
     assert _time_block_size(opened, n_steps=128, min_blocks=4) == 32
     # Never below MIN_TIME_BLOCK (16), however many blocks are asked for.
     assert _time_block_size(opened, n_steps=128, min_blocks=1000) == 16
+
+
+LAT = np.array([-45.0, 0.0, 45.0])
+LON = np.array([0.0, 90.0, 180.0, 270.0])
+
+
+def _write_grid_store(path, seed: int, n_time: int, with_t850: bool = True, lat=LAT):
+    """A store on a small lat/lon grid with per-cell varying fields, a static
+    `hgt`, and optionally a `t850` field."""
+    rng = np.random.default_rng(seed)
+    time = pd.date_range("2000-01-01", periods=n_time, freq="D")
+    shape = (n_time, len(lat), len(LON))
+    offset = np.arange(len(lat) * len(LON)).reshape(len(lat), len(LON))
+    data = {
+        "field": (
+            ("time", "lat", "lon"),
+            seed + offset + rng.normal(size=shape) * (1 + offset),
+        ),
+        "hgt": (("lat", "lon"), rng.normal(size=(len(lat), len(LON)))),
+    }
+    if with_t850:
+        data["t850"] = (("time", "lat", "lon"), 250 + rng.normal(size=shape))
+    ds = xr.Dataset(data, coords={"time": time, "lat": lat, "lon": LON})
+    ds.to_zarr(path, mode="w")
+    return ds
+
+
+def _write_scalar_reference(root, groups: list[str]) -> dict:
+    """Scalar stats files for `hgt`, with a distinct value per directory."""
+    values = {}
+    for i, directory in enumerate(["", *[f"groups/{g}" for g in groups]]):
+        out = root / directory
+        out.mkdir(parents=True, exist_ok=True)
+        for j, name in enumerate(
+            ["centering.nc", "scaling-full-field.nc", "scaling-residual.nc"]
+        ):
+            value = 10.0 * (i + 1) + j + 1
+            xr.Dataset({"hgt": value, "other": 0.0}).to_netcdf(out / name)
+            values[(directory, name)] = value
+    return values
+
+
+def _weighted_stats(samples: list[np.ndarray], weights: list[float]):
+    """Per-cell mean and std of time samples (time first), each sample of a
+    list entry weighted by that entry's weight divided by its length."""
+    values = np.concatenate(samples)
+    w = np.concatenate(
+        [np.full(len(s), wt / len(s)) for s, wt in zip(samples, weights)]
+    )
+    mean = np.average(values, axis=0, weights=w)
+    std = np.sqrt(np.average((values - mean) ** 2, axis=0, weights=w))
+    return mean, std
+
+
+def _build_normalizer(directory, names, std_file="scaling-full-field.nc"):
+    from fme.core.normalizer import NormalizationConfig
+
+    config = NormalizationConfig(
+        global_means_path=str(directory / "centering.nc"),
+        global_stds_path=str(directory / std_file),
+        per_grid_cell=True,
+    )
+    return config.build(names)
+
+
+def test_compute_per_grid_cell_label_equal(tmp_path):
+    """Per-cell stats with label-equal pooling, scalar-kept variables copied
+    from a reference, and placeholders for a variable a group lacks; the files
+    load as per-grid-cell normalization constants."""
+    stores = {
+        "a0": _write_grid_store(tmp_path / "a0.zarr", seed=0, n_time=12),
+        "a1": _write_grid_store(tmp_path / "a1.zarr", seed=1, n_time=30),
+        "b0": _write_grid_store(
+            tmp_path / "b0.zarr", seed=5, n_time=8, with_t850=False
+        ),
+    }
+    reference = tmp_path / "reference"
+    ref_values = _write_scalar_reference(reference, ["a", "b-filled"])
+    config = {
+        "dataset_pairs": [
+            {"dataset": str(tmp_path / "a0.zarr"), "group": "a"},
+            {"dataset": str(tmp_path / "a1.zarr"), "group": "a"},
+            {"dataset": str(tmp_path / "b0.zarr"), "group": "b"},
+        ],
+        "groups": ["a", "b"],
+        "per_grid_cell": True,
+        "scalar_variables": ["hgt"],
+        "scalar_reference": {"directory": str(reference), "groups": {"b": "b-filled"}},
+        "pooling": "label_equal",
+        "group_placeholders": {"b": ["t850"]},
+    }
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text(yaml.safe_dump(config))
+    out = tmp_path / "out"
+    compute(str(config_yaml), str(out), n_workers=2)
+
+    root = _pooled(out)
+    group_a = _pooled(out / "groups" / "a")
+    group_b = _pooled(out / "groups" / "b")
+    for files in (root, group_a, group_b):
+        for ds in files.values():
+            assert ds["field"].dims == ("lat", "lon")
+            np.testing.assert_array_equal(ds["lat"], LAT)
+            np.testing.assert_array_equal(ds["lon"], LON)
+            assert ds["hgt"].dims == ()
+
+    field = {k: v["field"].values for k, v in stores.items()}
+    # Root: each group has total weight 1/2, timestep-weighted within a group.
+    mean, std = _weighted_stats(
+        [field["a0"], field["a1"], field["b0"]], [0.5 * 12 / 42, 0.5 * 30 / 42, 0.5]
+    )
+    np.testing.assert_allclose(root["centering.nc"]["field"], mean, rtol=1e-6)
+    np.testing.assert_allclose(root["scaling-full-field.nc"]["field"], std, rtol=1e-6)
+    # Group a: timestep-weighted.
+    mean, std = _weighted_stats([field["a0"], field["a1"]], [12, 30])
+    np.testing.assert_allclose(group_a["centering.nc"]["field"], mean, rtol=1e-6)
+    np.testing.assert_allclose(
+        group_a["scaling-full-field.nc"]["field"], std, rtol=1e-6
+    )
+    # Residual: per-cell time-difference std, pooled as a mean of variances
+    # with the same weights (timestep counts within a group).
+    var = {k: np.diff(v, axis=0).var(axis=0) for k, v in field.items()}
+    expected_var = 0.5 * var["b0"] + 0.5 * (12 * var["a0"] + 30 * var["a1"]) / 42
+    np.testing.assert_allclose(
+        root["scaling-residual.nc"]["field"], np.sqrt(expected_var), rtol=1e-6
+    )
+
+    # t850 is missing from group b, so the root pools group a alone for it.
+    np.testing.assert_allclose(
+        root["centering.nc"]["t850"], group_a["centering.nc"]["t850"]
+    )
+    np.testing.assert_allclose(
+        root["scaling-full-field.nc"]["t850"], group_a["scaling-full-field.nc"]["t850"]
+    )
+    for name, ds in group_b.items():
+        assert ds["t850"].dims == ("lat", "lon")
+        np.testing.assert_array_equal(
+            ds["t850"], 0.0 if name == "centering.nc" else 1.0
+        )
+
+    # Scalar-kept variables are the reference's values.
+    for directory, files in (
+        ("", root),
+        ("groups/a", group_a),
+        ("groups/b-filled", group_b),
+    ):
+        for name, ds in files.items():
+            assert float(ds["hgt"]) == ref_values[(directory, name)]
+
+    names = ["field", "t850", "hgt"]
+    for directory in (out, out / "groups" / "a", out / "groups" / "b"):
+        for std_file in ("scaling-full-field.nc", "scaling-residual.nc"):
+            normalizer = _build_normalizer(directory, names, std_file)
+            assert tuple(normalizer.means["field"].shape) == (3, 4)
+            assert normalizer.means["hgt"].numel() == 1
+
+
+def test_compute_per_grid_cell_without_reference_reduces_scalars(tmp_path):
+    ds = _write_grid_store(tmp_path / "a.zarr", seed=0, n_time=10)
+    config = {
+        "dataset_pairs": [{"dataset": str(tmp_path / "a.zarr")}],
+        "per_grid_cell": True,
+        "scalar_variables": ["hgt"],
+    }
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text(yaml.safe_dump(config))
+    compute(str(config_yaml), str(tmp_path / "out"), n_workers=1)
+    root = _pooled(tmp_path / "out")
+    np.testing.assert_allclose(root["centering.nc"]["hgt"], ds["hgt"].mean())
+    np.testing.assert_allclose(root["scaling-full-field.nc"]["hgt"], ds["hgt"].std())
+    np.testing.assert_allclose(
+        root["centering.nc"]["field"], ds["field"].mean("time"), rtol=1e-6
+    )
+
+
+def test_per_grid_cell_pooling_rejects_different_grids(tmp_path):
+    _write_grid_store(tmp_path / "a.zarr", seed=0, n_time=5)
+    _write_grid_store(tmp_path / "b.zarr", seed=1, n_time=5, lat=LAT[::-1])
+    config = {
+        "dataset_pairs": [
+            {"dataset": str(tmp_path / "a.zarr")},
+            {"dataset": str(tmp_path / "b.zarr")},
+        ],
+        "per_grid_cell": True,
+    }
+    config_yaml = tmp_path / "config.yaml"
+    config_yaml.write_text(yaml.safe_dump(config))
+    with pytest.raises(ValueError, match="different grids"):
+        compute(str(config_yaml), str(tmp_path / "out"), n_workers=1)
+
+
+def test_config_validates_per_grid_cell_options():
+    with pytest.raises(ValueError, match="requires per_grid_cell"):
+        Config(dataset_pairs=[DatasetPair(dataset="a")], scalar_variables=["x"])
+    with pytest.raises(ValueError, match="exactly one group"):
+        Config(
+            dataset_pairs=[
+                DatasetPair(dataset="a", group="x"),
+                DatasetPair(dataset="b"),
+            ],
+            groups=["x"],
+            pooling="label_equal",
+        )
+    with pytest.raises(ValueError, match="pooling must be"):
+        Config(dataset_pairs=[DatasetPair(dataset="a")], pooling="equal")
+    with pytest.raises(ValueError, match="group_placeholders"):
+        Config(dataset_pairs=[DatasetPair(dataset="a")], group_placeholders={"x": []})

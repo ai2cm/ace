@@ -1,8 +1,8 @@
 # PRs merged into exp/alexeyfm2
 
 This branch is `main` plus the PRs below. No code changes are made on this
-branch outside `configs/experiments/2026-10-19-fm/` unless they come from a PR
-listed here.
+branch outside `configs/experiments/2026-10-19-fm/` and the repo-level
+`scripts/` unless they come from a PR listed here.
 
 | PR | Title | Author |
 |----|-------|--------|
@@ -31,6 +31,29 @@ listed here.
 | [#1617](https://github.com/ai2cm/ace/pull/1617) | Add per-sample global-mean drift inference aggregator | yyexela |
 | [#1620](https://github.com/ai2cm/ace/pull/1620) | Add per-dataset spherical harmonic roundtrip of selected variables | yyexela |
 | [#1654](https://github.com/ai2cm/ace/pull/1654) | Add per-grid-cell normalization constants | yyexela |
+
+## Branch-local changes
+
+Changes made directly on this branch (not from a PR), outside
+`configs/experiments/2026-10-19-fm/`:
+
+- `scripts/data_process/get_pooled_stats.py` gains opt-in config keys:
+  `per_grid_cell` (reduce over time only, writing per-cell `centering.nc`,
+  `scaling-full-field.nc` and `scaling-residual.nc` on the stores' lat/lon grid,
+  pooled and per group as before), `scalar_variables` (kept scalar in per-cell
+  mode), `scalar_reference` (copy those scalars from an existing stats
+  directory, per group, so they equal a baseline's constants), `pooling:
+  label_equal` (root stats give each group equal total weight, timestep-weighted
+  within a group; a variable missing from a group is pooled over the others
+  with renormalized equal weights) and `group_placeholders` (per-cell mean 0 /
+  std 1 for variables a group lacks). Defaults are unchanged; tests in
+  `scripts/data_process/test_get_pooled_stats.py`.
+- `scripts/data_process/configs/fm-v3-e3sm-balanced-percell-stats.yaml`: the
+  v2 fm-e3sm-balanced stats config read from weka, with per-cell stats,
+  label-equal pooling, HGTsfc / land, ocean and sea-ice fractions /
+  global_mean_co2 copied from the v2 stats, and TMP850 / h500 placeholders in
+  the e3sm group. Checked by
+  `configs/experiments/2026-10-19-fm/scripts/verify_percell_stats.py`.
 
 ## Deferred
 
