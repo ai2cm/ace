@@ -601,11 +601,11 @@ stepper:
         conditional: true
       normalization:
         network:
-          global_means_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-c96amip-stats-rru2/2026-11-18-fm-c96amip/centering.nc
-          global_stds_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-c96amip-stats-rru2/2026-11-18-fm-c96amip/scaling-full-field.nc
+          global_means_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-c96amip-stats-gpu-0isd/2026-11-18-fm-c96amip/centering.nc
+          global_stds_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-c96amip-stats-gpu-0isd/2026-11-18-fm-c96amip/scaling-full-field.nc
         residual:
-          global_means_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-c96amip-stats-rru2/2026-11-18-fm-c96amip/centering.nc
-          global_stds_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-c96amip-stats-rru2/2026-11-18-fm-c96amip/scaling-residual.nc
+          global_means_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-c96amip-stats-gpu-0isd/2026-11-18-fm-c96amip/centering.nc
+          global_stds_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-c96amip-stats-gpu-0isd/2026-11-18-fm-c96amip/scaling-residual.nc
       ocean:
         surface_temperature_name: surface_temperature
         ocean_fraction_name: ocean_fraction

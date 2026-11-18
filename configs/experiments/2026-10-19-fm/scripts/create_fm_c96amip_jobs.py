@@ -171,18 +171,18 @@ JOB_PREFIX = "ace2-fm-"
 WANDB_GROUP = "ace2-fm-c96amip-2026-11-18"
 SMOKE_WANDB_GROUP = f"{WANDB_GROUP}-smoke"
 
-# Scalar stats pooled over the training data (fm-c96amip-stats.yaml), written
-# by the agent job agent-alexeyy-fm-c96amip-stats-rru2.
 ARM = "fm-c96amip"
 ERA5_ARM = "fm-era5-1979"
 ARMS = (ARM, ERA5_ARM)
 # Scalar stats pooled over each arm's training data
 # (scripts/data_process/configs/fm-c96amip-stats.yaml, fm-era5-1979-stats.yaml),
-# written by the agent jobs agent-alexeyy-fm-{c96amip,era5-1979}-stats-*.
+# written by the agent jobs agent-alexeyy-fm-{c96amip,era5-1979}-stats-gpu-*
+# (on a 1-GPU node: the CPU-only submissions sat in "initializing" for over
+# an hour).
+_AGENT_DIR = "/climate-default/agents/alexeyy"
 STATS_DIRS = {
-    ARM: "/climate-default/agents/alexeyy/agent-alexeyy-fm-c96amip-stats-rru2/"
-    "2026-11-18-fm-c96amip",
-    ERA5_ARM: "/climate-default/agents/alexeyy/agent-alexeyy-fm-era5-1979-stats-vziz/"
+    ARM: f"{_AGENT_DIR}/agent-alexeyy-fm-c96amip-stats-gpu-0isd/2026-11-18-fm-c96amip",
+    ERA5_ARM: f"{_AGENT_DIR}/agent-alexeyy-fm-era5-1979-stats-gpu-c1ic/"
     "2026-11-18-fm-era5-1979",
 }
 SFNO = "nc-sfno-v2"

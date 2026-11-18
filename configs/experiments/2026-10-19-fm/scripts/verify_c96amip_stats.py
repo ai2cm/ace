@@ -9,7 +9,11 @@ fm-era5-1979-stats.yaml, with --group era5). It checks that:
 - OUT/{centering,scaling-full-field,scaling-residual}.nc (and groups/GROUP/,
   GROUP = c96 by default, which pools the same entries) hold every variable
   of in_names and out_names of each TRAIN_CONFIG, as scalars, finite, with
-  positive stds; groups/GROUP equals the root;
+  positive full-field stds and positive residual stds for the prognostic
+  variables (in in_names and out_names; fme applies the residual scaling to
+  those only, and input-only forcings such as land_fraction can be constant
+  in time, with residual std 0, as in the v2 stats); groups/GROUP equals
+  the root;
 - the files build with fme's NormalizationConfig;
 - the store is daily and gap-free from 1979-01-01 through 2014-12-31, so it
   covers the training splits (1979-1993, 1995-2008), the validation years
@@ -44,14 +48,20 @@ INFERENCE_LAST_IC = "2009-11-15"
 INFERENCE_STEPS = 1825
 
 
-def _names(config_path: str) -> set[str]:
+def _names(config_path: str) -> tuple[set[str], set[str]]:
+    """(in_names | out_names, in_names & out_names) of a training config."""
     cfg = yaml.safe_load(pathlib.Path(config_path).read_text())
     step = cfg["stepper"]["step"]["config"]
-    return set(step["in_names"]) | set(step["out_names"])
+    in_names, out_names = set(step["in_names"]), set(step["out_names"])
+    return in_names | out_names, in_names & out_names
 
 
 def check_stats(
-    out: pathlib.Path, names: set[str], group_name: str, failures: list[str]
+    out: pathlib.Path,
+    names: set[str],
+    prognostic: set[str],
+    group_name: str,
+    failures: list[str],
 ) -> None:
     for subdir in (out, out / "groups" / group_name):
         for name in FILES:
@@ -66,7 +76,10 @@ def check_stats(
                 elif not np.isfinite(value):
                     failures.append(f"{subdir}/{name} {var} not finite: {value}")
                 elif name in STD_FILES and not value > 0:
-                    failures.append(f"{subdir}/{name} {var} not positive: {value}")
+                    if name == "scaling-residual.nc" and var not in prognostic:
+                        print(f"note: {subdir}/{name} {var} = {value} (not prognostic)")
+                    else:
+                        failures.append(f"{subdir}/{name} {var} not positive: {value}")
     for name in FILES:
         root = xr.open_dataset(out / name)
         group = xr.open_dataset(out / "groups" / group_name / name)
@@ -148,14 +161,17 @@ def main() -> None:
     parser.add_argument("--group", default="c96")
     args = parser.parse_args()
     names: set[str] = set()
+    prognostic: set[str] = set()
     for path in args.train_configs:
-        config_names = _names(path)
-        if names and config_names != names:
+        config_names, config_prognostic = _names(path)
+        if names and (config_names, config_prognostic) != (names, prognostic):
             raise SystemExit(f"{path}: in/out names differ from the first config")
-        names = config_names
-    print(f"{len(names)} variables in in_names | out_names")
+        names, prognostic = config_names, config_prognostic
+    print(
+        f"{len(names)} variables in in_names | out_names, {len(prognostic)} prognostic"
+    )
     failures: list[str] = []
-    check_stats(args.out, names, args.group, failures)
+    check_stats(args.out, names, prognostic, args.group, failures)
     print_table(args.out, names, args.reference)
     check_store(args.store, failures)
     print("\n=== SUMMARY ===")
