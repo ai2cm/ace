@@ -1,0 +1,25 @@
+# Pooled (scalar) normalization stats for the FM C96 AMIP-only runs
+# (configs/experiments/2026-10-19-fm/scripts/create_fm_c96amip_jobs.py), over
+# exactly their training data: the C96 SHiELD AMIP ensemble member ic_0001 with
+# the two year splits of the v2 runs' c96 AMIP ic_0001 entries (training
+# skips 1994, a validation year). The entries equal
+# train_loader.dataset.concat of the C96 AMIP-only run configs, read from weka
+# as training does (the stats job runs on beaker, which has no GCS
+# credentials). These training entries have no renamed, derived or rescaled
+# variables, so none are set here.
+#
+# Scalar stats (no per_grid_cell), pooled with timestep weighting (the
+# default, as for the v2 stats), written at the output root as centering.nc,
+# scaling-full-field.nc and scaling-residual.nc. The one group, c96, is the
+# training label and pools the same two entries (its files equal the root's).
+dataset_pairs:
+- dataset: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset/ic_0001.zarr
+  start_time: '1979-01-01'
+  end_time: '1993-12-31'
+  group: c96
+- dataset: /climate-default/2026-01-28-vertically-resolved-c96-4deg-daily-shield-amip-ensemble-dataset/ic_0001.zarr
+  start_time: '1995-01-01'
+  end_time: '2008-12-31'
+  group: c96
+groups:
+- c96
