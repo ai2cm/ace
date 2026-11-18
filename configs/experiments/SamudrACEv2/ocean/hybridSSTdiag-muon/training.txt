@@ -1,0 +1,26 @@
+group|tag|skip_or_trained|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr10e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=L1 optimization.lr=0.001 optimization.kwargs.adjust_lr_fn=null|8h
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr15e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=L1 optimization.lr=0.0015 optimization.kwargs.adjust_lr_fn=null|8h
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr20e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=L1 optimization.lr=0.002 optimization.kwargs.adjust_lr_fn=null|8h
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr30e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=L1 optimization.lr=0.003 optimization.kwargs.adjust_lr_fn=null|8h
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr50e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=L1 optimization.lr=0.005 optimization.kwargs.adjust_lr_fn=null|8h
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr70e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=L1 optimization.lr=0.007 optimization.kwargs.adjust_lr_fn=null|8h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr1e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=L1 optimization.lr=0.0001 optimization.kwargs.adjust_lr_fn=match_rms_adamw|8h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr2e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=L1 optimization.lr=0.0002 optimization.kwargs.adjust_lr_fn=match_rms_adamw|8h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr3e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=L1 optimization.lr=0.0003 optimization.kwargs.adjust_lr_fn=match_rms_adamw|8h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr6e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=L1 optimization.lr=0.0006 optimization.kwargs.adjust_lr_fn=match_rms_adamw|8h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr10e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=L1 optimization.lr=0.001 optimization.kwargs.adjust_lr_fn=match_rms_adamw|8h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr30e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=L1 optimization.lr=0.003 optimization.kwargs.adjust_lr_fn=match_rms_adamw|8h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr10e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=MSE optimization.lr=0.001 optimization.kwargs.adjust_lr_fn=null|8h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr15e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=MSE optimization.lr=0.0015 optimization.kwargs.adjust_lr_fn=null|8h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr20e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=MSE optimization.lr=0.002 optimization.kwargs.adjust_lr_fn=null|8h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr30e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=MSE optimization.lr=0.003 optimization.kwargs.adjust_lr_fn=null|8h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr50e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=MSE optimization.lr=0.005 optimization.kwargs.adjust_lr_fn=null|8h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr70e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=MSE optimization.lr=0.007 optimization.kwargs.adjust_lr_fn=null|8h
+SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr1e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=MSE optimization.lr=0.0001 optimization.kwargs.adjust_lr_fn=match_rms_adamw|8h
+SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr2e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=MSE optimization.lr=0.0002 optimization.kwargs.adjust_lr_fn=match_rms_adamw|8h
+SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr3e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=MSE optimization.lr=0.0003 optimization.kwargs.adjust_lr_fn=match_rms_adamw|8h
+SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr6e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=MSE optimization.lr=0.0006 optimization.kwargs.adjust_lr_fn=match_rms_adamw|8h
+SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr10e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=MSE optimization.lr=0.001 optimization.kwargs.adjust_lr_fn=match_rms_adamw|8h
+SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr30e-4|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper_training.loss.type=MSE optimization.lr=0.003 optimization.kwargs.adjust_lr_fn=match_rms_adamw|8h
