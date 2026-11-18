@@ -1,0 +1,3 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
+
+1deg-hybridsstdiag-randco2ft-x5d-pclr-replayonly-tb6xf0ju||01M7PTPNH811WEV5AS4EBQDJKE|training|best_inference_ckpt|normal|--min-runtime 8h
