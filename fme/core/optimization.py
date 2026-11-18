@@ -1,5 +1,6 @@
 import contextlib
 import dataclasses
+import inspect
 import itertools
 import warnings
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -11,6 +12,7 @@ from torch import nn
 
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
+from fme.core.muon import _MUON_FLAG as MUON_FLAG
 from fme.core.muon import ADJUST_LR_FNS as MUON_ADJUST_LR_FNS
 from fme.core.muon import Muon, check_muon_state_dict_compatible
 from fme.core.scheduler import LRScheduler, SchedulerConfig, SequentialSchedulerConfig
@@ -119,7 +121,77 @@ def _split_muon_parameters(
     return muon_params, adamw_params
 
 
+OPTIMIZER_PARAM_GROUP_ATTR = "optimizer_param_group"
+"""Attribute of an ``nn.Parameter`` holding optimizer hyperparameters (e.g.
+``lr``, ``weight_decay``) that override the configured ones for it."""
+
+
+def _split_param_group_overrides(
+    named_parameters: Iterable[tuple[str, torch.nn.Parameter]],
+) -> tuple[
+    list[tuple[str, torch.nn.Parameter]],
+    list[tuple[dict[str, Any], list[torch.nn.Parameter]]],
+]:
+    """Split off parameters carrying ``OPTIMIZER_PARAM_GROUP_ATTR``.
+
+    Returns the parameters without overrides, in their order, and one
+    ``(override, params)`` entry per distinct override set.
+    """
+    default: list[tuple[str, torch.nn.Parameter]] = []
+    overridden: dict[tuple, list[torch.nn.Parameter]] = {}
+    for name, parameter in named_parameters:
+        override = getattr(parameter, OPTIMIZER_PARAM_GROUP_ATTR, None)
+        if override:
+            overridden.setdefault(tuple(sorted(override.items())), []).append(parameter)
+        else:
+            default.append((name, parameter))
+    return default, [(dict(key), params) for key, params in overridden.items()]
+
+
+def _muon_adamw_group_hparams(kwargs: Mapping[str, Any]) -> dict[str, Any]:
+    """Hyperparameters of the AdamW group ``Muon`` builds from ``kwargs``."""
+    signature = inspect.signature(Muon.__init__).parameters
+
+    def get(key: str) -> Any:
+        return kwargs.get(key, signature[key].default)
+
+    return {
+        "lr": get("adamw_lr"),
+        "betas": tuple(get("adamw_betas")),
+        "eps": get("adamw_eps"),
+        "weight_decay": get("adamw_weight_decay"),
+        MUON_FLAG: False,
+    }
+
+
 def _build_optimizer(
+    optimizer_type: Literal["Adam", "FusedAdam", "AdamW", "Muon"],
+    named_parameters: Iterable[tuple[str, torch.nn.Parameter]],
+    lr: float,
+    kwargs: Mapping[str, Any],
+    adamw_names: Sequence[str] = (),
+) -> torch.optim.Optimizer:
+    """Build the optimizer.
+
+    Parameters carrying ``OPTIMIZER_PARAM_GROUP_ATTR`` each get a last group
+    per distinct override set, added after construction; unset keys take the
+    values the parameter would have had without the override (for Muon, those
+    of its AdamW group).
+    """
+    named_parameters, overrides = _split_param_group_overrides(named_parameters)
+    optimizer = _build_base_optimizer(
+        optimizer_type, named_parameters, lr, kwargs, adamw_names
+    )
+    for override, params in overrides:
+        if optimizer_type == "Muon":
+            group = {**_muon_adamw_group_hparams(kwargs), **override}
+        else:
+            group = dict(override)  # unset keys from optimizer.defaults
+        optimizer.add_param_group({"params": params, **group})
+    return optimizer
+
+
+def _build_base_optimizer(
     optimizer_type: Literal["Adam", "FusedAdam", "AdamW", "Muon"],
     named_parameters: Iterable[tuple[str, torch.nn.Parameter]],
     lr: float,
