@@ -1,0 +1,314 @@
+# Example A — multi-resolution latent stepping (1°/2°/4°). Each resolution
+# encodes into its own latent domain (latent_1deg/2deg/4deg); learned
+# resamplers move between latent resolutions, so the 1° and 2° paths into the
+# 4° latent share the same downsampling modules. The forward stepper lives in
+# the 4° latent.
+# Intended config surface for the fme/translate PR series; only the
+# component_pool: block is implemented in PR 1. See README.md in this
+# directory for which PR lands each block. Not runnable.
+experiment_dir: train_output
+save_checkpoint: true
+validate_using_ema: true
+max_epochs: 40
+logging: {log_to_screen: true, log_to_wandb: true, log_to_file: true, project: ace}
+
+# streams are a list; `name` is the handle objectives reference, defaulting to
+# `domain` (given explicitly here because the source, not the domain, is the
+# natural handle — several streams may share one domain). There is no sampling
+# knob: streams that appear together in some objective are sampled at the same
+# valid times, and streams that never co-occur are sampled independently.
+train_data:
+  batch_size: 16
+  num_data_workers: 4
+  streams:
+    - {name: era5_1deg, domain: atmos_1deg, dataset: {data_path: gs://.../era5-1deg-8layer/train}}
+    - {name: era5_2deg, domain: atmos_2deg, dataset: {data_path: gs://.../era5-2deg-8layer/train}}
+    - {name: era5_4deg, domain: atmos_4deg, dataset: {data_path: gs://.../era5-4deg-8layer/train}}
+
+validation_data:
+  batch_size: 16
+  streams:
+    - {name: era5_1deg, domain: atmos_1deg, dataset: {data_path: gs://.../era5-1deg-8layer/valid, subset: {step: 5}}}
+    - {name: era5_2deg, domain: atmos_2deg, dataset: {data_path: gs://.../era5-2deg-8layer/valid, subset: {step: 5}}}
+    - {name: era5_4deg, domain: atmos_4deg, dataset: {data_path: gs://.../era5-4deg-8layer/valid, subset: {step: 5}}}
+
+component_pool:
+  domains:
+    # Data domains are primarily a data-loading concept: the grid comes from
+    # the dataset a stream binds to the domain, and the channel list is
+    # derived automatically from the channels the transforms below reference
+    # in the domain (channel lists live on transforms, so a resolution's
+    # encoder inputs and decoder outputs need not match).
+    atmos_1deg: {}
+    atmos_2deg: {}
+    atmos_4deg: {}
+    # Latent domains, one per resolution. No dataset binds to them, so they
+    # declare their channels directly: `channels` is int | list[str]; an int
+    # declares an anonymous latent block named after the domain, referenced
+    # as a block name in backbone in_names/out_names and expanded before
+    # StepperConfig construction. Forcings are not latent channels: they
+    # enter through the encoders (see in_channels below) and are translated
+    # between latent resolutions like the rest of the state.
+    latent_1deg:
+      grid_like: atmos_1deg
+      channels: 512
+    latent_2deg:
+      grid_like: atmos_2deg
+      channels: 512
+    latent_4deg:
+      grid_like: atmos_4deg
+      channels: 512
+
+  transforms:
+    # Per-resolution encoders into that resolution's latent (same grid; the
+    # resolution change happens in the latent resamplers below). The encoder
+    # ingests prognostics + forcings; channel lists are declared here on the
+    # transform. ("noise_conditioned_same_grid" and the "sht_resize" latent
+    # resamplers are later registry entries; only same_grid and interpolate
+    # exist in PR 1.)
+    encoder_1deg:
+      in_domain: atmos_1deg
+      in_channels: &encoder_in
+        - air_temperature_0        # ... _1 through _7
+        - specific_total_water_0   # ...
+        - eastward_wind_0          # ...
+        - northward_wind_0         # ...
+        - PRESsfc
+        - surface_temperature
+        - DSWRFtoa                 # forcings: encoder input only
+        - ocean_fraction
+        - land_fraction
+        - sea_ice_fraction
+        - global_mean_co2
+      out_domain: latent_1deg      # out_channels: the domain's latent block
+      module:
+        type: noise_conditioned_same_grid
+        config: {embed_dim: 256, num_layers: 4, n_noise_channels: 8}
+    encoder_2deg:
+      in_domain: atmos_2deg
+      in_channels: *encoder_in
+      out_domain: latent_2deg
+      module:
+        type: noise_conditioned_same_grid
+        config: {embed_dim: 256, num_layers: 4, n_noise_channels: 8}
+    encoder_4deg:
+      in_domain: atmos_4deg
+      in_channels: *encoder_in
+      out_domain: latent_4deg
+      module:
+        type: noise_conditioned_same_grid
+        config: {embed_dim: 256, num_layers: 4, n_noise_channels: 8}
+
+    # Per-resolution decoders out of that resolution's latent. Prognostics
+    # only — the decoder's out_channels differ from the encoder's in_channels
+    # (forcings are not reconstructed).
+    decoder_1deg:
+      in_domain: latent_1deg
+      out_domain: atmos_1deg
+      out_channels: &decoder_out
+        - air_temperature_0        # ... _1 through _7
+        - specific_total_water_0   # ...
+        - eastward_wind_0          # ...
+        - northward_wind_0         # ...
+        - PRESsfc
+        - surface_temperature
+      module:
+        type: same_grid
+        config: {embed_dim: 256, num_layers: 4}
+    decoder_2deg:
+      in_domain: latent_2deg
+      out_domain: atmos_2deg
+      out_channels: *decoder_out
+      module:
+        type: same_grid
+        config: {embed_dim: 256, num_layers: 4}
+    decoder_4deg:
+      in_domain: latent_4deg
+      out_domain: atmos_4deg
+      out_channels: *decoder_out
+      module:
+        type: same_grid
+        config: {embed_dim: 256, num_layers: 4}
+
+    # Learned resamplers between latent resolutions ("down" = toward coarser).
+    # The 1° and 2° encode paths into the 4° latent share latent_2to4.
+    latent_1to2:
+      in_domain: latent_1deg
+      out_domain: latent_2deg
+      module:
+        type: sht_resize
+        config: {embed_dim: 256, num_layers: 2}
+    latent_2to4:
+      in_domain: latent_2deg
+      out_domain: latent_4deg
+      module:
+        type: sht_resize
+        config: {embed_dim: 256, num_layers: 2}
+    latent_4to2:
+      in_domain: latent_4deg
+      out_domain: latent_2deg
+      module:
+        type: sht_resize
+        config: {embed_dim: 256, num_layers: 2}
+    latent_2to1:
+      in_domain: latent_2deg
+      out_domain: latent_1deg
+      module:
+        type: sht_resize
+        config: {embed_dim: 256, num_layers: 2}
+
+  backbones:
+    stepper_latent:
+      domain: latent_4deg
+      stepper:
+        step:
+          type: single_module
+          config:
+            builder:
+              type: SphericalFourierNeuralOperatorNet
+              config: {embed_dim: 384, num_layers: 8, operator_type: dhconv, scale_factor: 1}
+            # "latent_4deg" is the domain's int-declared latent block,
+            # expanded (-> 512 channel names) by BackboneConfig before the
+            # StepperConfig is constructed — the stepper never enumerates
+            # latent channels by hand. Forcings reach the backbone inside
+            # the latent state (encoded and translated per step from the
+            # forcing stream), not as named input channels.
+            in_names: [latent_4deg]
+            out_names: [latent_4deg]
+            normalization:
+              network: {identity: true}  # NEW: latent channels have no dataset
+                                         # stats; the encoder sets their scale
+            ocean: null                  # no physical shell in the latent
+            corrector: null
+
+objectives:
+  # ---- k=0 explicit reconstruction at each resolution. The loss compares
+  # the chain's output channels (the decoder's out_channels) against the
+  # target stream — encoder-only inputs (forcings) are not reconstructed, so
+  # differing encoder/decoder channel sets are fine. ----
+  - name: recon_1deg
+    type: translation
+    config:
+      components: [encoder_1deg, decoder_1deg]
+      input_stream: era5_1deg
+      target_stream: era5_1deg
+      n_ensemble: 2       # encoder is stochastic -> ensemble loss
+      loss: {type: EnsembleLoss, kwargs: {crps_weight: 1.0, energy_score_weight: 1.0}}
+      weight: 1.0
+  - name: recon_2deg
+    type: translation
+    config:
+      components: [encoder_2deg, decoder_2deg]
+      input_stream: era5_2deg
+      target_stream: era5_2deg
+      n_ensemble: 2
+      loss: {type: EnsembleLoss, kwargs: {crps_weight: 1.0, energy_score_weight: 1.0}}
+      weight: 1.0
+  - name: recon_4deg
+    type: translation
+    config:
+      components: [encoder_4deg, decoder_4deg]
+      input_stream: era5_4deg
+      target_stream: era5_4deg
+      n_ensemble: 2
+      loss: {type: EnsembleLoss, kwargs: {crps_weight: 1.0, energy_score_weight: 1.0}}
+      weight: 1.0
+
+  # ---- forward prediction at every resolution, one shared backbone.
+  # `components` is a flat chain containing exactly one backbone, which
+  # splits it: everything before encodes once at the initial time, the
+  # backbone rolls out in its own domain, and everything after decodes every
+  # output step. Each step's forcings are taken from forcing_stream at that
+  # objective's own resolution and carried into the backbone's latent domain
+  # through the encode chain (a forcing-only application of it — data
+  # prognostics at future steps must not leak in). ----
+  - name: forward_4deg
+    type: forward_prediction
+    config:
+      components: [encoder_4deg, stepper_latent, decoder_4deg]
+      input_stream: era5_4deg
+      target_stream: era5_4deg
+      forcing_stream: era5_4deg
+      n_forward_steps:
+        start_value: 1
+        milestones:
+          - epoch: 8
+            value: {outcomes: [{steps: 1, probability: 0.6}, {steps: 4, probability: 0.4}]}
+      n_ensemble: 2
+      loss: {type: EnsembleLoss, kwargs: {crps_weight: 1.0, energy_score_weight: 1.0}}
+      weight: 1.0
+  - name: forward_2deg
+    type: forward_prediction
+    config:
+      components: [encoder_2deg, latent_2to4, stepper_latent, latent_4to2, decoder_2deg]
+      input_stream: era5_2deg
+      target_stream: era5_2deg
+      forcing_stream: era5_2deg
+      n_forward_steps:
+        start_value: 1
+        milestones:
+          - epoch: 8
+            value: {outcomes: [{steps: 1, probability: 0.6}, {steps: 4, probability: 0.4}]}
+      n_ensemble: 2
+      loss: {type: EnsembleLoss, kwargs: {crps_weight: 1.0, energy_score_weight: 1.0}}
+      weight: 0.5
+  - name: forward_1deg
+    type: forward_prediction
+    config:
+      components: [encoder_1deg, latent_1to2, latent_2to4, stepper_latent, latent_4to2, latent_2to1, decoder_1deg]
+      input_stream: era5_1deg
+      target_stream: era5_1deg
+      forcing_stream: era5_1deg
+      n_forward_steps:
+        start_value: 1
+        milestones:
+          - epoch: 8
+            value: {outcomes: [{steps: 1, probability: 0.6}, {steps: 4, probability: 0.4}]}
+      n_ensemble: 2
+      loss: {type: EnsembleLoss, kwargs: {crps_weight: 1.0, energy_score_weight: 1.0}}
+      weight: 0.5
+
+  # ---- stochastic latent consistency between adjacent resolutions: both
+  # chains must land in the same latent domain; the noise-injected coarse
+  # encoding is pulled toward the stop-gradient fine encoding (stop-gradient
+  # is semantics of the objective type, not config). The downsampler on the
+  # fine side sits behind the stop-gradient here, so latent_1to2/latent_2to4
+  # train through the forward objectives, not through consistency. ----
+  - name: consistency_1v2
+    type: latent_consistency
+    config:
+      fine_components: [encoder_1deg, latent_1to2]
+      coarse_components: [encoder_2deg]
+      fine_stream: era5_1deg
+      coarse_stream: era5_2deg
+      n_ensemble: 4
+      loss: {type: EnsembleLoss, kwargs: {crps_weight: 1.0, energy_score_weight: 1.0}}
+      weight: 0.5
+  - name: consistency_2v4
+    type: latent_consistency
+    config:
+      fine_components: [encoder_2deg, latent_2to4]
+      coarse_components: [encoder_4deg]
+      fine_stream: era5_2deg
+      coarse_stream: era5_4deg
+      n_ensemble: 4
+      loss: {type: EnsembleLoss, kwargs: {crps_weight: 1.0, energy_score_weight: 1.0}}
+      weight: 0.5
+
+optimization:
+  optimizer_type: AdamW
+  lr: 1.0e-4
+  enable_automatic_mixed_precision: false
+
+# in-training inference callbacks over exported composites: a composite is
+# the same one-backbone component chain, evaluated with the standard
+# aggregators
+inference:
+  - composite: [encoder_4deg, stepper_latent, decoder_4deg]
+    n_forward_steps: 1460
+    forward_steps_in_memory: 50
+    loader: {dataset: {data_path: gs://.../era5-4deg-8layer/valid}, start_indices: {first: 0, n_initial_conditions: 4, interval: 365}}
+  - composite: [encoder_1deg, latent_1to2, latent_2to4, stepper_latent, latent_4to2, latent_2to1, decoder_1deg]
+    n_forward_steps: 1460
+    forward_steps_in_memory: 50
+    loader: {dataset: {data_path: gs://.../era5-1deg-8layer/valid}, start_indices: {first: 0, n_initial_conditions: 4, interval: 365}}
