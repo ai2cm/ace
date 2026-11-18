@@ -16,8 +16,13 @@ ace2-fm-sfno-v3-2026-11-18, or its -smoke group) and the wandb key from the
 allowlisted secret. `--weka climate-default:/climate-default` makes the shim
 mount every /climate-default/<dir> named in the config (each config's
 WEKA_MOUNT header names the ERA5 store, which the datasets name only as
-data_path + file_pattern). Clusters: CLUSTERS (the v2 clusters without
-saturn). Priority: high for seed 0 (and the smoke test), normal for s1/s2.
+data_path + file_pattern). Clusters: CLUSTERS, the v2 clusters. saturn
+(A100 80GB) was added back on 2026-11-18 for jobs still queued: the compiled
+1deg model does not fit an A100's shared memory (see submit_fm_1deg_jobs.py),
+but the 4deg SFNO-v2 ran on saturn (wandb hao37vth,
+...-sfno-v2-fm-spencer-balanced-s2-maskoff, 50 epochs on 4x A100), and v3
+differs from v2 only in normalization. Priority: high for seed 0 (and the
+smoke test), normal for s1/s2.
 
 Checkpoints and logs go to $AGENT_OUTPUT_DIR
 (/climate-default/agents/alexeyy/<experiment name>), not the configs'
@@ -76,7 +81,7 @@ RECORD_PATH = EXP_DIR / "records" / "fm_v3_jobs.json"
 GANTRY = "/usr/local/bin/gantry"
 BRANCH = "agent/alexeyy/exp/alexeyfm2"
 EXPERIMENT_PREFIX = "agent-alexeyy-"
-CLUSTERS = ("ai2/jupiter", "ai2/titan")
+CLUSTERS = ("ai2/jupiter", "ai2/titan", "ai2/saturn")
 HIGH_PRIORITY = "high"
 DEFAULT_PRIORITY = "normal"
 SHARED_MEMORY = "200GiB"
