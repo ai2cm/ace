@@ -142,7 +142,7 @@ class OceanHeatContentBudgetConfig:
             (thetao - origin_deg_C) rather than thetao, so the correction vanishes
             at origin_deg_C instead of at 0 C. Heat content closure holds for any
             origin; only the spatial distribution of the correction changes. The
-            default 0.0 reproduces scaling about 0 C exactly.
+            default 0.0 reproduces scaling about 0 C, up to roundoff.
 
     """
 

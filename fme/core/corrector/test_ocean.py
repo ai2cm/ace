@@ -1219,7 +1219,7 @@ def test_ocean_heat_content_correction_origin_closes_budget(origin_deg_C):
 
 
 def test_ocean_heat_content_correction_zero_origin_matches_scaling_about_zero():
-    # The origin = 0 branch reproduces r * theta (to roundoff: it is applied as
+    # origin = 0 reproduces r * theta (to roundoff: it is applied as
     # theta + (r - 1) * theta in float64).
     unaccounted = 0.1
     (
