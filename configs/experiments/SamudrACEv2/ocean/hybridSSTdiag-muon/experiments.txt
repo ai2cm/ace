@@ -55,3 +55,5 @@ SamudrACEv2-hybridSSTdiag-muon|mse-null-lr100e-4|01M7QTQHFV8Z2HX024YZSZNQDN|trai
 SamudrACEv2-hybridSSTdiag-muon|mse-null-lr150e-4|01M7QTQZ8YXV16N6J0V05SMK8K|training|best_inference_ckpt|normal|--min-runtime 8h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr60e-4|01M7QTRCAS26Q9J5MRY5Q1QWE8|training|best_inference_ckpt|normal|--min-runtime 8h
+
+SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr100e-4|01M7QTRV2F08HX05M0X8TQT6G0|training|best_inference_ckpt|normal|--min-runtime 8h
