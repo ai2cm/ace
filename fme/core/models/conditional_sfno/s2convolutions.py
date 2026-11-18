@@ -20,6 +20,7 @@ import torch.nn as nn
 
 from fme.core.benchmark.timer import NullTimer, Timer
 from fme.core.distributed.distributed import Distributed
+from fme.core.spectral_filter_parameter import SpectralFilterParameter
 
 from .activations import ComplexReLU
 
@@ -126,7 +127,7 @@ def _contract_dhconv(
 
     Args:
         xc: Complex input tensor of shape (batch_size, group, in_channels, nlat, nlon)
-        weight: Weight tensor of shape (group, in_channels, out_channels, nlat, 2)
+        weight: Weight tensor of shape (group, nlat, out_channels, in_channels, 2)
 
     Returns:
         Complex output tensor of shape (batch_size, group, out_channels, nlat, nlon)
@@ -237,11 +238,15 @@ class SpectralConvS2(nn.Module):
             spectral_channels // num_groups,
         ]
 
-        self.weight = nn.Parameter(scale * torch.randn(*weight_shape, 2))
+        # contracted as "bgixy,gxoi->bgoxy"
+        self.weight = SpectralFilterParameter(
+            scale * torch.randn(*weight_shape, 2), in_dim=3, out_dim=2
+        )
 
         self.lora_rank = lora_rank
         if lora_rank > 0:
-            self.lora_A = nn.Parameter(
+            # contracted as "gxri,bgixy->bgxry"
+            self.lora_A: SpectralFilterParameter | None = SpectralFilterParameter(
                 scale
                 * torch.randn(
                     num_groups,
@@ -249,16 +254,21 @@ class SpectralConvS2(nn.Module):
                     lora_rank,
                     spectral_channels // num_groups,
                     2,
-                )
+                ),
+                in_dim=3,
+                out_dim=2,
             )
-            self.lora_B = nn.Parameter(
+            # contracted as "gxor,bgxry->bgoxy"
+            self.lora_B: SpectralFilterParameter | None = SpectralFilterParameter(
                 torch.zeros(
                     num_groups,
                     self.modes_lat,
                     spectral_channels // num_groups,
                     lora_rank,
                     2,
-                )
+                ),
+                in_dim=3,
+                out_dim=2,
             )
             self.lora_alpha = lora_alpha if lora_alpha is not None else lora_rank
             self.lora_scaling = self.lora_alpha / lora_rank
@@ -483,13 +493,28 @@ class SpectralAttentionS2(nn.Module):
             self.mul_handle = compl_mul2d_fwd
 
             # weights
-            w = [self.scale * torch.randn(self.embed_dim, hidden_size, 2)]
+            # contracted as "bixy,io->boxy"
+            w = [
+                SpectralFilterParameter(
+                    self.scale * torch.randn(self.embed_dim, hidden_size, 2),
+                    in_dim=0,
+                    out_dim=1,
+                )
+            ]
             for l in range(1, self.spectral_layers):
-                w.append(self.scale * torch.randn(hidden_size, hidden_size, 2))
+                w.append(
+                    SpectralFilterParameter(
+                        self.scale * torch.randn(hidden_size, hidden_size, 2),
+                        in_dim=0,
+                        out_dim=1,
+                    )
+                )
             self.w = nn.ParameterList(w)
 
-            self.wout = nn.Parameter(
-                self.scale * torch.randn(hidden_size, self.embed_dim, 2)
+            self.wout = SpectralFilterParameter(
+                self.scale * torch.randn(hidden_size, self.embed_dim, 2),
+                in_dim=0,
+                out_dim=1,
             )
 
             if bias:
@@ -515,13 +540,23 @@ class SpectralAttentionS2(nn.Module):
             self.mul_handle = compl_exp_mul2d_fwd
 
             # weights
+            # contracted as "bixy,xio->boxy"
             w = [
-                self.scale * torch.randn(self.modes_lat, self.embed_dim, hidden_size, 2)
+                SpectralFilterParameter(
+                    self.scale
+                    * torch.randn(self.modes_lat, self.embed_dim, hidden_size, 2),
+                    in_dim=1,
+                    out_dim=2,
+                )
             ]
             for l in range(1, self.spectral_layers):
                 w.append(
-                    self.scale
-                    * torch.randn(self.modes_lat, hidden_size, hidden_size, 2)
+                    SpectralFilterParameter(
+                        self.scale
+                        * torch.randn(self.modes_lat, hidden_size, hidden_size, 2),
+                        in_dim=1,
+                        out_dim=2,
+                    )
                 )
             self.w = nn.ParameterList(w)
 
@@ -533,8 +568,11 @@ class SpectralAttentionS2(nn.Module):
                     ]
                 )
 
-            self.wout = nn.Parameter(
-                self.scale * torch.randn(self.modes_lat, hidden_size, self.embed_dim, 2)
+            self.wout = SpectralFilterParameter(
+                self.scale
+                * torch.randn(self.modes_lat, hidden_size, self.embed_dim, 2),
+                in_dim=1,
+                out_dim=2,
             )
 
             self.activations = nn.ModuleList([])
