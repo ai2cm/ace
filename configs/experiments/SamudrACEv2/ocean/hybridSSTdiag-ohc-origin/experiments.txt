@@ -3,3 +3,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 SamudrACEv2-hybridSSTdiag-ohc-origin|Tref-neg2-w1|01M7PXGDHQ99WFDCR6VPZND5H4|training|best_inference_ckpt|normal|--min-runtime 8h
 
 SamudrACEv2-hybridSSTdiag-ohc-origin|Tref-neg32-w1|01M7PXGSTTB78M17KCMHJBNTG5|training|best_inference_ckpt|normal|--min-runtime 8h
+
+SamudrACEv2-hybridSSTdiag-ohc-origin|Tref-neg273-w1|01M7PXH6W8MEFMZRAGH6FWGSJ6|training|best_inference_ckpt|normal|--min-runtime 8h
