@@ -1,0 +1,55 @@
+# Baseline two-track (global / local latent) SFNO step configuration.
+#
+# This is the entry-point recipe for the two-track validation runs: all three
+# ablation options are off (feed_global_to_local, parallel_conv1x1,
+# per_track_layer_norm all default False and omitted here), and a subset of
+# variables is assigned to the local (pointwise-only) track. In a full training
+# config this block is the value of `stepper.step.config` with
+# `stepper.step.type: two_track`.
+#
+# The global track carries the dynamical prognostics that need a global
+# (spectral) operator; the local track carries column-local inputs/outputs that
+# should not pass through the spherical harmonic transform (e.g. RH-like or
+# change-of-basis variables). The real training-scale widths and variable lists
+# are wired at launch time; the tiny dims here keep the example loadable and
+# CPU-testable.
+builder:
+  embed_dim: 32
+  local_embed_dim: 8
+  noise_embed_dim: 4
+  noise_type: gaussian
+  num_layers: 2
+  pos_embed: true
+  filter_type: linear
+global_in_names:
+  - air_temperature_0
+  - air_temperature_1
+  - eastward_wind_0
+  - DSWRFtoa
+local_in_names:
+  - relative_humidity_0
+  - relative_humidity_1
+global_out_names:
+  - air_temperature_0
+  - air_temperature_1
+  - eastward_wind_0
+local_out_names:
+  - relative_humidity_0
+  - relative_humidity_1
+residual_prediction: true
+normalization:
+  network:
+    means:
+      air_temperature_0: 0.0
+      air_temperature_1: 0.0
+      eastward_wind_0: 0.0
+      DSWRFtoa: 0.0
+      relative_humidity_0: 0.0
+      relative_humidity_1: 0.0
+    stds:
+      air_temperature_0: 1.0
+      air_temperature_1: 1.0
+      eastward_wind_0: 1.0
+      DSWRFtoa: 1.0
+      relative_humidity_0: 1.0
+      relative_humidity_1: 1.0
