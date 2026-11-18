@@ -83,6 +83,8 @@ SCALAR_NAMES = (
 )
 FILES = ("centering", "scaling-full-field", "scaling-residual")
 N_LAT, N_LON = 8, 16
+# As in the real STATS_DIR files (fme matches per-cell grids by position).
+STATS_DIMS = ("grid_yt", "grid_xt")
 LAT = np.linspace(-78.75, 78.75, N_LAT)
 LON = np.arange(N_LON) * 360.0 / N_LON
 N_LEVELS = 8
@@ -157,11 +159,13 @@ def _write(path: pathlib.Path, names, rng, per_cell: bool, std: bool) -> None:
                 if std
                 else rng.normal(size=(N_LAT, N_LON))
             )
-            data_vars[name] = (("lat", "lon"), value)
+            data_vars[name] = (STATS_DIMS, value)
         else:
             data_vars[name] = ((), rng.uniform(0.5, 2.0) if std else rng.normal())
     path.parent.mkdir(parents=True, exist_ok=True)
-    xr.Dataset(data_vars, coords={"lat": LAT, "lon": LON}).to_netcdf(path)
+    xr.Dataset(data_vars, coords={STATS_DIMS[0]: LAT, STATS_DIMS[1]: LON}).to_netcdf(
+        path
+    )
 
 
 def write_synthetic_stats(root: pathlib.Path, names: list[str]) -> dict[str, str]:

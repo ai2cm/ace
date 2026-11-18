@@ -1260,8 +1260,8 @@ stepper:
         allow_missing_variables: true
       normalization:
         network:
-          global_means_path: /climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell/centering.nc
-          global_stds_path: /climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell/scaling-full-field.nc
+          global_means_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/2026-11-18-fm-v3-e3sm-balanced-percell/centering.nc
+          global_stds_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/2026-11-18-fm-v3-e3sm-balanced-percell/scaling-full-field.nc
           per_grid_cell: true
           per_grid_cell_min_std_fraction: 0.01
         loss:

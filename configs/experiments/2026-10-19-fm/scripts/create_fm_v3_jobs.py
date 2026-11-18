@@ -129,10 +129,13 @@ JOB_PREFIX = "ace2-fm-"
 WANDB_GROUP = "ace2-fm-sfno-v3-2026-11-18"
 SMOKE_WANDB_GROUP = f"{WANDB_GROUP}-smoke"
 
-# Per-grid-cell stats root (see the module docstring). Placeholder until the
-# stats are written; regenerate with --stats-dir or by editing this.
+# Per-grid-cell stats root (see the module docstring): 51 per-cell variables
+# on the 45 x 90 grid (dims grid_yt/grid_xt) and the 5 scalars, written by the
+# agent job agent-alexeyy-fm-v3-percell-stats-75w7; groups/e3sm holds
+# placeholder TMP850/h500 constants (E3SM lacks them).
 STATS_DIR = (
-    "/climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell"
+    "/climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/"
+    "2026-11-18-fm-v3-e3sm-balanced-percell"
 )
 PARENT_ARCH = "nc-sfno-v2"
 ARCH = "nc-sfno-v3"

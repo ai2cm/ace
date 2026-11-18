@@ -940,45 +940,45 @@ stepper:
         allow_missing_variables: true
       normalization:
         network:
-          global_means_path: /climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell/centering.nc
-          global_stds_path: /climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell/scaling-full-field.nc
+          global_means_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/2026-11-18-fm-v3-e3sm-balanced-percell/centering.nc
+          global_stds_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/2026-11-18-fm-v3-e3sm-balanced-percell/scaling-full-field.nc
           per_grid_cell: true
           per_grid_cell_min_std_fraction: 0.01
         loss:
-          global_means_path: /climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell/centering.nc
-          global_stds_path: /climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell/scaling-full-field.nc
+          global_means_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/2026-11-18-fm-v3-e3sm-balanced-percell/centering.nc
+          global_stds_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/2026-11-18-fm-v3-e3sm-balanced-percell/scaling-full-field.nc
           per_grid_cell: true
           per_grid_cell_min_std_fraction: 0.1
         residual:
-          global_means_path: /climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell/centering.nc
-          global_stds_path: /climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell/scaling-residual.nc
+          global_means_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/2026-11-18-fm-v3-e3sm-balanced-percell/centering.nc
+          global_stds_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/2026-11-18-fm-v3-e3sm-balanced-percell/scaling-residual.nc
           per_grid_cell: true
           per_grid_cell_min_std_fraction: 0.1
         grouped:
           groups:
             c96:
-              global_means_path: /climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell/groups/c96/centering.nc
-              global_stds_path: /climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell/groups/c96/scaling-full-field.nc
+              global_means_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/2026-11-18-fm-v3-e3sm-balanced-percell/groups/c96/centering.nc
+              global_stds_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/2026-11-18-fm-v3-e3sm-balanced-percell/groups/c96/scaling-full-field.nc
               per_grid_cell: true
               per_grid_cell_min_std_fraction: 0.01
             era5:
-              global_means_path: /climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell/groups/era5/centering.nc
-              global_stds_path: /climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell/groups/era5/scaling-full-field.nc
+              global_means_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/2026-11-18-fm-v3-e3sm-balanced-percell/groups/era5/centering.nc
+              global_stds_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/2026-11-18-fm-v3-e3sm-balanced-percell/groups/era5/scaling-full-field.nc
               per_grid_cell: true
               per_grid_cell_min_std_fraction: 0.01
             cm4:
-              global_means_path: /climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell/groups/cm4/centering.nc
-              global_stds_path: /climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell/groups/cm4/scaling-full-field.nc
+              global_means_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/2026-11-18-fm-v3-e3sm-balanced-percell/groups/cm4/centering.nc
+              global_stds_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/2026-11-18-fm-v3-e3sm-balanced-percell/groups/cm4/scaling-full-field.nc
               per_grid_cell: true
               per_grid_cell_min_std_fraction: 0.01
             xshield:
-              global_means_path: /climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell/groups/xshield/centering.nc
-              global_stds_path: /climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell/groups/xshield/scaling-full-field.nc
+              global_means_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/2026-11-18-fm-v3-e3sm-balanced-percell/groups/xshield/centering.nc
+              global_stds_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/2026-11-18-fm-v3-e3sm-balanced-percell/groups/xshield/scaling-full-field.nc
               per_grid_cell: true
               per_grid_cell_min_std_fraction: 0.01
             e3sm:
-              global_means_path: /climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell/groups/e3sm/centering.nc
-              global_stds_path: /climate-default/agents/alexeyy/PENDING/2026-11-18-fm-v3-e3sm-balanced-percell/groups/e3sm/scaling-full-field.nc
+              global_means_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/2026-11-18-fm-v3-e3sm-balanced-percell/groups/e3sm/centering.nc
+              global_stds_path: /climate-default/agents/alexeyy/agent-alexeyy-fm-v3-percell-stats-75w7/2026-11-18-fm-v3-e3sm-balanced-percell/groups/e3sm/scaling-full-field.nc
               per_grid_cell: true
               per_grid_cell_min_std_fraction: 0.01
           default_label: era5
