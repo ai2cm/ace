@@ -164,6 +164,18 @@ snapshots (`time_subsample_stride`) and average the daily-mean fluxes over
 5-day blocks (`time_block_mean_factor`) in the pipeline; the 1-daily configs
 only subsample the 6-hourly ice streams.
 
+The CM4 CMIP6 abrupt-4xCO2 initial-condition configs
+(`configs/cm4-cmip6-abrupt-4xCO2-initial-condition-{1,4}deg-1daily.yaml`)
+process the two-day piControl "bridge" run (0251-01-01 to 0251-01-03). This
+run was initialized from the exact state used to initialize the CMIP6
+abrupt 4xCO2 simulation; therefore, the state output at 0251-01-02
+approximately aligns with the piControl state used to initialize the CM4
+abrupt 4xCO2 simulation in CMIP6. The configurations reuse the piControl
+face-mask artifact (the bridge continues piControl on the same grid and
+bathymetry). This short run was merely used as a way to generate
+CMIP6-like initial conditions for SamudrACE without having to derive all
+the necessary prognostic variables from raw restart files.
+
 ### Running
 
 #### Smoke tests
@@ -190,6 +202,9 @@ The abrupt-4xCO2 ensemble has its own set: `make smoke_tests_abrupt_4xco2`
 smoke-tests one member at both resolutions, checks all 36 members derive the
 same wetmask, and runs the repeat-run check; `make
 smoke_tests_abrupt_4xco2_1daily` does the same for the 1-daily configs.
+`make smoke_tests_cmip6_initial_condition_1daily` processes the whole
+two-timestep CMIP6 initial-condition store at both resolutions, checks its
+wetmask against piControl's, and runs the repeat-run check.
 
 The pipeline can also be invoked directly, with any beam pipeline options
 after the script's own arguments:
@@ -216,6 +231,7 @@ python -m pipeline.om4.run --config configs/om4-picontrol-1deg-5daily.yaml \
    make dataflow_abrupt_4xco2_1deg_ic_0001   # one per ensemble member
    make dataflow_abrupt_4xco2_1deg_all       # or all 36
    make dataflow_abrupt_4xco2_1deg_1daily_ic_0001   # 1-daily, likewise
+   make dataflow_cmip6_initial_condition_1deg_1daily   # CMIP6 abrupt-4xCO2 IC
    ```
 
    `make dataflow*` first checks that `$(IMAGE_NAME)` exists in Artifact

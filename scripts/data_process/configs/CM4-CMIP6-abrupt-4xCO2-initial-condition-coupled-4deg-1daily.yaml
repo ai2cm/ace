@@ -1,0 +1,75 @@
+# make cm4_cmip6_abrupt_4xCO2_initial_condition_coupled_argo RESOLUTION=4deg
+# Requires the atmosphere store from
+# make cm4_cmip6_abrupt_4xCO2_initial_condition_atmosphere RESOLUTION=4deg and the
+# ocean store from make dataflow_cmip6_initial_condition_4deg_1daily in
+# scripts/gfdl_om4.
+#
+# Coupled store for the two-day CM4 piControl "bridge" run (0251-01-01 to
+# 0251-01-03) whose end state initializes the CMIP6 abrupt-4xCO2 simulation.
+version: "2026-11-17"
+family_name: cm4-cmip6-abrupt-4xCO2-initial-condition-4deg-coupled-1daily
+output_directory: gs://vcm-ml-intermediate
+
+coupled_datasets:
+  coupled_ts:
+    how: interpolate_sst
+  coupled_sea_surface:
+    # The bridge run continues piControl on the same grid, and two days are
+    # too few for a time-mean SST threshold, so reuse the piControl mask.
+    precomputed_sea_ice_mask:
+      zarr_path: gs://vcm-ml-intermediate/2026-09-02-cm4-piControl-4deg-coupled-1daily-ocean.zarr
+    ocean_extra_masked_names: ["HI", "sea_ice_volume", "UI", "VI", "sfdsi"]
+    ocean_extra_fill_values:
+      UI: 0.0
+      VI: 0.0
+    # the ocean store is 1-daily; the default (120h) is for 5-daily stores
+    timedelta: 24h
+    surface_flux_window_avg:
+      window_timedelta: 24h
+      # No first_timestamp or last_timestamp: the flux windows are
+      # right-labeled at the ocean timesteps, i.e. each window (t - 24h, t]
+      # ends at an ocean timestep t, starting from the ocean store's first
+      # timestamp (0251-01-02).
+      subset_names:
+        - DLWRFsfc
+        - DSWRFsfc
+        - ULWRFsfc
+        - USWRFsfc
+        - LHTFLsfc
+        - SHTFLsfc
+        - PRATEsfc
+        - eastward_surface_wind_stress
+        - northward_surface_wind_stress
+        - total_frozen_precipitation_rate
+  coupled_sea_ice:
+    # No window_avg and no sea_ice input dataset: the sea ice fraction is
+    # sourced from the ocean store's native 1-daily fields and forward-filled
+    # onto the atmosphere's 6-hourly time index.
+    include_ts: true
+    use_atmosphere_sea_ice_fraction_fallback: false
+  output_writer:
+    n_dask_workers: 32
+    # Two days of 6-hourly steps fit in one chunk, so the default 50
+    # partitions would be mostly empty.
+    n_split: 1
+
+# No beaker_dataset: stats over two days are not meaningful for training, so
+# they are written alongside the stores but not uploaded.
+
+input_datasets:
+  climate_data_type: "CM4"
+  atmosphere:
+    zarr_path: gs://vcm-ml-intermediate/2026-11-17-CM4-CMIP6-abrupt-4xCO2-initial-condition-atmosphere-land-4deg-8layer-2day.zarr
+    time_chunk_size: 360
+    extra_fields:
+      names_and_prefixes: ["ak_", "bk_"]
+  ocean:
+    zarr_path: gs://vcm-ml-intermediate/2026-11-17-cm4-cmip6-abrupt-4xCO2-initial-condition-4deg-ocean-1daily.zarr
+    time_chunk_size: 365
+    extra_fields:
+      names_and_prefixes: ["idepth_", "mask_", "deptho"]
+  # Merge with the piControl uncoupled stats, the climate the bridge run
+  # continues, rather than with stats from its own two days.
+  stats:
+    atmosphere_dir: gs://vcm-ml-intermediate/2026-06-19-CM4-piControl-atmosphere-land-4deg-8layer-200yr-stats/combined
+    ocean_dir: gs://vcm-ml-intermediate/2026-09-02-cm4-piControl-4deg-ocean-1daily-stats/2026-09-02-cm4-piControl-4deg-ocean-1daily

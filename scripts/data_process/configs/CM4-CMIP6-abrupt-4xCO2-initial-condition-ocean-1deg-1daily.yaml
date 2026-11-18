@@ -1,0 +1,12 @@
+# make cm4_cmip6_abrupt_4xCO2_initial_condition_ocean_stats RESOLUTION=1deg
+# Stats of the 1-daily ocean and sea-ice store from the two-day CM4 piControl
+# "bridge" run (0251-01-01 to 0251-01-03) produced by the scripts/gfdl_om4
+# xrbeam Dataflow pipeline
+# (gfdl_om4/configs/cm4-cmip6-abrupt-4xCO2-initial-condition-1deg-1daily.yaml).
+runs:
+  2026-11-17-cm4-cmip6-abrupt-4xCO2-initial-condition-1deg-ocean-1daily: ""
+data_output_directory: gs://vcm-ml-intermediate
+stats:
+  output_directory: gs://vcm-ml-intermediate/2026-11-17-cm4-cmip6-abrupt-4xCO2-initial-condition-1deg-ocean-1daily-stats
+  data_type: CM4
+  beaker_dataset: 2026-11-17-cm4-cmip6-abrupt-4xCO2-initial-condition-1deg-ocean-1daily-stats

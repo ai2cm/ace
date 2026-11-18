@@ -221,6 +221,40 @@ dataflow_abrupt_4xco2_1deg_1daily_all: $(addprefix dataflow_abrupt_4xco2_1deg_1d
 
 dataflow_abrupt_4xco2_4deg_1daily_all: $(addprefix dataflow_abrupt_4xco2_4deg_1daily_,$(ABRUPT_4XCO2_MEMBERS))
 
+# CM4 CMIP6 abrupt-4xCO2 initial condition: the two-day piControl "bridge"
+# run (0251-01-01 to 0251-01-03) ending at the CMIP6 abrupt-4xCO2 start.
+# It has only two output timesteps, so its smoke tests process the whole
+# store.
+CMIP6_IC_1DEG_1DAILY_CONFIG = configs/cm4-cmip6-abrupt-4xCO2-initial-condition-1deg-1daily.yaml
+CMIP6_IC_4DEG_1DAILY_CONFIG = configs/cm4-cmip6-abrupt-4xCO2-initial-condition-4deg-1daily.yaml
+CMIP6_IC_NUM_TIMESTEPS = 2
+
+check_wetmask_equivalence_cmip6_initial_condition:
+	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.om4.check_wetmask_equivalence \
+		configs/cm4-piControl-1deg-1daily.yaml \
+		$(CMIP6_IC_1DEG_1DAILY_CONFIG)
+
+smoke_test_cmip6_initial_condition_1deg_1daily:
+	$(MAKE) smoke_test CONFIG=$(CMIP6_IC_1DEG_1DAILY_CONFIG) \
+		SMOKE_NUM_TIMESTEPS=$(CMIP6_IC_NUM_TIMESTEPS)
+
+smoke_test_cmip6_initial_condition_4deg_1daily:
+	$(MAKE) smoke_test CONFIG=$(CMIP6_IC_4DEG_1DAILY_CONFIG) \
+		SMOKE_NUM_TIMESTEPS=$(CMIP6_IC_NUM_TIMESTEPS)
+
+smoke_tests_cmip6_initial_condition_1daily: \
+	check_wetmask_equivalence_cmip6_initial_condition \
+	smoke_test_cmip6_initial_condition_1deg_1daily \
+	smoke_test_cmip6_initial_condition_4deg_1daily
+	$(MAKE) smoke_test_repeat_fails CONFIG=$(CMIP6_IC_1DEG_1DAILY_CONFIG) \
+		SMOKE_NUM_TIMESTEPS=$(CMIP6_IC_NUM_TIMESTEPS)
+
+dataflow_cmip6_initial_condition_1deg_1daily:
+	$(MAKE) dataflow CONFIG=$(CMIP6_IC_1DEG_1DAILY_CONFIG)
+
+dataflow_cmip6_initial_condition_4deg_1daily:
+	$(MAKE) dataflow CONFIG=$(CMIP6_IC_4DEG_1DAILY_CONFIG)
+
 # The per-member targets are deliberately absent: make skips implicit-rule
 # search for a phony target, which would leave the pattern rules above with
 # nothing to match.
@@ -241,4 +275,10 @@ dataflow_abrupt_4xco2_4deg_1daily_all: $(addprefix dataflow_abrupt_4xco2_4deg_1d
 	smoke_tests_abrupt_4xco2 dataflow_abrupt_4xco2_1deg_all \
 	dataflow_abrupt_4xco2_4deg_all smoke_test_abrupt_4xco2_1deg_1daily \
 	smoke_test_abrupt_4xco2_4deg_1daily smoke_tests_abrupt_4xco2_1daily \
-	dataflow_abrupt_4xco2_1deg_1daily_all dataflow_abrupt_4xco2_4deg_1daily_all
+	dataflow_abrupt_4xco2_1deg_1daily_all dataflow_abrupt_4xco2_4deg_1daily_all \
+	check_wetmask_equivalence_cmip6_initial_condition \
+	smoke_test_cmip6_initial_condition_1deg_1daily \
+	smoke_test_cmip6_initial_condition_4deg_1daily \
+	smoke_tests_cmip6_initial_condition_1daily \
+	dataflow_cmip6_initial_condition_1deg_1daily \
+	dataflow_cmip6_initial_condition_4deg_1daily
