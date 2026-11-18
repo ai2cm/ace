@@ -2,7 +2,8 @@
 stats files or the training data.
 
 1. Every v3 config (the 12 runs and the smoke test) parses strictly into
-   TrainConfig, as `python -m fme.ace.validate_config` does.
+   TrainConfig, as `python -m fme.ace.validate_config` does, also with the
+   `experiment_dir=$AGENT_OUTPUT_DIR` override the jobs apply.
 2. The LR schedule of the 120-epoch runs and of the smoke test, stepped
    through torch's SequentialLR: LR 1e-4 through the last single-step epoch,
    decreasing over the cooldown epochs and 0 at the end.
@@ -57,10 +58,12 @@ from create_fm_v3_jobs import (  # noqa: E402
     runs,
     smoke_run,
 )
+from submit_fm_v3_jobs import AGENT_OUTPUT_ROOT  # noqa: E402
 
 from fme.ace.data_loading.batch_data import BatchData  # noqa: E402
 from fme.ace.stepper.single_module import StepperConfig  # noqa: E402
 from fme.ace.train.train_config import TrainConfig  # noqa: E402
+from fme.core.config import update_dict_with_dotlist  # noqa: E402
 from fme.core.coordinates import (  # noqa: E402
     HybridSigmaPressureCoordinate,
     LatLonCoordinates,
@@ -354,9 +357,12 @@ def main() -> None:
     args = parser.parse_args()
     all_runs = runs() + [smoke_run()]
 
-    print("1. Strict TrainConfig parse:")
+    print("1. Strict TrainConfig parse (also with the job's experiment_dir):")
+    override = [f"experiment_dir={AGENT_OUTPUT_ROOT}/agent-alexeyy-example-abcd"]
     for run in all_runs:
         parse(load(run))
+        overridden = parse(dict(update_dict_with_dotlist(load(run), override)))
+        assert overridden.experiment_dir == override[0].split("=", 1)[1]
     print(f"  {len(all_runs)} configs parse")
 
     print("2. LR schedule:")

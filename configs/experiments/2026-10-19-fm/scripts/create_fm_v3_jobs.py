@@ -66,6 +66,12 @@ Changes from the parent:
 3. Seeds 0, 1, 2 (submit_fm_v3_jobs.py: s0 at Beaker priority high, s1/s2
    normal).
 
+Output directory: the configs keep the parent's `experiment_dir: /results`,
+but submit_fm_v3_jobs.py overrides it at job start with
+`--override experiment_dir=$AGENT_OUTPUT_DIR`, the agent proxy's per-experiment
+folder under /climate-default/agents/alexeyy/, which survives Beaker's
+automatic resume of a preempted job (header line EXPERIMENT_DIR).
+
 Each file starts with a `# KEY: value` header (create_anneal_jobs.read_header)
 naming the job, its wandb group, its parent and the climate-default folders it
 needs mounted (WEKA_MOUNT; the gantry shim mounts every /climate-default/<dir>
@@ -428,6 +434,7 @@ def header(run: Run) -> str:
         f"WANDB_GROUP: {run.group}",
         f"PARENT_CONFIG: run_configs/{run.parent_config.name}",
         f"WEKA_MOUNT: {ERA5_STORE}",
+        "EXPERIMENT_DIR: $AGENT_OUTPUT_DIR (set by submit_fm_v3_jobs.py)",
         f"DESCRIPTION: {describe(run)}",
         "See create_fm_v3_jobs.py for every change from the parent.",
     ]

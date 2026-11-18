@@ -5,9 +5,11 @@ The shim (/usr/local/bin/gantry) sends each request to the Beaker proxy, which
 runs the pushed commit of BRANCH (never the working tree), in workspace ai2/ace
 and budget ai2/atec-climate. Each job runs, from the repo root,
 
-    torchrun --nproc_per_node 4 -m fme.ace.train <run config>
+    bash -c '<LAUNCH_SCRIPT>' fme-train <run config>
 
-as run-ace-train.sh does (4 GPUs, image latest_deps_only_image.txt, system
+i.e. `torchrun --nproc_per_node 4 -m fme.ace.train <run config> --override
+experiment_dir=$AGENT_OUTPUT_DIR`, as run-ace-train.sh launches training
+(4 GPUs, image latest_deps_only_image.txt, system
 python with `pip install --no-deps .`, shared memory 200GiB, min runtime 4h),
 with the wandb env of run-ace-train.sh (project FM, run name = job name, group
 ace2-fm-sfno-v3-2026-11-18, or its -smoke group) and the wandb key from the
@@ -17,10 +19,24 @@ WEKA_MOUNT header names the ERA5 store, which the datasets name only as
 data_path + file_pattern). Clusters: CLUSTERS (the v2 clusters without
 saturn). Priority: high for seed 0 (and the smoke test), normal for s1/s2.
 
+Checkpoints and logs go to $AGENT_OUTPUT_DIR
+(/climate-default/agents/alexeyy/<experiment name>), not the configs'
+experiment_dir /results. The v2 runs (real gantry) resumed after preemption
+from /results/training_checkpoints/ckpt.tar (their wandb output.log shows
+"Resuming training from /results/training_checkpoints/ckpt.tar"), but under
+the agent proxy only $AGENT_OUTPUT_DIR is guaranteed to survive Beaker's
+automatic resume of a preempted job. The experiment name, and so
+$AGENT_OUTPUT_DIR, is the same for every retry, so a retry finds ckpt.tar
+there and resumes (fme resumes whenever experiment_dir holds one, and its
+wandb run id too); the command is safe to restart. The config path stays a
+separate argument so the shim still reads the config for its weka mounts.
+
 The proxy names the Beaker experiment agent-alexeyy-<job name>-<suffix>. Each
 submission is recorded in records/fm_v3_jobs.json (job name -> experiment
-name, Beaker id, url, commit, priority, submission time), which fm_table.py
-reads; a job already recorded is skipped unless --resubmit.
+name, Beaker id, url, commit, priority, submission time, and the
+experiment_dir / checkpoint paths under $AGENT_OUTPUT_DIR that downstream
+evaluations need), which fm_table.py reads; a job already recorded is skipped
+unless --resubmit.
 
 Usage:
     python submit_fm_v3_jobs.py [--dry-run] [--only NAME ...] [--smoke]
@@ -70,6 +86,14 @@ WANDB_PROJECT = "FM"
 WANDB_USERNAME = "yyexela"
 WANDB_SECRET = "WANDB_API_KEY=wandb-api-key-ai2cm-sa"
 WEKA = "climate-default:/climate-default"
+AGENT_OUTPUT_ROOT = "/climate-default/agents/alexeyy"
+# $1 is the run config. Fails fast if the proxy did not set AGENT_OUTPUT_DIR.
+LAUNCH_SCRIPT = (
+    'set -eu; : "${AGENT_OUTPUT_DIR:?AGENT_OUTPUT_DIR is not set}"; '
+    'mkdir -p "$AGENT_OUTPUT_DIR"; '
+    f"exec torchrun --nproc_per_node {N_GPUS} -m fme.ace.train "
+    '"$1" --override "experiment_dir=$AGENT_OUTPUT_DIR"'
+)
 
 SUBMITTED_RE = re.compile(
     r"^Submitted (?P<name>\S+)\s+id:\s+(?P<id>\S+)\s+url:\s+(?P<url>\S+)", re.M
@@ -111,9 +135,21 @@ def gantry_command(run: Run, dry_run: bool) -> list[str]:
     cmd += ["--allow-dirty"]
     if dry_run:
         cmd += ["--dry-run"]
-    cmd += ["--", "torchrun", "--nproc_per_node", str(N_GPUS)]
-    cmd += ["-m", "fme.ace.train", str(config)]
+    cmd += ["--", "bash", "-c", LAUNCH_SCRIPT, "fme-train", str(config)]
     return cmd
+
+
+def output_paths(experiment: str) -> dict[str, str]:
+    """Where the job writes, from its experiment name (AGENT_OUTPUT_DIR)."""
+    experiment_dir = f"{AGENT_OUTPUT_ROOT}/{experiment}"
+    checkpoints = f"{experiment_dir}/training_checkpoints"
+    return {
+        "experiment_dir": experiment_dir,
+        "latest_ckpt": f"{checkpoints}/ckpt.tar",
+        "best_ckpt": f"{checkpoints}/best_ckpt.tar",
+        "best_inference_ckpt": f"{checkpoints}/best_inference_ckpt.tar",
+        "ema_ckpt_pattern": f"{checkpoints}/ema_ckpt_{{epoch:04d}}.tar",
+    }
 
 
 def read_record() -> dict:
@@ -203,6 +239,7 @@ def main() -> None:
             "priority": priority(run),
             "submitted": datetime.now(UTC).isoformat(timespec="seconds"),
             "config": str(run.path.relative_to(EXP_DIR)),
+            **output_paths(match["name"]),
             **({"replaces": previous} if previous else {}),
         }
         write_record(record)

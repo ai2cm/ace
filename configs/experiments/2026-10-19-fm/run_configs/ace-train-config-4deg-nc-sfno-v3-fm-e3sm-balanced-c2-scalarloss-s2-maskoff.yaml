@@ -3,6 +3,7 @@
 # WANDB_GROUP: ace2-fm-sfno-v3-2026-11-18
 # PARENT_CONFIG: run_configs/ace-train-config-4deg-nc-sfno-v2-fm-e3sm-balanced-s2-maskoff.yaml
 # WEKA_MOUNT: /climate-default/2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+# EXPERIMENT_DIR: $AGENT_OUTPUT_DIR (set by submit_fm_v3_jobs.py)
 # DESCRIPTION: ACE FM nc-sfno-v3: 120 epochs from scratch, LR 0.0001 constant, 3-step + 1-sqrt cooldown to 0 over epochs 115-120, pooled + grouped per-cell network normalization, v2 scalar loss normalization, masking off
 # See create_fm_v3_jobs.py for every change from the parent.
 seed: 2
