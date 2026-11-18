@@ -1,4 +1,23 @@
 {
+  "ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff": {
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff-zs1v/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff-zs1v/training_checkpoints/best_inference_ckpt.tar",
+    "clusters": [
+      "ai2/jupiter",
+      "ai2/titan",
+      "ai2/saturn"
+    ],
+    "commit": "3004d15a85fa298cf1e1176fe4e03a30c34abb50",
+    "config": "run_configs/ace-train-config-4deg-nc-sfno-v2-fm-c96amip-s0-maskoff.yaml",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff-zs1v/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff-zs1v",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff-zs1v",
+    "id": "01M7RBFK6YX98903P2BZ9V4MCE",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff-zs1v/training_checkpoints/ckpt.tar",
+    "priority": "high",
+    "submitted": "2026-11-18T22:12:20+00:00",
+    "url": "https://beaker.org/ex/01M7RBFK6YX98903P2BZ9V4MCE"
+  },
   "ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff-smoke": {
     "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff-smoke-9hb0/training_checkpoints/best_ckpt.tar",
     "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff-smoke-9hb0/training_checkpoints/best_inference_ckpt.tar",
@@ -18,6 +37,120 @@
     "submitted": "2026-11-18T21:51:27+00:00",
     "url": "https://beaker.org/ex/01M7RA9BTKJWY17X0XQYH7H7HB"
   },
+  "ace2-fm-nc-sfno-v2-fm-c96amip-s1-maskoff": {
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s1-maskoff-pprv/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s1-maskoff-pprv/training_checkpoints/best_inference_ckpt.tar",
+    "clusters": [
+      "ai2/jupiter",
+      "ai2/titan",
+      "ai2/saturn"
+    ],
+    "commit": "3004d15a85fa298cf1e1176fe4e03a30c34abb50",
+    "config": "run_configs/ace-train-config-4deg-nc-sfno-v2-fm-c96amip-s1-maskoff.yaml",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s1-maskoff-pprv/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s1-maskoff-pprv",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s1-maskoff-pprv",
+    "id": "01M7RBFNWQ5C34T94NQSRVYBZJ",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s1-maskoff-pprv/training_checkpoints/ckpt.tar",
+    "priority": "normal",
+    "submitted": "2026-11-18T22:12:22+00:00",
+    "url": "https://beaker.org/ex/01M7RBFNWQ5C34T94NQSRVYBZJ"
+  },
+  "ace2-fm-nc-sfno-v2-fm-c96amip-s2-maskoff": {
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s2-maskoff-86g2/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s2-maskoff-86g2/training_checkpoints/best_inference_ckpt.tar",
+    "clusters": [
+      "ai2/jupiter",
+      "ai2/titan",
+      "ai2/saturn"
+    ],
+    "commit": "3004d15a85fa298cf1e1176fe4e03a30c34abb50",
+    "config": "run_configs/ace-train-config-4deg-nc-sfno-v2-fm-c96amip-s2-maskoff.yaml",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s2-maskoff-86g2/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s2-maskoff-86g2",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s2-maskoff-86g2",
+    "id": "01M7RBFRJBK0Z4N8KC2KZEXKDY",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s2-maskoff-86g2/training_checkpoints/ckpt.tar",
+    "priority": "normal",
+    "submitted": "2026-11-18T22:12:25+00:00",
+    "url": "https://beaker.org/ex/01M7RBFRJBK0Z4N8KC2KZEXKDY"
+  },
+  "ace2-fm-nc-sfno-v2-fm-era5-1979-s0-maskoff": {
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-era5-1979-s0-maskoff-0zt1/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-era5-1979-s0-maskoff-0zt1/training_checkpoints/best_inference_ckpt.tar",
+    "clusters": [
+      "ai2/jupiter",
+      "ai2/titan",
+      "ai2/saturn"
+    ],
+    "commit": "3004d15a85fa298cf1e1176fe4e03a30c34abb50",
+    "config": "run_configs/ace-train-config-4deg-nc-sfno-v2-fm-era5-1979-s0-maskoff.yaml",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-era5-1979-s0-maskoff-0zt1/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v2-fm-era5-1979-s0-maskoff-0zt1",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-era5-1979-s0-maskoff-0zt1",
+    "id": "01M7RBG36MGDHPFKS7WBGJVE4C",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-era5-1979-s0-maskoff-0zt1/training_checkpoints/ckpt.tar",
+    "priority": "high",
+    "submitted": "2026-11-18T22:12:36+00:00",
+    "url": "https://beaker.org/ex/01M7RBG36MGDHPFKS7WBGJVE4C"
+  },
+  "ace2-fm-nc-sfno-v2-fm-era5-1979-s1-maskoff": {
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-era5-1979-s1-maskoff-ubyl/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-era5-1979-s1-maskoff-ubyl/training_checkpoints/best_inference_ckpt.tar",
+    "clusters": [
+      "ai2/jupiter",
+      "ai2/titan",
+      "ai2/saturn"
+    ],
+    "commit": "3004d15a85fa298cf1e1176fe4e03a30c34abb50",
+    "config": "run_configs/ace-train-config-4deg-nc-sfno-v2-fm-era5-1979-s1-maskoff.yaml",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-era5-1979-s1-maskoff-ubyl/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v2-fm-era5-1979-s1-maskoff-ubyl",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-era5-1979-s1-maskoff-ubyl",
+    "id": "01M7RBG5S7THH51NYXXH3X83XN",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-era5-1979-s1-maskoff-ubyl/training_checkpoints/ckpt.tar",
+    "priority": "normal",
+    "submitted": "2026-11-18T22:12:39+00:00",
+    "url": "https://beaker.org/ex/01M7RBG5S7THH51NYXXH3X83XN"
+  },
+  "ace2-fm-nc-sfno-v2-fm-era5-1979-s2-maskoff": {
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-era5-1979-s2-maskoff-kga0/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-era5-1979-s2-maskoff-kga0/training_checkpoints/best_inference_ckpt.tar",
+    "clusters": [
+      "ai2/jupiter",
+      "ai2/titan",
+      "ai2/saturn"
+    ],
+    "commit": "3004d15a85fa298cf1e1176fe4e03a30c34abb50",
+    "config": "run_configs/ace-train-config-4deg-nc-sfno-v2-fm-era5-1979-s2-maskoff.yaml",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-era5-1979-s2-maskoff-kga0/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v2-fm-era5-1979-s2-maskoff-kga0",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-era5-1979-s2-maskoff-kga0",
+    "id": "01M7RBG8EYKSWJ6FJD9BCTJ79D",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-era5-1979-s2-maskoff-kga0/training_checkpoints/ckpt.tar",
+    "priority": "normal",
+    "submitted": "2026-11-18T22:12:41+00:00",
+    "url": "https://beaker.org/ex/01M7RBG8EYKSWJ6FJD9BCTJ79D"
+  },
+  "ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff": {
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff-kw7q/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff-kw7q/training_checkpoints/best_inference_ckpt.tar",
+    "clusters": [
+      "ai2/jupiter",
+      "ai2/titan",
+      "ai2/saturn"
+    ],
+    "commit": "3004d15a85fa298cf1e1176fe4e03a30c34abb50",
+    "config": "run_configs/ace-train-config-4deg-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff.yaml",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff-kw7q/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff-kw7q",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff-kw7q",
+    "id": "01M7RBFV9RABC44F3DXW89KRX1",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff-kw7q/training_checkpoints/ckpt.tar",
+    "priority": "high",
+    "submitted": "2026-11-18T22:12:28+00:00",
+    "url": "https://beaker.org/ex/01M7RBFV9RABC44F3DXW89KRX1"
+  },
   "ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff-smoke": {
     "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff-smoke-z35m/training_checkpoints/best_ckpt.tar",
     "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff-smoke-z35m/training_checkpoints/best_inference_ckpt.tar",
@@ -36,5 +169,100 @@
     "replaces": "agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff-smoke-mrw2",
     "submitted": "2026-11-18T21:51:30+00:00",
     "url": "https://beaker.org/ex/01M7RA9FEA7FZ2WCEKE0FAAMQX"
+  },
+  "ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s1-maskoff": {
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s1-maskoff-cltp/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s1-maskoff-cltp/training_checkpoints/best_inference_ckpt.tar",
+    "clusters": [
+      "ai2/jupiter",
+      "ai2/titan",
+      "ai2/saturn"
+    ],
+    "commit": "3004d15a85fa298cf1e1176fe4e03a30c34abb50",
+    "config": "run_configs/ace-train-config-4deg-nc-swin-v2.2-v2-fm-c96amip-s1-maskoff.yaml",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s1-maskoff-cltp/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s1-maskoff-cltp",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s1-maskoff-cltp",
+    "id": "01M7RBFY0CBN16BK9T5AGZS8WY",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s1-maskoff-cltp/training_checkpoints/ckpt.tar",
+    "priority": "normal",
+    "submitted": "2026-11-18T22:12:31+00:00",
+    "url": "https://beaker.org/ex/01M7RBFY0CBN16BK9T5AGZS8WY"
+  },
+  "ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s2-maskoff": {
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s2-maskoff-umy9/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s2-maskoff-umy9/training_checkpoints/best_inference_ckpt.tar",
+    "clusters": [
+      "ai2/jupiter",
+      "ai2/titan",
+      "ai2/saturn"
+    ],
+    "commit": "3004d15a85fa298cf1e1176fe4e03a30c34abb50",
+    "config": "run_configs/ace-train-config-4deg-nc-swin-v2.2-v2-fm-c96amip-s2-maskoff.yaml",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s2-maskoff-umy9/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s2-maskoff-umy9",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s2-maskoff-umy9",
+    "id": "01M7RBG0MKCSRCFFXJB2SRZ0XC",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s2-maskoff-umy9/training_checkpoints/ckpt.tar",
+    "priority": "normal",
+    "submitted": "2026-11-18T22:12:33+00:00",
+    "url": "https://beaker.org/ex/01M7RBG0MKCSRCFFXJB2SRZ0XC"
+  },
+  "ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s0-maskoff": {
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s0-maskoff-1hzp/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s0-maskoff-1hzp/training_checkpoints/best_inference_ckpt.tar",
+    "clusters": [
+      "ai2/jupiter",
+      "ai2/titan",
+      "ai2/saturn"
+    ],
+    "commit": "3004d15a85fa298cf1e1176fe4e03a30c34abb50",
+    "config": "run_configs/ace-train-config-4deg-nc-swin-v2.2-v2-fm-era5-1979-s0-maskoff.yaml",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s0-maskoff-1hzp/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s0-maskoff-1hzp",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s0-maskoff-1hzp",
+    "id": "01M7RBGB19C2GWPT1D7MBNWS51",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s0-maskoff-1hzp/training_checkpoints/ckpt.tar",
+    "priority": "high",
+    "submitted": "2026-11-18T22:12:44+00:00",
+    "url": "https://beaker.org/ex/01M7RBGB19C2GWPT1D7MBNWS51"
+  },
+  "ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s1-maskoff": {
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s1-maskoff-6rza/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s1-maskoff-6rza/training_checkpoints/best_inference_ckpt.tar",
+    "clusters": [
+      "ai2/jupiter",
+      "ai2/titan",
+      "ai2/saturn"
+    ],
+    "commit": "3004d15a85fa298cf1e1176fe4e03a30c34abb50",
+    "config": "run_configs/ace-train-config-4deg-nc-swin-v2.2-v2-fm-era5-1979-s1-maskoff.yaml",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s1-maskoff-6rza/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s1-maskoff-6rza",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s1-maskoff-6rza",
+    "id": "01M7RBGDJZTG4367PB6H8QYJ5P",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s1-maskoff-6rza/training_checkpoints/ckpt.tar",
+    "priority": "normal",
+    "submitted": "2026-11-18T22:12:47+00:00",
+    "url": "https://beaker.org/ex/01M7RBGDJZTG4367PB6H8QYJ5P"
+  },
+  "ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s2-maskoff": {
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s2-maskoff-n7hx/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s2-maskoff-n7hx/training_checkpoints/best_inference_ckpt.tar",
+    "clusters": [
+      "ai2/jupiter",
+      "ai2/titan",
+      "ai2/saturn"
+    ],
+    "commit": "3004d15a85fa298cf1e1176fe4e03a30c34abb50",
+    "config": "run_configs/ace-train-config-4deg-nc-swin-v2.2-v2-fm-era5-1979-s2-maskoff.yaml",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s2-maskoff-n7hx/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s2-maskoff-n7hx",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s2-maskoff-n7hx",
+    "id": "01M7RBGGCNVMKSK8ZG3664MREQ",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-era5-1979-s2-maskoff-n7hx/training_checkpoints/ckpt.tar",
+    "priority": "normal",
+    "submitted": "2026-11-18T22:12:49+00:00",
+    "url": "https://beaker.org/ex/01M7RBGGCNVMKSK8ZG3664MREQ"
   }
 }
