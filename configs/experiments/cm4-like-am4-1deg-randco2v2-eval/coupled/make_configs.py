@@ -155,12 +155,12 @@ def _monthly_files_yaml(names: list[str]) -> str:
 
 EXTENSION_COMMENT = """
 # Initial conditions and forcing are as in inference-config-cm4-abrupt4xCO2-ic1.yaml,
-# except that both forcing datasets are repeated in time to cover 0301-0401:
+# except that both forcing datasets are repeated in time to cover 0301-{end_year:04d}:
 # - the piControl atmosphere stores end in 0350, so they are repeated once; the
 #   remaining atmosphere forcings are periodic in the noleap calendar and CO2 is
 #   {co2_repeat}, so the repeat introduces no discontinuity.
 # - the ocean's time-constant forcings file only spans the 150-day window on a
-#   5-day axis, so it is tiled well past the 7301 times needed."""
+#   5-day axis, so it is tiled well past the {n_times} times needed."""
 
 
 ABRUPT = dict(
@@ -223,9 +223,15 @@ def _n_years(years: int, in_memory: int = 4) -> dict:
 
 
 HUNDRED_YEAR = _n_years(100)
-# The CMIP6-like IC runs also write monthly-mean 2m air temperature; the
-# earlier monthly runs, already run, keep MONTHLY_ATMOS_NAMES as it was.
-CMIP6_LIKE_IC_MONTHLY_ATMOS_NAMES = MONTHLY_ATMOS_NAMES + ["TMP2m"]
+# The CMIP6-like IC runs and the 150-year piControl run also write
+# monthly-mean 2m air temperature; the earlier monthly runs, already run, keep
+# MONTHLY_ATMOS_NAMES as it was.
+MONTHLY_ATMOS_NAMES_WITH_TMP2M = MONTHLY_ATMOS_NAMES + ["TMP2m"]
+
+PICONTROL_150YR_COMMENT = """
+# 150-year version of inference-config-cm4-piControl-ic1-100yr-monthly.yaml
+# (same initial condition, forcing and CO2) that also writes monthly-mean
+# TMP2m; experiment_dir is set per run with an override in experiments.txt."""
 
 # Lengths of the CMIP6-like IC runs in years, with coupled_steps_in_memory:
 # 10950 steps (150 years) is not divisible by 4, so that run uses 6, as the
@@ -233,9 +239,11 @@ CMIP6_LIKE_IC_MONTHLY_ATMOS_NAMES = MONTHLY_ATMOS_NAMES + ["TMP2m"]
 CMIP6_LIKE_IC_YEARS = {100: 4, 150: 6}
 
 
-def _extension_comment(scenario: dict) -> str:
+def _extension_comment(scenario: dict, years: int = 100) -> str:
     abrupt = scenario is ABRUPT
     return EXTENSION_COMMENT.format(
+        end_year=301 + years,
+        n_times=365 * years // 5 + 1,  # n_coupled_steps + the initial condition
         co2_repeat=(
             "overwritten with a constant" if abrupt else "constant in piControl"
         ),
@@ -306,6 +314,24 @@ def main():
             atmos_files=_monthly_files_yaml(MONTHLY_ATMOS_NAMES) if monthly else "",
         )
         (HERE / f"inference-config-{tag}.yaml").write_text(text)
+    text = TEMPLATE.format(
+        **PICONTROL,
+        description="control for abrupt-4xCO2 member 1",
+        time=format_time(times[0]),
+        extra_comment=(
+            _extension_comment(PICONTROL, years=150)
+            + PICONTROL_150YR_COMMENT
+            + MONTHLY_COMMENT
+        ),
+        static_forcing=STATIC_FORCING,
+        forcing_file="ic_0001.nc",
+        **PICONTROL_IC,
+        **_n_years(150, in_memory=6),
+        experiment_dir="/results",
+        ocean_files=_monthly_files_yaml(MONTHLY_OCEAN_NAMES),
+        atmos_files=_monthly_files_yaml(MONTHLY_ATMOS_NAMES_WITH_TMP2M),
+    )
+    (HERE / "inference-config-cm4-piControl-ic1-150yr-monthly.yaml").write_text(text)
     t = CMIP6_LIKE_IC_START
     for years, in_memory in CMIP6_LIKE_IC_YEARS.items():
         length = _n_years(years, in_memory)
@@ -326,7 +352,7 @@ def main():
             **length,
             experiment_dir="/results",
             ocean_files=_monthly_files_yaml(MONTHLY_OCEAN_NAMES),
-            atmos_files=_monthly_files_yaml(CMIP6_LIKE_IC_MONTHLY_ATMOS_NAMES),
+            atmos_files=_monthly_files_yaml(MONTHLY_ATMOS_NAMES_WITH_TMP2M),
         )
         name = f"inference-config-cm4-cmip6-like-ic-abrupt4xCO2-0251-{years}yr-monthly"
         (HERE / f"{name}.yaml").write_text(text)
