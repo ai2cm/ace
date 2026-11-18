@@ -1,0 +1,25 @@
+# Pooled (scalar) normalization stats for the FM `era5-1979` runs, the
+# ERA5-only baseline of the C96 AMIP-only runs matched in data amount
+# (configs/experiments/2026-10-19-fm/scripts/create_fm_c96amip_jobs.py), over
+# exactly their training data: the v2 ERA5 training store with the C96 AMIP
+# runs' year splits (1979-1993 and 1995-2008; training skips 1994, a
+# validation year). The entries equal train_loader.dataset.concat of the
+# era5-1979 run configs, read from weka as training does (the stats job runs
+# on beaker, which has no GCS credentials). The v2 ERA5 training entries have
+# no renamed, derived or rescaled variables, so none are set here.
+#
+# Scalar stats (no per_grid_cell), pooled with timestep weighting (the
+# default, as for the v2 stats), written at the output root as centering.nc,
+# scaling-full-field.nc and scaling-residual.nc. The one group, era5, is the
+# training label and pools the same two entries (its files equal the root's).
+dataset_pairs:
+- dataset: /climate-default/2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+  start_time: '1979-01-01'
+  end_time: '1993-12-31'
+  group: era5
+- dataset: /climate-default/2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+  start_time: '1995-01-01'
+  end_time: '2008-12-31'
+  group: era5
+groups:
+- era5

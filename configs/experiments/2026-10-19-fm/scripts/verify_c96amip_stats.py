@@ -1,17 +1,19 @@
-"""Check the scalar normalization stats of the FM C96 AMIP-only runs, and the
-C96 AMIP store's time coverage, inside a beaker job (both live on weka).
+"""Check the scalar normalization stats of the FM C96 AMIP-only runs (or of
+their ERA5-only `era5-1979` baseline), and the training store's time
+coverage, inside a beaker job (both live on weka).
 
 Runs after `get_pooled_stats.py compute
-scripts/data_process/configs/fm-c96amip-stats.yaml OUT`. It checks that:
+scripts/data_process/configs/fm-c96amip-stats.yaml OUT` (or
+fm-era5-1979-stats.yaml, with --group era5). It checks that:
 
-- OUT/{centering,scaling-full-field,scaling-residual}.nc (and groups/c96/,
-  which pools the same entries) hold every variable of in_names and out_names
-  of each TRAIN_CONFIG, as scalars, finite, with positive stds; groups/c96
-  equals the root;
+- OUT/{centering,scaling-full-field,scaling-residual}.nc (and groups/GROUP/,
+  GROUP = c96 by default, which pools the same entries) hold every variable
+  of in_names and out_names of each TRAIN_CONFIG, as scalars, finite, with
+  positive stds; groups/GROUP equals the root;
 - the files build with fme's NormalizationConfig;
 - the store is daily and gap-free from 1979-01-01 through 2014-12-31, so it
   covers the training splits (1979-1993, 1995-2008), the validation years
-  (1994, 2014) and the C96 inline inference (8 ICs from 2009-01-01 to
+  (1994, 2014) and the inline inference on it (8 ICs from 2009-01-01 to
   2009-11-15, each run 1825 days); it prints the training timesteps per split.
 
 With --reference DIR (a scalar stats root, e.g. the v2 fm-balanced stats'
@@ -20,7 +22,7 @@ Exits non-zero if any check fails.
 
 Usage:
     python verify_c96amip_stats.py OUT STORE TRAIN_CONFIG [TRAIN_CONFIG ...]
-        [--reference DIR]
+        [--reference DIR] [--group GROUP]
 """
 
 import argparse
@@ -48,8 +50,10 @@ def _names(config_path: str) -> set[str]:
     return set(step["in_names"]) | set(step["out_names"])
 
 
-def check_stats(out: pathlib.Path, names: set[str], failures: list[str]) -> None:
-    for subdir in (out, out / "groups" / "c96"):
+def check_stats(
+    out: pathlib.Path, names: set[str], group_name: str, failures: list[str]
+) -> None:
+    for subdir in (out, out / "groups" / group_name):
         for name in FILES:
             ds = xr.open_dataset(subdir / name)
             missing = sorted(names - set(ds.data_vars))
@@ -65,11 +69,13 @@ def check_stats(out: pathlib.Path, names: set[str], failures: list[str]) -> None
                     failures.append(f"{subdir}/{name} {var} not positive: {value}")
     for name in FILES:
         root = xr.open_dataset(out / name)
-        group = xr.open_dataset(out / "groups" / "c96" / name)
+        group = xr.open_dataset(out / "groups" / group_name / name)
         for var in sorted(names):
             if var in root and var in group:
                 if not np.allclose(root[var].values, group[var].values, rtol=1e-6):
-                    failures.append(f"groups/c96/{name} {var} differs from the root")
+                    failures.append(
+                        f"groups/{group_name}/{name} {var} differs from the root"
+                    )
     for scaling in STD_FILES:
         normalizer = NormalizationConfig(
             global_means_path=str(out / "centering.nc"),
@@ -125,7 +131,7 @@ def check_store(store: str, failures: list[str]) -> None:
         )
     last_ic = datetime.date.fromisoformat(INFERENCE_LAST_IC)
     end = last_ic + datetime.timedelta(days=INFERENCE_STEPS)
-    print(f"C96 inline inference: last IC {last_ic}, ends {end} (within coverage)")
+    print(f"inline inference: last IC {last_ic}, ends {end} (within coverage)")
     if end > stop:
         failures.append(f"inline inference ends {end}, after {stop}")
     for a, b in TRAIN_SPLITS:
@@ -139,6 +145,7 @@ def main() -> None:
     parser.add_argument("store")
     parser.add_argument("train_configs", nargs="+")
     parser.add_argument("--reference", type=pathlib.Path)
+    parser.add_argument("--group", default="c96")
     args = parser.parse_args()
     names: set[str] = set()
     for path in args.train_configs:
@@ -148,7 +155,7 @@ def main() -> None:
         names = config_names
     print(f"{len(names)} variables in in_names | out_names")
     failures: list[str] = []
-    check_stats(args.out, names, failures)
+    check_stats(args.out, names, args.group, failures)
     print_table(args.out, names, args.reference)
     check_store(args.store, failures)
     print("\n=== SUMMARY ===")
