@@ -1,45 +1,67 @@
-"""Progress table for the 1deg, 6-hourly FM training runs.
+"""Progress table for the FM training runs currently tracked.
 
-Tracks only the 6 runs of create_fm_1deg_jobs (NoiseConditionedSFNO embed_dim
-1024, 120 epochs, 8 GPUs; 2 arms x 3 seeds), one row per arm, 3 runs each:
-sfno-v2-1deg-fm-e3sm-balanced, sfno-v2-1deg-fm-era5. Their smoke tests and
-every 4deg run (the 2026-10-19 runs, the 2026-11-09 v2 runs, their follow-ups
-and the 2026-11-12 fine-tunes) are not tracked; their logs are not read.
+Rows (ROWS), 3 seeds each unless noted:
+- The 12 FM v3 per-grid-cell normalization runs (create_fm_v3_jobs.py, 120
+  epochs, 4 GPUs), one row per network x loss normalization:
+  sfno-v3-{c1,c2}-{scalarloss,cellloss}.
+- Their smoke test (sfno-v3-smoke, c2-cellloss s0, 2 epochs), while its config
+  exists.
+- The 6 1deg, 6-hourly FM runs of create_fm_1deg_jobs (120 epochs, 8 GPUs),
+  one row per arm: sfno-v2-1deg-fm-e3sm-balanced, sfno-v2-1deg-fm-era5.
+
+Two backends, chosen by whether the `beaker` CLI is on PATH:
+- beaker: one `beaker workspace experiments` listing per row prefix
+  (_beaker_listing) and `beaker job logs` of every job (preemption retry) of
+  each experiment, as before.
+- gantry (agent VMs, which have no beaker CLI): the gantry shim
+  (/usr/local/bin/gantry), which sees only jobs submitted from this VM. Job
+  name -> Beaker id comes from records/fm_v3_jobs.json (written by
+  submit_fm_v3_jobs.py), else from `gantry list --all` (experiment names are
+  agent-alexeyy-<job name>-<suffix>; the newest wins); status from `gantry
+  list --all`, logs from `gantry logs <id>`, which hold every retry of the
+  experiment. A retry starts at fme's "Resuming training from" line, so
+  "Preemptions" counts those (restarts from a checkpoint, whatever their
+  cause). Rows of runs submitted outside this VM (the 1deg runs) are left out,
+  with a note.
 
 Epochs done and per-phase timings come from the logs of every run
 (preemption retry) of each finished or running experiment. Epochs done is the
 highest N in "Starting training step for model trained for N complete
 epochs", so an epoch counts only once its training, validation and inline
-inference are all done. Finished jobs count as max_epochs (120); never-started
+inference are all done. Finished jobs count as their max_epochs; never-started
 jobs count as 0.
 Train time is the wall time that produced kept progress,
-summed over an experiment's jobs (preemption retries): each job counts from
+summed over an experiment's runs (preemption retries): each run counts from
 its first training step to its exit (or now, if running), except that a
-preempted or failed job counts only up to its last checkpoint save, since the
+preempted or failed run counts only up to its last checkpoint save, since the
 work after it is redone by the next retry. Queueing, startup and lost work are
-excluded, so preemptions do not inflate it. Epoch columns cover unfinished
-(running or queued) jobs only, "-" when none; train-time and timing columns
-cover finished and running jobs. The "inference, every 10" column is the
-inline inference after epochs 10, 20, ..., when the every-10th-epoch entries
-run too; "-" until a run of the row has finished one. All values are measured;
-there are no estimates.
+excluded, so preemptions do not inflate it. (gantry backend: a run's exit is
+its last timestamped log line.) Epoch columns cover unfinished (running or
+queued) jobs only, "-" when none; train-time and timing columns cover finished
+and running jobs. The "inference, every 10" column is the inline inference
+after epochs 10, 20, ..., when the every-10th-epoch entries run too; "-" until
+a run of the row has finished one (the smoke test runs all of its inference
+every epoch). All values are measured; there are no estimates.
 
 "Not submitted" counts job names with no Beaker experiment;
 "Failed / Other" counts only experiments that exist and failed or were canceled.
 "Preemptions" sums, over the row's experiments, the jobs Beaker canceled
-because a higher-priority job preempted them.
+because a higher-priority job preempted them (gantry backend: the restarts).
 
-Usage:
-    python fm_table.py
+Usage (from the repo root):
+    PYTHONPATH=$PWD python configs/experiments/2026-10-19-fm/scripts/fm_table.py
 """
 
+import json
 import os
 import pathlib
 import re
+import shutil
 import statistics
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
@@ -51,8 +73,20 @@ from _beaker_listing import (  # noqa: E402
     job_status,
     list_experiments,
 )
-from create_fm_1deg_jobs import ARMS, SEEDS, run_config_name  # noqa: E402
+from create_fm_1deg_jobs import ARMS as ARMS_1DEG  # noqa: E402
+from create_fm_1deg_jobs import SEEDS as SEEDS_1DEG  # noqa: E402
+from create_fm_1deg_jobs import run_config_name as run_config_name_1deg  # noqa: E402
+from create_fm_v3_jobs import LOSSES, NETWORKS, SMOKE_MAX_EPOCHS  # noqa: E402
+from create_fm_v3_jobs import MAX_EPOCHS as MAX_EPOCHS_V3  # noqa: E402
+from create_fm_v3_jobs import runs as v3_runs  # noqa: E402
+from create_fm_v3_jobs import smoke_run as v3_smoke_run  # noqa: E402
 from submit_fm_jobs import config_to_job_name  # noqa: E402
+
+EXP_DIR = pathlib.Path(__file__).parent.parent
+V3_RECORD = EXP_DIR / "records" / "fm_v3_jobs.json"
+GANTRY = "/usr/local/bin/gantry"
+AGENT_PREFIX = "agent-alexeyy-"
+GANTRY_LIST_LIMIT = 500
 
 # "Starting training step for model trained for N complete epochs" marks that
 # epochs 0..N-1 are done, including their validation and inline inference.
@@ -63,15 +97,19 @@ EPOCH_RE = re.compile(r"Starting training step for model trained for (\d+) compl
 # the checkpoint save). A resumed run's first training start is mid-epoch, so
 # its epoch and training intervals are skipped.
 PHASE_RE = re.compile(
-    r"^(\S+)Z .*Starting (training|validation|inference) step for model trained "
-    r"for (\d+)",
-    re.M,
+    r"Starting (training|validation|inference) step for model trained for (\d+)"
 )
 RESUME_MARK = "Resuming training from"
 # Checkpoint saves: at each epoch end and every checkpoint_every_n_batches. A
 # preempted run resumes from the last one, so its later work is redone.
-CHECKPOINT_RE = re.compile(
-    r"^(\S+)Z .*Saving (?:checkpoints for epoch|latest checkpoint)", re.M
+CHECKPOINT_RE = re.compile(r"Saving (?:checkpoints for epoch|latest checkpoint)")
+# Line timestamps: the RFC 3339 prefix `beaker job logs` adds, else fme's own
+# logging asctime (UTC in the job containers).
+BEAKER_TIME_RE = re.compile(r"^(\S+)Z ")
+ASCTIME_RE = re.compile(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d),(\d{3}) - ")
+LOG_FILTER_RE = re.compile(
+    r"Starting (training|validation|inference) step|Resuming training"
+    r"|Saving (checkpoints for epoch|latest checkpoint)"
 )
 # Two tables with the same rows, so each fits a terminal: job counts and
 # epochs, then timings.
@@ -97,92 +135,111 @@ TIMING_COLUMNS = (
 )
 
 
-def _submitted(experiment: dict) -> str:
-    """When the experiment was submitted: its first job's creation time.
+# --- tracked runs ----------------------------------------------------------------
 
-    Not the latest job's, which moves forward on every preemption retry.
+
+@dataclass(frozen=True)
+class Row:
+    label: str
+    names: tuple[str, ...]
+    max_epochs: int
+    # Submitted from this agent VM (visible through the gantry shim).
+    agent_vm: bool
+
+
+def _rows() -> list[Row]:
+    rows = []
+    v3 = v3_runs()
+    for network in NETWORKS:
+        for loss in LOSSES:
+            names = tuple(
+                r.job_name for r in v3 if (r.network, r.loss) == (network, loss)
+            )
+            rows.append(Row(f"sfno-v3-{network}-{loss}", names, MAX_EPOCHS_V3, True))
+    smoke = v3_smoke_run()
+    if smoke.path.exists():
+        rows.append(Row("sfno-v3-smoke", (smoke.job_name,), SMOKE_MAX_EPOCHS, True))
+    for arm in ARMS_1DEG:
+        names = tuple(
+            config_to_job_name(run_config_name_1deg(arm, seed, False))
+            for seed in SEEDS_1DEG
+        )
+        rows.append(Row(f"sfno-v2-1deg-{arm}", names, 120, False))
+    return rows
+
+
+ROWS = _rows()
+
+
+@dataclass
+class Tracked:
+    """One job name's experiment, from either backend."""
+
+    status: str  # OK, "running", or how it ended
+    queued: bool
+    preemptions: int
+
+
+Seconds = tuple[float | None, float | None, float | None, float | None]
+Intervals = tuple[list[float], list[float], list[float], list[float]]
+Progress = tuple[int, Seconds, float]
+NO_SECONDS: Seconds = (None, None, None, None)
+
+
+# --- log parsing (both backends) -------------------------------------------------
+
+
+def _line_time(line: str) -> datetime | None:
+    match = BEAKER_TIME_RE.match(line)
+    if match:
+        return datetime.fromisoformat(match.group(1)).replace(tzinfo=UTC)
+    match = ASCTIME_RE.search(line)
+    if match:
+        t = datetime.fromisoformat(f"{match.group(1)}.{match.group(2)}")
+        return t.replace(tzinfo=UTC)
+    return None
+
+
+def _events(log: str) -> list[tuple[datetime, str, int]]:
+    events = []
+    for line in log.splitlines():
+        match = PHASE_RE.search(line)
+        t = _line_time(line) if match else None
+        if match and t is not None:
+            events.append((t, match.group(1), int(match.group(2))))
+    return events
+
+
+def _checkpoint_times(log: str) -> list[datetime]:
+    return [
+        t
+        for line in log.splitlines()
+        if CHECKPOINT_RE.search(line) and (t := _line_time(line)) is not None
+    ]
+
+
+def _last_time(log: str) -> datetime | None:
+    for line in reversed(log.splitlines()):
+        if (t := _line_time(line)) is not None:
+            return t
+    return None
+
+
+def _kept_seconds(log: str, end_kind: str, exited: datetime | None) -> float:
+    """Wall seconds of one run whose progress was kept: from its first
+    training step to `exited` ("ok"), now ("running"), or its last checkpoint
+    save ("lost": preempted or failed, as later work is redone).
     """
-    jobs = experiment.get("jobs") or []
-    created = [job.get("status", {}).get("created", "") for job in jobs]
-    return min(created, default="")
-
-
-def newest_by_name(text: str) -> dict[str, NamedExperiment]:
-    """The newest experiment for each canonical job name matching ``text``.
-
-    Unlike ``_beaker_listing.experiments_by_name`` (which prefers the best
-    status, as the submit scripts need), a resubmitted job always replaces the
-    older experiment of the same name, so the table tracks the latest run.
-    """
-    newest: dict[str, dict] = {}
-    for experiment in list_experiments(text=text):
-        name = canonical_name(experiment["name"])
-        if name not in newest or _submitted(experiment) > _submitted(newest[name]):
-            newest[name] = experiment
-    return {
-        name: NamedExperiment(name, experiment_status(e), e)
-        for name, e in newest.items()
-    }
-
-
-def _queued(named: NamedExperiment) -> bool:
-    """A running experiment whose unfinished job has not started yet."""
-    jobs = named.experiment.get("jobs") or []
-    pending = [j for j in jobs if job_status(j) == "running"]
-    return bool(pending) and not pending[-1].get("status", {}).get("started")
-
-
-def _preemptions(named: NamedExperiment) -> int:
-    """Jobs of the experiment that Beaker canceled to run a preempting job."""
-    return sum(
-        "preempted" in (job.get("status", {}).get("canceledFor") or "")
-        for job in named.experiment.get("jobs") or []
-    )
-
-
-MAX_EPOCHS = 120  # max_epochs of both 1deg base configs
-# Tracked runs: job name -> arm, in table row order (one row per arm, seeds in
-# order within it).
-RUN_ARMS = {
-    config_to_job_name(run_config_name(arm, seed, False)): arm
-    for arm in ARMS
-    for seed in SEEDS
-}
-
-
-def arch_of(name: str) -> str:
-    """Row of the run named `name`, e.g. sfno-v2-1deg-fm-era5."""
-    return f"sfno-v2-1deg-{RUN_ARMS[name]}"
-
-
-ARCHS = tuple(dict.fromkeys(arch_of(name) for name in RUN_ARMS))
-
-
-def max_epochs_of(name: str) -> int:
-    return MAX_EPOCHS
-
-
-def _log_time(t: str) -> datetime:
-    return datetime.fromisoformat(t).replace(tzinfo=UTC)
-
-
-def useful_seconds(job: dict, log: str) -> float:
-    """Wall seconds of one job (run) whose progress was kept: from its first
-    training step to its exit (or now, if still running); a preempted or
-    failed job ends at its last checkpoint save, as later work is redone.
-    """
-    starts = [_log_time(t) for t, _, _ in PHASE_RE.findall(log)]
+    starts = [t for t, _, _ in _events(log)]
     if not starts:
         return 0.0
     start = starts[0]
-    status = job.get("status", {})
-    if status.get("exited") and status.get("exitCode") == 0:
-        end = datetime.fromisoformat(status["exited"])
-    elif not status.get("exited") and not status.get("canceled"):
+    if end_kind == "ok" and exited is not None:
+        end = exited
+    elif end_kind == "running":
         end = datetime.now(UTC)
     else:
-        saves = [_log_time(t) for t in CHECKPOINT_RE.findall(log)]
-        saves = [t for t in saves if t >= start]
+        saves = [t for t in _checkpoint_times(log) if t >= start]
         end = saves[-1] if saves else start
     return max((end - start).total_seconds(), 0.0)
 
@@ -208,20 +265,11 @@ def _is_heavy_inference(epoch: int, residue: int) -> bool:
     return epoch % HEAVY_INFERENCE_EVERY == residue
 
 
-Seconds = tuple[float | None, float | None, float | None, float | None]
-
-
-Intervals = tuple[list[float], list[float], list[float], list[float]]
-
-
 def epoch_intervals(log: str, heavy_residue: int) -> Intervals:
     """Wall seconds of each (full epoch, training, inline inference on light
     epochs, inline inference on heavy every-10th epochs) in one run's log.
     """
-    events = [
-        (datetime.fromisoformat(t), phase, int(n))
-        for t, phase, n in PHASE_RE.findall(log)
-    ]
+    events = _events(log)
     starts = [(t, n) for t, phase, n in events if phase == "training"]
     if RESUME_MARK in log and starts:
         resumed_at = starts[0][0]
@@ -246,81 +294,290 @@ def epoch_intervals(log: str, heavy_residue: int) -> Intervals:
     return full, train, light, heavy
 
 
-def _run_log(job_id: str) -> str:
-    grep = (
-        "grep -E 'Starting (training|validation|inference) step|Resuming training"
-        "|Saving (checkpoints for epoch|latest checkpoint)'"
-    )
-    return subprocess.run(
-        f"beaker job logs {job_id} 2>/dev/null | {grep}",
-        shell=True,
-        capture_output=True,
-        text=True,
-    ).stdout
-
-
-def progress(named, name: str) -> tuple[int, Seconds, float]:
+def _progress_from_runs(
+    runs: list[tuple[str, str, datetime | None]], finished: bool, max_epochs: int
+) -> Progress:
     """(epochs done, median seconds per (epoch, training, light and heavy
-    inference), useful train seconds) over the logs of every run (preemption
-    retry) of the experiment, finished or not.
+    inference), kept train seconds) over the logs of every run (preemption
+    retry) of an experiment: (log, end kind, exit time) each.
     """
-    none: Seconds = (None, None, None, None)
-    max_epochs = max_epochs_of(name)
-    if named is None:
-        return 0, none, 0.0
-    jobs = named.experiment.get("jobs") or []
-    started = [j for j in jobs if "started" in j.get("status", {})]
-    if not started:
-        return (max_epochs if named.status == OK else 0), none, 0.0
+    if not runs:
+        return (max_epochs if finished else 0), NO_SECONDS, 0.0
     intervals: Intervals = ([], [], [], [])
     done = 0
-    useful = 0.0
-    for job in started:
-        log = _run_log(job["id"])
-        useful += useful_seconds(job, log)
+    kept = 0.0
+    for log, end_kind, exited in runs:
+        kept += _kept_seconds(log, end_kind, exited)
         done = max(done, *(int(m.group(1)) for m in EPOCH_RE.finditer(log)), 0)
         for acc, values in zip(
             intervals, epoch_intervals(log, HEAVY_INFERENCE_RESIDUE)
         ):
             acc.extend(values)
-    if named.status == OK:
+    if finished:
         done = max_epochs
     full, train, light, heavy = intervals
-    medians = (_median(full), _median(train), _median(light), _median(heavy))
-    return done, medians, useful
+    return done, (_median(full), _median(train), _median(light), _median(heavy)), kept
+
+
+def _filter_log(text: str) -> str:
+    return "\n".join(line for line in text.splitlines() if LOG_FILTER_RE.search(line))
+
+
+# --- beaker backend ------------------------------------------------------------
+
+
+def _submitted(experiment: dict) -> str:
+    """When the experiment was submitted: its first job's creation time.
+
+    Not the latest job's, which moves forward on every preemption retry.
+    """
+    jobs = experiment.get("jobs") or []
+    created = [job.get("status", {}).get("created", "") for job in jobs]
+    return min(created, default="")
+
+
+def newest_by_name(text: str, names: set[str]) -> dict[str, NamedExperiment]:
+    """The newest experiment for each canonical job name matching ``text``.
+
+    Unlike ``_beaker_listing.experiments_by_name`` (which prefers the best
+    status, as the submit scripts need), a resubmitted job always replaces the
+    older experiment of the same name, so the table tracks the latest run.
+    Experiments submitted through the agent VM's proxy
+    (agent-alexeyy-<job name>-<suffix>) are matched to the tracked `names`.
+    """
+    newest: dict[str, dict] = {}
+    for experiment in list_experiments(text=text):
+        if experiment["name"].startswith(AGENT_PREFIX):
+            name = _job_name_of(experiment["name"], names)
+            if name is None:
+                continue
+        else:
+            name = canonical_name(experiment["name"])
+        if name not in newest or _submitted(experiment) > _submitted(newest[name]):
+            newest[name] = experiment
+    return {
+        name: NamedExperiment(name, experiment_status(e), e)
+        for name, e in newest.items()
+    }
+
+
+def _queued(named: NamedExperiment) -> bool:
+    """A running experiment whose unfinished job has not started yet."""
+    jobs = named.experiment.get("jobs") or []
+    pending = [j for j in jobs if job_status(j) == "running"]
+    return bool(pending) and not pending[-1].get("status", {}).get("started")
+
+
+def _preemptions(named: NamedExperiment) -> int:
+    """Jobs of the experiment that Beaker canceled to run a preempting job."""
+    return sum(
+        "preempted" in (job.get("status", {}).get("canceledFor") or "")
+        for job in named.experiment.get("jobs") or []
+    )
+
+
+def _beaker_job_log(job_id: str) -> str:
+    proc = subprocess.run(
+        ["beaker", "job", "logs", job_id], capture_output=True, text=True
+    )
+    return _filter_log(proc.stdout)
+
+
+def _beaker_progress(named: NamedExperiment | None, max_epochs: int) -> Progress:
+    if named is None:
+        return 0, NO_SECONDS, 0.0
+    jobs = named.experiment.get("jobs") or []
+    runs = []
+    for job in jobs:
+        status = job.get("status", {})
+        if "started" not in status:
+            continue
+        if status.get("exited") and status.get("exitCode") == 0:
+            kind, exited = "ok", datetime.fromisoformat(status["exited"])
+        elif not status.get("exited") and not status.get("canceled"):
+            kind, exited = "running", None
+        else:
+            kind, exited = "lost", None
+        runs.append((_beaker_job_log(job["id"]), kind, exited))
+    return _progress_from_runs(runs, named.status == OK, max_epochs)
+
+
+def beaker_backend(rows: list[Row]) -> tuple[dict[str, Tracked], dict[str, Progress]]:
+    # One listing per distinct common prefix of a row's job names (the name up
+    # to the seed; it also matches the row's smoke tests, which are dropped
+    # as their names are not tracked): the broad "ace2-fm-nc-" listing matches
+    # ~9k old experiments and takes ~5 min, while a narrow one takes seconds.
+    prefixes = dict.fromkeys(os.path.commonprefix(list(row.names)) for row in rows)
+    max_epochs = {name: row.max_epochs for row in rows for name in row.names}
+    by_name: dict[str, NamedExperiment] = {}
+    for prefix in prefixes:
+        by_name.update(newest_by_name(prefix, set(max_epochs)))
+    names = list(max_epochs)
+    with ThreadPoolExecutor(20) as ex:
+        progress = dict(
+            zip(
+                names,
+                ex.map(
+                    lambda n: _beaker_progress(by_name.get(n), max_epochs[n]), names
+                ),
+            )
+        )
+    tracked = {
+        name: Tracked(named.status, _queued(named), _preemptions(named))
+        for name, named in by_name.items()
+        if name in max_epochs
+    }
+    return tracked, progress
+
+
+# --- gantry backend --------------------------------------------------------------
+
+# gantry list statuses -> the beaker backend's statuses (anything else counts
+# as Failed / Other).
+GANTRY_DONE = {"succeeded", "success", "completed", "finished", "ok", "done"}
+GANTRY_RUNNING = {"running", "started", "initializing", "executing"}
+GANTRY_QUEUED = {"queued", "pending", "submitted", "scheduled", "created", "waiting"}
+GANTRY_LIST_RE = re.compile(r"^(?P<id>\S+)\s+(?P<status>\S+)\s+(?P<rest>.*)$")
+
+
+@dataclass
+class GantryJob:
+    id: str
+    status: str
+    created: str
+    name: str
+
+
+def _gantry(*args: str) -> str:
+    proc = subprocess.run([GANTRY, *args], capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(f"gantry {' '.join(args)} failed: {proc.stderr.strip()}")
+    return proc.stdout
+
+
+def _gantry_list() -> list[GantryJob]:
+    """`gantry list --all`: `<id>  <status>  <created>  <name>` per line."""
+    jobs = []
+    out = _gantry("list", "--all", "--limit", str(GANTRY_LIST_LIMIT))
+    for line in out.splitlines():
+        match = GANTRY_LIST_RE.match(line.strip())
+        if match is None or line.startswith("no jobs"):
+            continue
+        rest = match["rest"].split()
+        name = rest[-1]
+        created = rest[0] if len(rest) > 1 else ""
+        jobs.append(GantryJob(match["id"], match["status"].lower(), created, name))
+    return jobs
+
+
+def _job_name_of(experiment: str, names: set[str]) -> str | None:
+    """The tracked job name of an experiment agent-alexeyy-<name>-<suffix>."""
+    if not experiment.startswith(AGENT_PREFIX):
+        return None
+    body = experiment.removeprefix(AGENT_PREFIX)
+    if body in names:
+        return body
+    stem, sep, suffix = body.rpartition("-")
+    return stem if sep and stem in names and suffix else None
+
+
+def _gantry_status(status: str) -> tuple[str, bool]:
+    if status in GANTRY_DONE:
+        return OK, False
+    if status in GANTRY_RUNNING:
+        return "running", False
+    if status in GANTRY_QUEUED:
+        return "running", True
+    return status or "unknown", False
+
+
+def _split_runs(log: str) -> list[str]:
+    """One experiment's log split into its runs (preemption retries), each
+    resumed run starting at its "Resuming training from" line.
+    """
+    runs: list[list[str]] = [[]]
+    for line in log.splitlines():
+        if RESUME_MARK in line and runs[-1]:
+            runs.append([])
+        runs[-1].append(line)
+    return ["\n".join(run) for run in runs if run]
+
+
+def _gantry_progress(job: GantryJob | None, max_epochs: int) -> tuple[Progress, int]:
+    """(progress, restarts) of one experiment from its gantry logs."""
+    if job is None:
+        return (0, NO_SECONDS, 0.0), 0
+    status, queued = _gantry_status(job.status)
+    if queued:
+        return (0, NO_SECONDS, 0.0), 0
+    log = _filter_log(_gantry("logs", job.id))
+    runs = _split_runs(log)
+    entries = []
+    for i, run_log in enumerate(runs):
+        last = i == len(runs) - 1
+        if last and status == "running":
+            kind, exited = "running", None
+        elif last and status == OK:
+            kind, exited = "ok", _last_time(run_log)
+        else:
+            kind, exited = "lost", None
+        entries.append((run_log, kind, exited))
+    restarts = sum(RESUME_MARK in run for run in runs)
+    return _progress_from_runs(entries, status == OK, max_epochs), restarts
+
+
+def gantry_backend(rows: list[Row]) -> tuple[dict[str, Tracked], dict[str, Progress]]:
+    max_epochs = {name: row.max_epochs for row in rows for name in row.names}
+    names = set(max_epochs)
+    listed = _gantry_list()
+    by_id = {job.id: job for job in listed}
+    newest: dict[str, GantryJob] = {}
+    for job in listed:
+        name = _job_name_of(job.name, names)
+        if name is not None and (
+            name not in newest or job.created > newest[name].created
+        ):
+            newest[name] = job
+    # The submit script's record names the latest submission of each job.
+    if V3_RECORD.exists():
+        for name, entry in json.loads(V3_RECORD.read_text()).items():
+            if name in names and entry.get("id") in by_id:
+                newest[name] = by_id[entry["id"]]
+    ordered = list(max_epochs)
+    with ThreadPoolExecutor(13) as ex:
+        results = dict(
+            zip(
+                ordered,
+                ex.map(
+                    lambda n: _gantry_progress(newest.get(n), max_epochs[n]), ordered
+                ),
+            )
+        )
+    tracked = {}
+    for name, job in newest.items():
+        status, queued = _gantry_status(job.status)
+        tracked[name] = Tracked(status, queued, results[name][1])
+    return tracked, {name: result[0] for name, result in results.items()}
+
+
+# --- table -----------------------------------------------------------------------
 
 
 def main() -> None:
-    names = list(RUN_ARMS)
-    # One listing per distinct common prefix of a row's job names (the name up
-    # to the seed; it also matches the row's smoke tests, which are dropped
-    # below as their names are not tracked): the
-    # broad "ace2-fm-nc-" listing matches ~9k old experiments and takes
-    # ~5 min, while a narrow one takes a few seconds.
-    prefixes = dict.fromkeys(
-        os.path.commonprefix([n for n in names if arch_of(n) == arch]) for arch in ARCHS
-    )
-    by_name = {}
-    for prefix in prefixes:
-        by_name.update(newest_by_name(prefix))
-    with ThreadPoolExecutor(20) as ex:
-        prog = dict(
-            zip(
-                names,
-                ex.map(lambda n: progress(by_name.get(n), n), names),
-            )
-        )
+    use_beaker = shutil.which("beaker") is not None
+    rows = ROWS if use_beaker else [row for row in ROWS if row.agent_vm]
+    if use_beaker:
+        tracked, prog = beaker_backend(rows)
+    else:
+        tracked, prog = gantry_backend(rows)
     count_rows = []
     timing_rows = []
-    for arch in ARCHS:
-        arch_names = [n for n in names if arch_of(n) == arch]
-        statuses = [
-            by_name[n].status if n in by_name else "missing" for n in arch_names
-        ]
+    for row in rows:
+        statuses = [tracked[n].status if n in tracked else "missing" for n in row.names]
         # Epoch columns cover finished and running jobs only; failed/canceled
         # or deleted jobs would pull them toward 0.
         live_pairs = [
-            (n, s) for n, s in zip(arch_names, statuses) if s in (OK, "running")
+            (n, s) for n, s in zip(row.names, statuses) if s in (OK, "running")
         ]
         live = [n for n, _ in live_pairs]
         # Epoch columns cover unfinished (running or queued) jobs only.
@@ -333,13 +590,13 @@ def main() -> None:
 
         count_rows.append(
             (
-                arch,
+                row.label,
                 sum(s == OK for s in statuses),
-                sum(s == "running" and not _queued(by_name[n]) for n, s in live_pairs),
-                sum(s == "running" and _queued(by_name[n]) for n, s in live_pairs),
+                sum(s == "running" and not tracked[n].queued for n, s in live_pairs),
+                sum(s == "running" and tracked[n].queued for n, s in live_pairs),
                 sum(s not in (OK, "running", "missing") for s in statuses),
                 sum(s == "missing" for s in statuses),
-                sum(_preemptions(by_name[n]) for n in arch_names if n in by_name),
+                sum(tracked[n].preemptions for n in row.names if n in tracked),
                 min(eps) if eps else "-",
                 max(eps) if eps else "-",
                 f"{statistics.median(eps):g}" if eps else "-",
@@ -347,7 +604,7 @@ def main() -> None:
         )
         timing_rows.append(
             (
-                arch,
+                row.label,
                 median_column(0),
                 median_column(1),
                 median_column(2),
@@ -358,6 +615,13 @@ def main() -> None:
     _print_table(COUNT_COLUMNS, count_rows)
     print()
     _print_table(TIMING_COLUMNS, timing_rows)
+    if not use_beaker:
+        hidden = [row.label for row in ROWS if not row.agent_vm]
+        print()
+        print(
+            "Source: gantry shim (no beaker CLI here); it sees only jobs "
+            "submitted from this VM. Not shown: " + ", ".join(hidden) + "."
+        )
 
 
 def _print_table(columns: tuple[str, ...], rows: list[tuple]) -> None:

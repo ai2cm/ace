@@ -50,7 +50,11 @@ ARCH_CHOICES = ("nc-sfno", "nc-swin-v2", "nc-swin-v2.1", "nc-swin-v2.2")
 # above (`nc-sfno-v2-...` starts with `nc-sfno-`), so configs are matched on
 # their longest tag: `--arch nc-sfno` here never selects a v2 config.
 V2_ARCH_CHOICES = ("nc-sfno-v2", "nc-swin-v2.2-v2")
-ALL_ARCH_TAGS = ARCH_CHOICES + V2_ARCH_CHOICES
+# Architecture tag of the 2026-11-18 v3 per-grid-cell normalization runs,
+# submitted by submit_fm_v3_jobs.py; listed so `--arch nc-sfno` never selects
+# them.
+V3_ARCH_CHOICES = ("nc-sfno-v3",)
+ALL_ARCH_TAGS = ARCH_CHOICES + V2_ARCH_CHOICES + V3_ARCH_CHOICES
 # Beaker defaults for add_beaker_args, shared with submit_inference_jobs.py so
 # inference jobs land where training jobs do. Keep in step with the
 # BEAKER_* defaults in run-ace-train.sh / run-ace-inference-job.sh.

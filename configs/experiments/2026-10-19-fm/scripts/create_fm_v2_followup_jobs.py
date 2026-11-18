@@ -240,16 +240,22 @@ def cooldown_factor(t: int, n: int) -> float:
     return 1.0 - math.sqrt(t / n)
 
 
-def lr_scheduler(warmup: str, max_epochs: int, cooldown_epochs: int) -> dict:
+def lr_scheduler(
+    warmup: str,
+    max_epochs: int,
+    cooldown_epochs: int,
+    iterations_per_epoch: int = ITERATIONS_PER_EPOCH,
+) -> dict:
     """SequentialLR pieces (each with its length in iterations): `warmup`
     ("parent": the parent's 2-epoch per-epoch warmup; "fork": a
-    FORK_WARMUP_ITERATIONS linear warmup), constant 1, then the piecewise-linear
-    1-sqrt cooldown to 0 over the last `cooldown_epochs` epochs.
+    FORK_WARMUP_ITERATIONS linear warmup; "none": no warmup), constant 1, then
+    the piecewise-linear 1-sqrt cooldown to 0 over the last `cooldown_epochs`
+    epochs, of `iterations_per_epoch` iterations each.
     """
     pieces: list[tuple[dict, int]] = []
     if warmup == "parent":
         for factor in PARENT_WARMUP_FACTORS:
-            n = ITERATIONS_PER_EPOCH
+            n = iterations_per_epoch
             pieces.append((_piece("ConstantLR", factor=factor, total_iters=n), n))
     elif warmup == "fork":
         n = FORK_WARMUP_ITERATIONS
@@ -264,10 +270,10 @@ def lr_scheduler(warmup: str, max_epochs: int, cooldown_epochs: int) -> dict:
                 n,
             )
         )
-    else:
+    elif warmup != "none":
         raise ValueError(warmup)
-    total = max_epochs * ITERATIONS_PER_EPOCH
-    cooldown = cooldown_epochs * ITERATIONS_PER_EPOCH
+    total = max_epochs * iterations_per_epoch
+    cooldown = cooldown_epochs * iterations_per_epoch
     n_constant = total - cooldown - sum(n for _, n in pieces)
     assert n_constant > 0
     pieces.append(
