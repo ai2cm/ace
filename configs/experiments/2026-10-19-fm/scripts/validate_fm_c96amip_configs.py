@@ -1,26 +1,29 @@
-"""Check the FM C96 AMIP-only run configs (create_fm_c96amip_jobs.py) on CPU,
-without the stats files or the training data.
+"""Check the FM C96 AMIP-only and era5-1979 run configs
+(create_fm_c96amip_jobs.py) on CPU, without the stats files or the training
+data.
 
-1. Every config (the 6 runs and the 2 smoke tests) parses strictly into
+1. Every config (the 12 runs and the 2 smoke tests) parses strictly into
    TrainConfig, as `python -m fme.ace.validate_config` does, also with the
    `experiment_dir=$AGENT_OUTPUT_DIR` override the jobs apply. Every training,
-   validation and inline inference dataset is labelled c96, the only
-   label_sampling weight is c96: 1.0, and best_ckpt / best_inference_ckpt
-   are selected on C96 alone (val_c96, aimip_checkpoint_c96 the only
-   positive weights).
+   validation and inline inference dataset carries the arm's label (c96 /
+   era5), the only label_sampling weight is that label's 1.0, the training
+   data is the arm's store over 1979-1993 and 1995-2008, and best_ckpt /
+   best_inference_ckpt are selected on the arm's own data alone (C96 arm:
+   val_c96 and aimip_checkpoint_c96; era5-1979: val and
+   aimip_checkpoint_era5, the only positive weights).
 2. The LR schedule of the SFNO and Swin runs and of the smoke tests, stepped
    through torch's SequentialLR: Swin at 0.01 and 0.505 of 1e-4 over epochs
    1 and 2; then 1e-4 through the last single-step epoch, decreasing over the
    cooldown epochs and 0 at the end.
-3. For the s0 config of each architecture and each smoke test: with the
+3. For the s0 config of each architecture and arm and each smoke test: with the
    stats paths pointed at tiny synthetic scalar files, the model shrunk
    (SFNO embed_dim 128 and 2 layers, Swin embed_dim 64) and the optimizer
    switched to Adam (FusedAdam needs CUDA), build a TrainStepper on the
-   45 x 90 grid and train one batch of 2 samples labelled c96 in the last
+   45 x 90 grid and train one batch of 2 samples with the arm's label in the last
    1-step epoch and one in the first 3-step epoch. It checks that the network
    normalizer is scalar with no grouped normalizer, that the loss normalizer
    uses the residual stats for the prognostic names and the full-field stats
-   otherwise, and that the label encoding is [c96].
+   otherwise, and that the label encoding is the arm's one label.
 
 Usage:
     FME_FORCE_CPU=1 python validate_fm_c96amip_configs.py
@@ -42,16 +45,20 @@ import yaml
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[4]))
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from create_fm_c96amip_jobs import (  # noqa: E402
+    ARM,
+    C96_AMIP_DATA_PATH,
     C96_SELECTION,
     COOLDOWN_EPOCHS,
+    ERA5_FILE,
+    ERA5_SELECTION,
     ITERATIONS_PER_EPOCH,
-    LABEL,
     MAX_EPOCHS,
     SFNO,
     SMOKE_COOLDOWN_EPOCHS,
     SMOKE_MAX_EPOCHS,
     SMOKE_SAMPLES_PER_EPOCH,
     SWIN,
+    TRAIN_SPLITS,
     Run,
     iterations_per_epoch,
     runs,
@@ -96,19 +103,31 @@ def parse(data: dict) -> TrainConfig:
 # --- 1. labels and selection -------------------------------------------------------
 
 
-def check_labels_and_selection(cfg: dict) -> None:
+def check_labels_and_selection(run: Run, cfg: dict) -> None:
+    label = run.label
     loader = cfg["train_loader"]
-    assert loader["label_sampling"]["weights"] == {LABEL: 1.0}
+    assert loader["label_sampling"]["weights"] == {label: 1.0}
+    store = (
+        (C96_AMIP_DATA_PATH, "ic_0001.zarr")
+        if run.arm == ARM
+        else ("/climate-default", ERA5_FILE)
+    )
+    train = [
+        (d["data_path"], d["file_pattern"], d["subset"]["start_time"])
+        for d in loader["dataset"]["concat"]
+    ]
+    assert train == [(*store, a) for a, _ in TRAIN_SPLITS], train
     datasets = list(loader["dataset"]["concat"])
     for entry in cfg["validation"]:
         datasets += entry["loader"]["dataset"]["concat"]
     datasets += [entry["loader"]["dataset"] for entry in cfg["inference"]]
     labels = {label for d in datasets for label in d["labels"]}
-    assert labels == {LABEL}, labels
+    assert labels == {label}, labels
     val_weights = {e["name"]: e["weight"] for e in cfg["validation"]}
-    assert val_weights == {"val": 0.0, "val_c96": 1.0}, val_weights
+    c96_arm = run.arm == ARM
+    assert val_weights == {"val": float(not c96_arm), "val_c96": float(c96_arm)}
     positive = [e["name"] for e in cfg["inference"] if e["weight"] > 0]
-    assert positive == [C96_SELECTION], positive
+    assert positive == [C96_SELECTION if c96_arm else ERA5_SELECTION], positive
     assert "grouped" not in cfg["stepper"]["step"]["config"]["normalization"]
 
 
@@ -193,7 +212,7 @@ def _replace_root(node, old: str, new: str):
     return node
 
 
-def dataset_info() -> DatasetInfo:
+def dataset_info(label: str) -> DatasetInfo:
     return DatasetInfo(
         horizontal_coordinates=LatLonCoordinates(
             lat=torch.tensor(LAT, dtype=torch.float32),
@@ -204,11 +223,11 @@ def dataset_info() -> DatasetInfo:
             bk=torch.linspace(0, 1, N_LEVELS + 1),
         ),
         timestep=datetime.timedelta(days=1),
-        all_labels={LABEL},
+        all_labels={label},
     )
 
 
-def batch(names: list[str], epoch: int) -> BatchData:
+def batch(names: list[str], epoch: int, label: str) -> BatchData:
     device = get_device()
     shape = (N_SAMPLES, N_STEPS + 1, N_LAT, N_LON)
     generator = torch.Generator().manual_seed(0)
@@ -222,7 +241,7 @@ def batch(names: list[str], epoch: int) -> BatchData:
         data[name] = value.to(device)
     index = xr.date_range("2000", freq="1D", periods=N_STEPS + 1, use_cftime=True)
     time = xr.DataArray(np.stack(N_SAMPLES * [index]), dims=["sample", "time"])
-    labels = BatchLabels(tensor=torch.ones(N_SAMPLES, 1).to(device), names=[LABEL])
+    labels = BatchLabels(tensor=torch.ones(N_SAMPLES, 1).to(device), names=[label])
     return BatchData.new_on_device(data=data, time=time, epoch=epoch, labels=labels)
 
 
@@ -242,7 +261,7 @@ def check_build(run: Run, tmp: pathlib.Path) -> None:
     config = parse(cfg)
     assert isinstance(config.stepper, StepperConfig)
     train_stepper = config.stepper_training.get_train_stepper(
-        config.stepper, dataset_info()
+        config.stepper, dataset_info(run.label)
     )
     stepper = train_stepper._stepper
     step = stepper._step_obj
@@ -262,7 +281,7 @@ def check_build(run: Run, tmp: pathlib.Path) -> None:
             float(loss_normalizer.stds[name]), float(expected[name])
         ), name
     labels = step.get_state()["module"]["label_encoding"]["labels"]
-    assert labels == [LABEL], labels
+    assert labels == [run.label], labels
 
     optimization = config.optimization.build(
         train_stepper.modules, max_epochs=config.max_epochs
@@ -274,7 +293,9 @@ def check_build(run: Run, tmp: pathlib.Path) -> None:
     # Epochs are 1-based (Trainer passes epochs_trained + 1).
     for epoch, expected_steps in ((multi_step_from - 1, 1), (multi_step_from, 3)):
         train_stepper.set_epoch(epoch)
-        output = train_stepper.train_on_batch(batch(names, epoch), optimization)
+        output = train_stepper.train_on_batch(
+            batch(names, epoch, run.label), optimization
+        )
         loss = float(output.metrics["loss"])
         assert np.isfinite(loss), loss
         # gen_data is [sample, ensemble member, time, lat, lon], with the
@@ -297,10 +318,10 @@ def main() -> None:
         parse(load(run))
         overridden = parse(dict(update_dict_with_dotlist(load(run), override)))
         assert overridden.experiment_dir == override[0].split("=", 1)[1]
-        check_labels_and_selection(load(run))
+        check_labels_and_selection(run, load(run))
     print(
-        f"  {len(all_runs)} configs parse; every dataset labelled {LABEL}; "
-        "selection on val_c96 and aimip_checkpoint_c96 only"
+        f"  {len(all_runs)} configs parse; every dataset carries the arm's label; "
+        "training data and selection on the arm's own data"
     )
 
     print("2. LR schedule:")

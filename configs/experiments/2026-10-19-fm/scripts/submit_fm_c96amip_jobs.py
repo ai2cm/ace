@@ -1,5 +1,6 @@
-"""Submit the 2026-11-18 FM C96 AMIP-only runs (create_fm_c96amip_jobs.py
-configs) through the agent VM's gantry shim.
+"""Submit the 2026-11-18 FM C96 AMIP-only runs and their ERA5-only
+era5-1979 baseline (create_fm_c96amip_jobs.py configs) through the agent VM's
+gantry shim.
 
 The same mechanics as submit_fm_v3_jobs.py: the shim (/usr/local/bin/gantry)
 sends each request to the Beaker proxy, which runs the pushed commit of BRANCH
@@ -32,12 +33,15 @@ and the experiment_dir / checkpoint paths under $AGENT_OUTPUT_DIR), which
 fm_table.py reads; a job already recorded is skipped unless --resubmit.
 
 Usage:
-    python submit_fm_c96amip_jobs.py [--dry-run] [--only NAME ...] [--smoke]
-                                     [--resubmit] [--cluster CLUSTER ...]
+    python submit_fm_c96amip_jobs.py --arm ARM [ARM ...] [--dry-run]
+                                     [--only NAME ...] [--smoke] [--resubmit]
+                                     [--cluster CLUSTER ...]
 
---only takes job names (ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff, ...) or
-their unique substrings (e.g. sfno-v2-fm-c96amip-s1). --smoke selects from the
-two smoke tests instead of the 6 runs. --dry-run prints each gantry command and
+--arm (required unless --smoke) picks the arms, fm-c96amip and/or
+fm-era5-1979 (6 runs each). --only takes job names
+(ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff, ...) or their unique substrings
+(e.g. sfno-v2-fm-c96amip-s1) within them. --smoke selects from the two (C96
+AMIP) smoke tests instead. --dry-run prints each gantry command and
 the request the shim would send (gantry run --dry-run), and submits nothing.
 """
 
@@ -51,6 +55,7 @@ from datetime import UTC, datetime
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from _submit_common import check_configs_at_head  # noqa: E402
 from create_fm_c96amip_jobs import (  # noqa: E402
+    ARMS,
     N_GPUS,
     SEEDS,
     Run,
@@ -156,6 +161,7 @@ def main() -> None:
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--only", nargs="+", metavar="NAME")
+    parser.add_argument("--arm", nargs="+", choices=ARMS)
     parser.add_argument(
         "--smoke", action="store_true", help="Submit the smoke tests instead."
     )
@@ -172,8 +178,11 @@ def main() -> None:
     )
     args = parser.parse_args()
     clusters = tuple(args.cluster)
+    if not args.smoke and not args.arm:
+        parser.error("--arm is required (unless --smoke)")
 
-    selected = select(smoke_runs() if args.smoke else runs(), args.only)
+    candidates = smoke_runs() if args.smoke else runs(tuple(args.arm))
+    selected = select(candidates, args.only)
     record = read_record()
     pending = []
     for run in selected:

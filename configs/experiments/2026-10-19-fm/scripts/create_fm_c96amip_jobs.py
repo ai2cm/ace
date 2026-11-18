@@ -1,5 +1,5 @@
-"""Generate the 2026-11-18 FM C96 AMIP-only runs (wandb group
-ace2-fm-c96amip-2026-11-18).
+"""Generate the 2026-11-18 FM C96 AMIP-only runs and their ERA5-only
+`era5-1979` baseline (wandb group ace2-fm-c96amip-2026-11-18).
 
 6 runs ace2-fm-{nc-sfno-v2,nc-swin-v2.2-v2}-fm-c96amip-s{0,1,2}-maskoff:
 2 architectures x 3 seeds, trained on C96 SHiELD AMIP data only. Each is
@@ -32,10 +32,10 @@ Changes from the parent:
    only `c96`.
 
 2. Normalization: scalar stats pooled over exactly that training data
-   (STATS_DIR, written by get_pooled_stats.py with
+   (STATS_DIRS[fm-c96amip], written by get_pooled_stats.py with
    scripts/data_process/configs/fm-c96amip-stats.yaml and checked by
-   verify_c96amip_stats.py in the same job): network = STATS_DIR centering.nc
-   + scaling-full-field.nc, residual = STATS_DIR centering.nc +
+   verify_c96amip_stats.py in the same job): network = its centering.nc
+   + scaling-full-field.nc, residual = its centering.nc +
    scaling-residual.nc (so the loss normalizer is the network block with the
    residual block for the prognostic names, as in v2). No grouped block (the
    parent has one, with groups c96/era5/cm4/xshield).
@@ -80,6 +80,29 @@ Changes from the parent:
 7. Seeds 0, 1, 2 (submit_fm_c96amip_jobs.py: s0 at Beaker priority high,
    s1/s2 normal).
 
+ERA5-only baseline, arm `fm-era5-1979` (same wandb group): 6 runs
+ace2-fm-{nc-sfno-v2,nc-swin-v2.2-v2}-fm-era5-1979-s{0,1,2}-maskoff, matched to
+the C96 AMIP-only runs in data amount (the same year splits, so the same
+5479 + 5114 daily steps) and identical to them (same parent, model, recipe,
+2758 samples per epoch, conditional with a single label, scalar
+normalization without grouping) except:
+- Training data: the parent's two ERA5 entries (data_path /climate-default,
+  file_pattern 2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr, no renames
+  or derived variables) with the C96 splits: 1979-01-01..1993-12-31 (parent
+  1940-01-03..1993-12-31) and 1995-01-01..2008-12-31. Label `era5`,
+  label_sampling weights {era5: 1.0}.
+- Normalization: scalar stats pooled over exactly that ERA5 data
+  (STATS_DIRS[fm-era5-1979],
+  scripts/data_process/configs/fm-era5-1979-stats.yaml, checked in the same
+  job by verify_c96amip_stats.py --group era5).
+- Selection as v2 fm-era5: `val` (ERA5) weight 1 and `val_c96` weight 0;
+  aimip_checkpoint_era5 weight 1 and aimip_checkpoint_c96 weight 0.
+- Every validation and inline inference dataset (C96 included) labelled
+  `era5`, the model's only label (as in item 6, mirrored).
+No GPU smoke test for this arm (it differs from the smoke-tested C96 arm
+only in data, stats and weights); validate_fm_c96amip_configs.py builds and
+trains its s0 configs on CPU.
+
 Output directory: the configs keep the parent's `experiment_dir: /results`,
 but submit_fm_c96amip_jobs.py overrides it at job start with
 `--override experiment_dir=$AGENT_OUTPUT_DIR`, the agent proxy's
@@ -112,7 +135,8 @@ inline inference and checkpointing:
 - wandb group ace2-fm-c96amip-2026-11-18-smoke.
 
 Usage:
-    python create_fm_c96amip_jobs.py [--stats-dir DIR]
+    python create_fm_c96amip_jobs.py [--stats-dir-c96amip DIR]
+                                     [--stats-dir-era5-1979 DIR]
 """
 
 import argparse
@@ -140,6 +164,8 @@ from create_fm_v2_jobs import (
 )
 from create_fm_v3_jobs import ERA5_STORE, N_GPUS, iterations_per_epoch
 
+ERA5_FILE = ERA5_STORE.split("/")[-1]
+
 EXP_DIR = RUN_CONFIGS_DIR.parent
 JOB_PREFIX = "ace2-fm-"
 WANDB_GROUP = "ace2-fm-c96amip-2026-11-18"
@@ -147,10 +173,18 @@ SMOKE_WANDB_GROUP = f"{WANDB_GROUP}-smoke"
 
 # Scalar stats pooled over the training data (fm-c96amip-stats.yaml), written
 # by the agent job agent-alexeyy-fm-c96amip-stats-rru2.
-STATS_DIR = (
-    "/climate-default/agents/alexeyy/agent-alexeyy-fm-c96amip-stats-rru2/"
-    "2026-11-18-fm-c96amip"
-)
+ARM = "fm-c96amip"
+ERA5_ARM = "fm-era5-1979"
+ARMS = (ARM, ERA5_ARM)
+# Scalar stats pooled over each arm's training data
+# (scripts/data_process/configs/fm-c96amip-stats.yaml, fm-era5-1979-stats.yaml),
+# written by the agent jobs agent-alexeyy-fm-{c96amip,era5-1979}-stats-*.
+STATS_DIRS = {
+    ARM: "/climate-default/agents/alexeyy/agent-alexeyy-fm-c96amip-stats-rru2/"
+    "2026-11-18-fm-c96amip",
+    ERA5_ARM: "/climate-default/agents/alexeyy/agent-alexeyy-fm-era5-1979-stats-vziz/"
+    "2026-11-18-fm-era5-1979",
+}
 SFNO = "nc-sfno-v2"
 SWIN = "nc-swin-v2.2-v2"
 ARCHS = (SFNO, SWIN)
@@ -158,8 +192,9 @@ EMBED_DIMS = {SFNO: 1024, SWIN: 256}
 BUILDERS = {SFNO: "NoiseConditionedSFNO", SWIN: "NoiseConditionedSwinTransformer"}
 WARMUPS = {SFNO: "none", SWIN: "parent"}
 PARENT_ARM = "fm-balanced"
-ARM = "fm-c96amip"
-LABEL = "c96"
+# The arm's only label: of its training data, and given to every validation
+# and inline inference dataset.
+LABELS = {ARM: "c96", ERA5_ARM: "era5"}
 PARENT_LABELS = ("c96", "era5", "cm4", "xshield")
 
 C96_AMIP_DATA_PATH = (
@@ -168,6 +203,8 @@ C96_AMIP_DATA_PATH = (
 )
 C96_AMIP_FILE = "ic_0001.zarr"
 TRAIN_SPLITS = (("1979-01-01", "1993-12-31"), ("1995-01-01", "2008-12-31"))
+# The parent's ERA5 training splits; era5-1979 starts the first in 1979.
+PARENT_ERA5_SPLITS = (("1940-01-03", "1993-12-31"), ("1995-01-01", "2008-12-31"))
 VALIDATION_YEARS = ("1994", "2014")
 
 MAX_EPOCHS = 120
@@ -194,11 +231,16 @@ class Run:
     arch: str
     seed: int
     smoke: bool = False
+    arm: str = ARM
 
     @property
     def stem(self) -> str:
         suffix = "-smoke" if self.smoke else ""
-        return f"{self.arch}-{ARM}-s{self.seed}-maskoff{suffix}"
+        return f"{self.arch}-{self.arm}-s{self.seed}-maskoff{suffix}"
+
+    @property
+    def label(self) -> str:
+        return LABELS[self.arm]
 
     @property
     def config_name(self) -> str:
@@ -224,11 +266,14 @@ class Run:
         )
 
 
-def runs() -> list[Run]:
-    return [Run(arch, seed) for arch in ARCHS for seed in SEEDS]
+def runs(arms: tuple[str, ...] = ARMS) -> list[Run]:
+    return [
+        Run(arch, seed, arm=arm) for arm in arms for arch in ARCHS for seed in SEEDS
+    ]
 
 
 def smoke_runs() -> list[Run]:
+    """GPU smoke tests, C96 AMIP arm only (era5-1979 differs only in data)."""
     return [Run(arch, SMOKE_SEED, smoke=True) for arch in ARCHS]
 
 
@@ -258,28 +303,36 @@ def _is_c96_amip_ic1(dataset: dict) -> bool:
     )
 
 
-def make_train_concat(parent_concat: list[dict]) -> list[dict]:
-    concat = [copy.deepcopy(d) for d in parent_concat if _is_c96_amip_ic1(d)]
-    assert [
-        (d["subset"]["start_time"], d["subset"]["stop_time"]) for d in concat
-    ] == list(TRAIN_SPLITS)
+def _splits(concat: list[dict]) -> list[tuple[str, str]]:
+    return [(d["subset"]["start_time"], d["subset"]["stop_time"]) for d in concat]
+
+
+def make_train_concat(parent_concat: list[dict], arm: str) -> list[dict]:
+    if arm == ARM:
+        concat = [copy.deepcopy(d) for d in parent_concat if _is_c96_amip_ic1(d)]
+        source = {"data_path": C96_AMIP_DATA_PATH, "file_pattern": C96_AMIP_FILE}
+    else:
+        concat = [copy.deepcopy(d) for d in parent_concat if d["labels"] == ["era5"]]
+        assert _splits(concat) == list(PARENT_ERA5_SPLITS)
+        concat[0]["subset"]["start_time"] = TRAIN_SPLITS[0][0]
+        source = {"data_path": "/climate-default", "file_pattern": ERA5_FILE}
+    assert _splits(concat) == list(TRAIN_SPLITS)
     for dataset in concat:
         assert dataset == {
-            "data_path": C96_AMIP_DATA_PATH,
-            "file_pattern": C96_AMIP_FILE,
+            **source,
             "engine": "zarr",
             "subset": dataset["subset"],
-            "labels": [LABEL],
+            "labels": [LABELS[arm]],
         }, dataset
     return concat
 
 
-def _relabel(dataset: dict) -> None:
-    assert dataset["labels"] in (["era5"], [LABEL]), dataset["labels"]
-    dataset["labels"] = [LABEL]
+def _relabel(dataset: dict, label: str) -> None:
+    assert dataset["labels"] in (["era5"], ["c96"]), dataset["labels"]
+    dataset["labels"] = [label]
 
 
-def make_validation(parent_validation: list[dict]) -> list[dict]:
+def make_validation(parent_validation: list[dict], arm: str) -> list[dict]:
     validation = copy.deepcopy(parent_validation)
     assert [(e["name"], e["weight"]) for e in validation] == [
         ("val", 1.0),
@@ -291,40 +344,43 @@ def make_validation(parent_validation: list[dict]) -> list[dict]:
         concat = entry["loader"]["dataset"]["concat"]
         assert [d["subset"]["start_time"][:4] for d in concat] == list(VALIDATION_YEARS)
     for dataset in c96["loader"]["dataset"]["concat"]:
-        assert _is_c96_amip_ic1(dataset) and dataset["labels"] == [LABEL]
+        assert _is_c96_amip_ic1(dataset) and dataset["labels"] == ["c96"]
+        _relabel(dataset, LABELS[arm])
     for dataset in era5["loader"]["dataset"]["concat"]:
-        assert dataset["file_pattern"] == ERA5_STORE.split("/")[-1]
-        _relabel(dataset)
-    era5["weight"] = 0.0
-    c96["weight"] = 1.0
+        assert dataset["file_pattern"] == ERA5_FILE
+        _relabel(dataset, LABELS[arm])
+    # Selection on the arm's own data; the other is logged only.
+    era5["weight"] = 1.0 if arm == ERA5_ARM else 0.0
+    c96["weight"] = 1.0 if arm == ARM else 0.0
     return validation
 
 
-def make_inference(parent_inference: list[dict]) -> list[dict]:
+def make_inference(parent_inference: list[dict], arm: str) -> list[dict]:
     inference = copy.deepcopy(parent_inference)
     by_name = {entry["name"]: entry for entry in inference}
     assert list(by_name)[0] == ERA5_SELECTION
     for name, entry in by_name.items():
         dataset = entry["loader"]["dataset"]
         assert dataset["data_path"] == "/climate-default", name
-        assert dataset["file_pattern"] == ERA5_STORE.split("/")[-1], name
+        assert dataset["file_pattern"] == ERA5_FILE, name
         assert entry["weight"] == (1.0 if name == ERA5_SELECTION else 0.0), name
         expected_epochs = (
             EVERY_EPOCH if name == ERA5_SELECTION else HEAVY_INFERENCE_EPOCHS
         )
         assert entry["epochs"] == expected_epochs, name
-        _relabel(dataset)
+        _relabel(dataset, LABELS[arm])
     era5_selection = by_name[ERA5_SELECTION]
-    era5_selection["weight"] = 0.0
     c96 = copy.deepcopy(era5_selection)
     c96["name"] = C96_SELECTION
-    c96["weight"] = 1.0
     c96["loader"]["dataset"] = {
         "data_path": C96_AMIP_DATA_PATH,
         "file_pattern": C96_AMIP_FILE,
         "engine": "zarr",
-        "labels": [LABEL],
+        "labels": [LABELS[arm]],
     }
+    # Selection on the arm's own data; the other is logged only.
+    era5_selection["weight"] = 1.0 if arm == ERA5_ARM else 0.0
+    c96["weight"] = 1.0 if arm == ARM else 0.0
     return [c96] + inference
 
 
@@ -332,6 +388,7 @@ def make_inference(parent_inference: list[dict]) -> list[dict]:
 
 
 def make_config(run: Run, stats_dir: str) -> dict:
+    assert not run.smoke or run.arm == ARM
     parent = yaml.safe_load(run.parent_config.read_text())
     cfg = copy.deepcopy(parent)
     check_iterations_per_epoch(cfg)
@@ -345,17 +402,19 @@ def make_config(run: Run, stats_dir: str) -> dict:
 
     loader = cfg["train_loader"]
     assert loader["batch_size"] // N_GPUS == 2
-    loader["dataset"]["concat"] = make_train_concat(loader["dataset"]["concat"])
+    loader["dataset"]["concat"] = make_train_concat(
+        loader["dataset"]["concat"], run.arm
+    )
     assert loader["label_sampling"] == {
         "weights": {label: 0.25 for label in PARENT_LABELS},
         "samples_per_epoch": SAMPLES_PER_EPOCH,
     }
     loader["label_sampling"] = {
-        "weights": {LABEL: 1.0},
+        "weights": {run.label: 1.0},
         "samples_per_epoch": SAMPLES_PER_EPOCH,
     }
-    cfg["validation"] = make_validation(parent["validation"])
-    cfg["inference"] = make_inference(parent["inference"])
+    cfg["validation"] = make_validation(parent["validation"], run.arm)
+    cfg["inference"] = make_inference(parent["inference"], run.arm)
 
     training = cfg["stepper_training"]
     assert "parameter_init" not in training
@@ -446,11 +505,16 @@ def describe(run: Run) -> str:
             "epochs (1-step, then 3-step + cooldown)"
         )
     warmup = ", 2-epoch warmup" if WARMUPS[run.arch] == "parent" else ""
+    data, short = (
+        ("C96 AMIP ic_0001 only", "C96 AMIP")
+        if run.arm == ARM
+        else ("ERA5 1979-2008 only", "ERA5 1979")
+    )
     return (
-        f"ACE FM {run.arch} on C96 AMIP ic_0001 only: {MAX_EPOCHS} epochs from "
+        f"ACE FM {run.arch} on {data}: {MAX_EPOCHS} epochs from "
         f"scratch, LR {PARENT_LR:g} constant{warmup}, 3-step + 1-sqrt cooldown "
-        f"to 0 over epochs {MULTI_STEP_FROM}-{MAX_EPOCHS}, C96 AMIP scalar stats, "
-        "selection on C96, masking off"
+        f"to 0 over epochs {MULTI_STEP_FROM}-{MAX_EPOCHS}, {short} scalar stats, "
+        f"selection on {short.split()[0]}, masking off"
     )
 
 
@@ -483,17 +547,20 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument(
-        "--stats-dir",
-        default=STATS_DIR,
-        help=f"Scalar stats root (default: {STATS_DIR}).",
-    )
+    for arm in ARMS:
+        parser.add_argument(
+            f"--stats-dir-{arm.removeprefix('fm-')}",
+            dest=arm,
+            default=STATS_DIRS[arm],
+            help=f"{arm} scalar stats root (default: {STATS_DIRS[arm]}).",
+        )
     args = parser.parse_args()
-    stats_dir = args.stats_dir.rstrip("/")
-    if not stats_dir.startswith("/climate-default/"):
-        parser.error(f"{stats_dir} is not a /climate-default/ path")
+    stats_dirs = {arm: getattr(args, arm).rstrip("/") for arm in ARMS}
+    for stats_dir in stats_dirs.values():
+        if not stats_dir.startswith("/climate-default/"):
+            parser.error(f"{stats_dir} is not a /climate-default/ path")
     for run in runs() + smoke_runs():
-        write_config(run, stats_dir)
+        write_config(run, stats_dirs[run.arm])
 
 
 if __name__ == "__main__":
