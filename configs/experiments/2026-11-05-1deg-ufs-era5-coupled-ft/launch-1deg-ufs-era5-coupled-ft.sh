@@ -10,11 +10,13 @@
 #   EXISTING_RESULTS_DS=<results dataset> ...  continues a previous submission (the -resume config)
 set -euo pipefail
 OCEAN="${OCEAN:-noohc}"             # noohc = corrector-free UFS ocean (paper-2 line); ohc = scaled-temperature OHC corrector kept (2026-11-09 cooling test)
-ARM="${ARM:?ace2s6h or ace2s512}"
+ARM="${ARM:?ace2s6h, ace2s512 or ace2p5cm4}"
 STAGE="${STAGE:?fto, fto-then-alt, fto-mse, fto-mse-then-alt[-mseocean|-mse4], jfto or jfto-then-alt}"
 case "$ARM" in
   ace2s6h)  ATMOS_DS_DEFAULT=01M49ERVM1DVWV12G5DRDXM0PC; ATMOS_CKPT_DEFAULT=training_checkpoints/ema_ckpt_0002.tar ;;        # 1deg-6h-ace2s-ft12-detached-rs0 (wandb cerls68n), the ACE2S paper's sixhourly checkpoint
   ace2s512) ATMOS_DS_DEFAULT=01KSVC6YS7C18SGYV4VPZYZ232; ATMOS_CKPT_DEFAULT=training_checkpoints/best_inference_ckpt.tar ;;  # ace2s-era5-multi-step-fine-tuning-no-var-weighting-rs0 (wandb u9ek57d9), the summer-2026 coupled runs' atmosphere
+  ace2p5cm4) ATMOS_DS_DEFAULT=01M7N75EC6EW8V3P6QAP0YB9GS; ATMOS_CKPT_DEFAULT=training_checkpoints/best_inference_ckpt.tar   # ACE2.5-CM4-ERA5-6HR, epoch 16 of wandb ace-samudra-coupled-cm4/9l60thd4
+             ATMOS_STATS_DS="${ATMOS_STATS_DS:-01KXNT0RA6VX2YTZ8WJ936Q5RS:coupled_atmosphere}" ;;                                  # CM4 stats: this model's own normalization
   *) echo "unknown ARM $ARM"; exit 1 ;;
 esac
 ATMOS_DS="${ATMOS_DS:-$ATMOS_DS_DEFAULT}"

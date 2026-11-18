@@ -73,7 +73,18 @@ INLINE_ICS = [  # UFS stamps, 10-yr windows that stay inside the record and neve
 assert len(INLINE_ICS) % N_GPUS == 0
 
 
-def pair(start=None, stop=None):
+# ACE2.5-CM4-ERA5-6HR (CM4-pretrained ACE2.5 fine-tuned on ERA5, 2026-11-18): needs carbon_dioxide, lake_fraction and the
+# CM4-sign wind stresses from the extra store, and PRMSL in hPa (the ERA5 store holds Pa).
+EXTRA = {
+    "data_path": "/climate-default",
+    "file_pattern": "2026-11-17-era5-1deg-ace2p5-extra-1940-2025.zarr",
+    "engine": "zarr",
+}
+ERA5_HPA = ERA5 | {"overwrite": {"multiply_scalar": {"PRMSL": 0.01}}}
+CM4_LINE_ARMS = ("ace2p5cm4",)
+
+
+def pair(start=None, stop=None, arm=None):
     # fme's MergeDatasetConfig takes a variable from the FIRST source that holds it: the UFS-derived fractions win.
     # Merged members must share one time axis: training/validation subset both members identically; inference may not
     # subset (the loader clips every member to start at the ocean's first time and run to the member's end, which is why
@@ -81,7 +92,17 @@ def pair(start=None, stop=None):
     sub = {"subset": {"start_time": start, "stop_time": stop}} if start else {}
     return {
         "ocean": UFS | copy.deepcopy(sub),
-        "atmosphere": {"merge": [FRAC | copy.deepcopy(sub), ERA5 | copy.deepcopy(sub)]},
+        "atmosphere": {
+            "merge": [FRAC | copy.deepcopy(sub)]
+            + (
+                [
+                    copy.deepcopy(ERA5_HPA) | copy.deepcopy(sub),
+                    EXTRA | copy.deepcopy(sub),
+                ]
+                if arm in CM4_LINE_ARMS
+                else [ERA5 | copy.deepcopy(sub)]
+            )
+        },
     }
 
 
@@ -128,11 +149,15 @@ def load_ocean(name):
 ATMOS_FILES = {
     "ace2s6h": "ace2s6h-paper-stepper.yaml",
     "ace2s512": "ace2s512-era5-6h-stepper.yaml",
+    "ace2p5cm4": "../ssp/ace2p5-era5-multistep-ft.yaml",
 }
 ATMOS = {
     "ace2s6h": "Jeremy McGibbon's 6-hourly ACE2S paper arm (12-step fine-tune, wandb cerls68n, ema_ckpt_0002)",
     "ace2s512": "the summer-2026 SamudrACE-UFS ERA5 ACE2S (embed 512, no bottleneck; wandb u9ek57d9, best_inference_ckpt)",
+    "ace2p5cm4": "ACE2.5-CM4-ERA5-6HR, the CM4-pretrained ACE2.5 fine-tuned on ERA5 (wandb ace-samudra-coupled-cm4/9l60thd4, epoch 16; CM4 normalization, CO2 input, CM4-named and CM4-sign stress so no rename or scale)",
 }
+# the CM4-line arm runs only the current candidate's recipe (MSE FTO, then the ensemble-loss alternating stage)
+ARM_STAGES = {"ace2p5cm4": ("fto-mse", "fto-mse-then-alt")}
 
 
 def base(arm, ocean_name):
@@ -158,7 +183,7 @@ def base(arm, ocean_name):
             "loader": {
                 "num_data_workers": 2,
                 "start_indices": {"times": list(INLINE_ICS)},
-                "dataset": pair(),
+                "dataset": pair(arm=arm),
             },
             "aggregator": {"log_zonal_mean_images": False, "log_histograms": False},
         }
@@ -167,8 +192,8 @@ def base(arm, ocean_name):
     cfg["logging"]["metrics_log_dir"] = "metrics"
     cfg["train_loader"]["dataset"] = {
         "concat": [
-            pair(START, "2001-12-31T18:00:00"),
-            pair("2012-01-01T18:00:00", "2021-12-31T18:00:00"),
+            pair(START, "2001-12-31T18:00:00", arm=arm),
+            pair("2012-01-01T18:00:00", "2021-12-31T18:00:00", arm=arm),
         ]
     }
     cfg["validation"] = [
@@ -180,7 +205,7 @@ def base(arm, ocean_name):
                 "batch_size": N_GPUS,  # one validation sample per GPU (the 1deg pair OOMed at 8 per 4 GPUs, 2026-10-25)
                 "num_data_workers": 2,
                 "prefetch_factor": 2,
-                "dataset": pair("2022-01-03T18:00:00", END),
+                "dataset": pair("2022-01-03T18:00:00", END, arm=arm),
             },
         }
     ]
@@ -213,6 +238,12 @@ def base(arm, ocean_name):
         "ocean": {"timedelta": "5D", "stepper": copy.deepcopy(ocean)},
         "atmosphere": {"timedelta": "6h", "stepper": atmos},
     }
+    if arm in CM4_LINE_ARMS:
+        del (
+            cfg["stepper"]["atmosphere_output_rename"],
+            cfg["stepper"]["atmosphere_output_scale"],
+        )
+        assert "eastward_surface_wind_stress" in atmos["step"]["config"]["out_names"]
     return cfg
 
 
@@ -358,6 +389,8 @@ for (oc, odesc), (arm, desc) in itertools.product(OCEAN_DESC.items(), ATMOS.item
         ),
     }
     for stage, (c, header) in stages.items():
+        if stage not in ARM_STAGES.get(arm, stages):
+            continue
         hdr = "".join(f"# {line}\n" for line in header)
         out = HERE / "coupled" / f"ufs1deg-{oc}-{arm}-{stage}.yaml"
         out.write_text(hdr + yaml.safe_dump(c, sort_keys=False, width=110))
