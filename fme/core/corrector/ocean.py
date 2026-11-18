@@ -231,10 +231,15 @@ class SurfaceEnergyFluxCorrectionConfig:
       - "prescribed": corrected_hfds = net_flux * ocean_fraction + gen_hfds *
         (1 - ocean_fraction). Open-ocean hfds is prescribed from forcings; the
         network prediction is retained under sea ice and on land.
-      - "prescribed_open_ocean": corrected_hfds = net_flux where ocean_fraction
-        == 1, and gen_hfds elsewhere. hfds is prescribed from forcings only on
-        cells that are entirely ice-free ocean, and the network prediction
-        passes through unweighted everywhere else.
+      - "prescribed_open_ocean": corrected_hfds = net_flux + runoff_calving_heat
+        where ocean_fraction == 1, and gen_hfds elsewhere. hfds is prescribed
+        from forcings only on cells that are entirely ice-free ocean, and the
+        network prediction passes through unweighted everywhere else.
+        runoff_calving_heat = hfrunoffds - calving_residue, taken from the
+        generated data; an absent term counts as 0. Each term may be generated
+        per ocean area (``X``) or per total cell area (``X_total_area``); the
+        form matching the corrected hfds basis is used when both are present,
+        otherwise the other form is converted with sea_surface_fraction.
 
     Parameters:
         method: Method to use for the correction.
@@ -598,18 +603,60 @@ def _compute_ocean_net_surface_energy_flux(
     heat transport by precipitation and evaporation.
     """
     atmos = AtmosphereData(forcing_data)
-    base_flux = (
-        atmos.net_surface_energy_flux
-    )  # missing: - calving * LATENT_HEAT_OF_FREEZING
+    # runoff and calving heat (hfrunoffds - calving_residue) are not included;
+    # _correct_hfds adds them for "prescribed_open_ocean"
+    base_flux = atmos.net_surface_energy_flux
     mass_heat_flux = (
         SPECIFIC_HEAT_OF_SEA_WATER_CM4
         * (
             atmos.precipitation_rate
             - (atmos.latent_heat_flux / LATENT_HEAT_OF_VAPORIZATION)
-        )  # missing: + river runoff + calving
+        )  # P - E only: hfrunoffds already carries the runoff heat content
         * (sst - FREEZING_TEMPERATURE_KELVIN)
     )
     return base_flux + mass_heat_flux
+
+
+_RUNOFF_CALVING_HEAT_SIGNS = {"hfrunoffds": 1.0, "calving_residue": -1.0}
+
+
+def _runoff_calving_heat_flux(
+    gen_data: TensorMapping,
+    sea_surface_fraction: Callable[[], torch.Tensor],
+    total_area: bool,
+) -> torch.Tensor | None:
+    """Runoff and calving heat, hfrunoffds - calving_residue, from the generated
+    data: per ocean area, or per total cell area (times sea_surface_fraction)
+    if ``total_area``.
+
+    Returns None when the generated data has neither term.
+    """
+    flux: torch.Tensor | None = None
+    for name, sign in _RUNOFF_CALVING_HEAT_SIGNS.items():
+        total_area_name = f"{name}_total_area"
+        if total_area:
+            if total_area_name in gen_data:
+                term = gen_data[total_area_name]
+            elif name in gen_data:
+                term = gen_data[name] * sea_surface_fraction()
+            else:
+                continue
+        elif name in gen_data:
+            term = gen_data[name]
+        elif total_area_name in gen_data:
+            ssf = sea_surface_fraction()
+            has_ocean = ssf > 0
+            # safe denominator keeps land-cell gradients finite under torch.where
+            safe_ssf = torch.where(has_ocean, ssf, torch.ones_like(ssf))
+            term = torch.where(
+                has_ocean,
+                gen_data[total_area_name] / safe_ssf,
+                torch.zeros_like(ssf),
+            )
+        else:
+            continue
+        flux = sign * term if flux is None else flux + sign * term
+    return flux
 
 
 def _correct_hfds(
@@ -626,7 +673,13 @@ def _correct_hfds(
     Methods:
         residual_prediction: gen_hfds + ocean_fraction * net_flux
         prescribed: net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
-        prescribed_open_ocean: net_flux where ocean_fraction == 1, else gen_hfds
+        prescribed_open_ocean: net_flux + runoff_calving_heat where
+            ocean_fraction == 1, else gen_hfds
+
+    runoff_calving_heat = hfrunoffds - calving_residue from gen_data (absent
+    terms count as 0), in the basis of the corrected hfds: the matching
+    ``X`` or ``X_total_area`` form when present, else the other form
+    converted with sea_surface_fraction (division guarded where it is 0).
 
     The net flux uses the input SST when the step input has one, and otherwise
     the generated SST (SST as an output-only diagnostic). The fluxes are means
@@ -656,6 +709,13 @@ def _correct_hfds(
     elif method == "prescribed":
         out[hfds_name] = net_flux * ocean_fraction + gen_hfds * (1 - ocean_fraction)
     elif method == "prescribed_open_ocean":
+        runoff_calving_heat = _runoff_calving_heat_flux(
+            gen_data,
+            lambda: forcing.sea_surface_fraction,
+            total_area=hfds_name == "hfds_total_area",
+        )
+        if runoff_calving_heat is not None:
+            net_flux = net_flux + runoff_calving_heat
         out[hfds_name] = torch.where(ocean_fraction == 1, net_flux, gen_hfds)
     else:
         raise NotImplementedError(
