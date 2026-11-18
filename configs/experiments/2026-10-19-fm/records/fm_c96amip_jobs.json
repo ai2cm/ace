@@ -1,0 +1,36 @@
+{
+  "ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff-smoke": {
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff-smoke-9540/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff-smoke-9540/training_checkpoints/best_inference_ckpt.tar",
+    "clusters": [
+      "ai2/saturn"
+    ],
+    "commit": "51d1c2b2adfe600ab49bc1ea5968ee59534a1cfe",
+    "config": "run_configs/ace-train-config-4deg-nc-sfno-v2-fm-c96amip-s0-maskoff-smoke.yaml",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff-smoke-9540/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff-smoke-9540",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff-smoke-9540",
+    "id": "01M7R8HB981E0ZBP6VZ0G6GSFH",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-sfno-v2-fm-c96amip-s0-maskoff-smoke-9540/training_checkpoints/ckpt.tar",
+    "priority": "high",
+    "submitted": "2026-11-18T21:20:51+00:00",
+    "url": "https://beaker.org/ex/01M7R8HB981E0ZBP6VZ0G6GSFH"
+  },
+  "ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff-smoke": {
+    "best_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff-smoke-mrw2/training_checkpoints/best_ckpt.tar",
+    "best_inference_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff-smoke-mrw2/training_checkpoints/best_inference_ckpt.tar",
+    "clusters": [
+      "ai2/saturn"
+    ],
+    "commit": "51d1c2b2adfe600ab49bc1ea5968ee59534a1cfe",
+    "config": "run_configs/ace-train-config-4deg-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff-smoke.yaml",
+    "ema_ckpt_pattern": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff-smoke-mrw2/training_checkpoints/ema_ckpt_{epoch:04d}.tar",
+    "experiment": "agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff-smoke-mrw2",
+    "experiment_dir": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff-smoke-mrw2",
+    "id": "01M7R8HDZMN5J37EHBRT86QW9G",
+    "latest_ckpt": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v2-fm-c96amip-s0-maskoff-smoke-mrw2/training_checkpoints/ckpt.tar",
+    "priority": "high",
+    "submitted": "2026-11-18T21:20:54+00:00",
+    "url": "https://beaker.org/ex/01M7R8HDZMN5J37EHBRT86QW9G"
+  }
+}
