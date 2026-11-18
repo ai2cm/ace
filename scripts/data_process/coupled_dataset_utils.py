@@ -868,7 +868,9 @@ def compute_coupled_atmosphere(
     Args:
         atmos: Atmosphere input dataset.
         ocean: Ocean input dataset containing SST.
-        coupled_ocean: Computed coupled sea ice fields from compute_coupled_ocean.
+        coupled_ocean: Coupled land, ocean, sea ice and sea surface fractions.
+            create_coupled_datasets passes the unmasked compute_coupled_sea_ice
+            output, so the atmosphere carries no sea ice mask NaN.
         config: Configuration for surface temperature coupling.
         input_field_names: Names of input fields. If None, uses defaults.
         extras: Optional configuration for copying extra variables from atmosphere.

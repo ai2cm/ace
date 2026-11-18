@@ -28,10 +28,16 @@ from writer_utils import OutputWriterConfig
 """Create coupled atmosphere-ocean datasets for training coupled climate emulators.
 
 This script processes separate atmosphere, ocean, and sea ice datasets, applying
-coupling logic to create consistent training datasets. The computation follows a
-three-stage dependency chain:
+coupling logic to create consistent training datasets. The computation has
+three stages; the ocean and atmosphere stages both depend on the sea ice stage:
 
-    compute_coupled_sea_ice -> compute_coupled_ocean -> compute_coupled_atmosphere
+    compute_coupled_sea_ice -> compute_coupled_ocean
+    compute_coupled_sea_ice -> compute_coupled_atmosphere
+
+Only the coupled ocean dataset keeps NaN on land and outside the sea ice mask.
+The coupled sea ice and atmosphere datasets take their fractions from the
+unmasked coupled sea ice fields. Without coupled_sea_surface the ocean stage is
+skipped.
 
 Each stage can either compute from scratch or read from existing zarr outputs:
 - If a zarr already exists, it will be read from disk instead of being recomputed
@@ -453,6 +459,8 @@ class CoupledDatasetsConfig:
 
     Parameters:
         coupled_ts: Configuration for surface temperature in coupled atmosphere.
+            Its fractions come from the coupled sea ice dataset, so they carry
+            no land or sea ice mask NaN.
         coupled_sea_surface: Configuration for sea ice in coupled ocean.
         coupled_sea_ice: Configuration for for sea ice in the uncoupled atmosphere.
         input_field_names: Names of input fields.
@@ -472,15 +480,16 @@ class CoupledDatasetsConfig:
     )
 
     def validate(self, input_datasets: InputDatasetsConfig):
-        if self.coupled_sea_surface is None:
-            if self.coupled_ts is not None:
-                raise ValueError(
-                    "coupled_ts configured but coupled_sea_surface config is None. "
-                    "The coupled ocean dataset must be created in order to compute "
-                    "the coupled atmosphere dataset. Please remove coupled_ts or add "
-                    "coupled_sea_surface and configure the ocean input dataset."
-                )
-        elif isinstance(input_datasets.ocean, NullCoupledInputDatasetConfig):
+        if not isinstance(input_datasets.ocean, NullCoupledInputDatasetConfig):
+            return
+        if self.coupled_ts is not None:
+            raise ValueError(
+                "coupled_ts configured but the ocean input dataset is not. "
+                "The coupled atmosphere dataset takes its SST from the ocean "
+                "input dataset. Please remove coupled_ts or configure the ocean "
+                "input dataset."
+            )
+        if self.coupled_sea_surface is not None:
             raise ValueError(
                 "Ocean input dataset not configured but coupled_sea_surface "
                 "config is not None."
@@ -628,8 +637,8 @@ class CoupledDatasetsConfig:
                 atmos_extras=atmos_extras,
                 sea_ice_extras=input_datasets.sea_ice.extra_fields,
             )
-        elif need_compute_ocean:
-            # Need coupled_sea_ice as input for downstream ocean computation
+        elif need_compute_ocean or need_compute_atmos:
+            # Need coupled_sea_ice as input for the ocean and atmosphere stages
             logging.info(
                 f"Reading existing coupled sea ice from {sea_ice_output_store}"
             )
@@ -655,24 +664,21 @@ class CoupledDatasetsConfig:
                 input_field_names=self.input_field_names,
                 extras=input_datasets.ocean.extra_fields,
             )
-        elif compute_ocean and need_compute_atmos:
-            # Need coupled_ocean as input for downstream atmosphere computation
-            logging.info(f"Reading existing coupled ocean from {ocean_output_store}")
-            coupled_ocean = xr.open_zarr(ocean_output_store)
 
         # Stage 3: Coupled atmosphere — compute if needed
         coupled_atmos: xr.Dataset | None = None
         if need_compute_atmos:
             assert self.coupled_ts is not None
             assert ocean is not None
-            assert coupled_ocean is not None
+            assert coupled_sea_ice is not None
             logging.info("=" * 80)
             logging.info("Computing coupled atmosphere fields")
             logging.info("=" * 80)
             coupled_atmos = compute_coupled_atmosphere(
                 atmos=atmos,
                 ocean=ocean,
-                coupled_ocean=coupled_ocean,
+                # unmasked fractions: only the ocean store keeps land NaN
+                coupled_ocean=coupled_sea_ice,
                 config=self.coupled_ts,
                 input_field_names=self.input_field_names,
                 extras=atmos_extras,

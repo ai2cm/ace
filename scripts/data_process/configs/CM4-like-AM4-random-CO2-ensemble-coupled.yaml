@@ -3,6 +3,8 @@ family_name: CM4-like-AM4-random-CO2-coupled
 output_directory: gs://vcm-ml-intermediate
 
 coupled_datasets:
+  coupled_ts:
+    how: interpolate_sst
   coupled_sea_ice:
     include_ts: true
   output_writer:
@@ -14,7 +16,7 @@ stats:
     - random-CO2-1xCO2-ic_0003
     - random-CO2-2xCO2-ic_0003
     - random-CO2-4xCO2-ic_0003
-  beaker_dataset: 2026-10-11-cm4-like-am4-random-co2-1deg-coupled-stats
+  beaker_dataset: 2026-10-11-cm4-like-am4-random-co2-1deg-coupled-stats-sst-blended
 
 input_datasets:
   runs:
