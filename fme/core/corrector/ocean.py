@@ -1,5 +1,6 @@
 import dataclasses
 import datetime
+import warnings
 from collections.abc import Callable, Mapping
 from typing import Any, Literal, Protocol
 
@@ -226,9 +227,11 @@ class SurfaceEnergyFluxCorrectionConfig:
     out the correction on land and reduces it under sea ice.
 
     Available options are:
-      - "residual_prediction": corrected_hfds = gen_hfds + ocean_fraction * net_flux.
+      - "residual_prediction" (deprecated, use "prescribed_open_ocean"):
+        corrected_hfds = gen_hfds + ocean_fraction * net_flux.
         The network predicts a residual that is added to the forcing-derived flux.
-      - "prescribed": corrected_hfds = net_flux * ocean_fraction + gen_hfds *
+      - "prescribed" (deprecated, use "prescribed_open_ocean"):
+        corrected_hfds = net_flux * ocean_fraction + gen_hfds *
         (1 - ocean_fraction). Open-ocean hfds is prescribed from forcings; the
         network prediction is retained under sea ice and on land.
       - "prescribed_open_ocean": corrected_hfds = net_flux where ocean_fraction
@@ -242,6 +245,14 @@ class SurfaceEnergyFluxCorrectionConfig:
     """
 
     method: Literal["residual_prediction", "prescribed", "prescribed_open_ocean"]
+
+    def __post_init__(self):
+        if self.method in ("residual_prediction", "prescribed"):
+            warnings.warn(
+                f"SurfaceEnergyFluxCorrectionConfig method '{self.method}' is "
+                "deprecated. Use 'prescribed_open_ocean' instead.",
+                FutureWarning,
+            )
 
 
 @dataclasses.dataclass
