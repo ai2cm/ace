@@ -1,21 +1,21 @@
 # job_runner/evaluate.sh configs/experiments/<exper> . \
-#   --config-dir configs/experiments/SamudrACEv2/ocean/eval
-# Adapted from configs/experiments/cm4_eval/ocean/evaluator-config-piC-ic0151-200yr-x0c.yaml:
-# SamudrACEv2 stores (2026-11-13), sst -> SST_degK.
+#   --config-dir configs/experiments/SamudrACEv2/eval/ocean/oos
+# Adapted from configs/experiments/SamudrACEv2/ocean/eval/oos/evaluator-config-piC-ic0226-20yr-maps.yaml at 1275e7093: correction_maps on, no reference (target) output.
+# Out-of-sample crossing (training_splits.yaml): train to 0236-01-01, val_piC 0236-01-06 (crossing) to 0241-01-01, holdout from 0241-01-06.
 experiment_dir: /results
-n_forward_steps: 14598  # --min-runtime 2h
+n_forward_steps: 1460  # exactly 20 noleap years
 forward_steps_in_memory: 40
 checkpoint_path: /ckpt.tar
 logging:
   log_to_screen: true
   log_to_wandb: true
-  log_to_file: true
+  log_to_file: false
   project: ace-samudra-cm4
   entity: ai2cm
 loader:
   start_indices:
     times:
-    - '0151-01-06T00:00:00'
+    - '0226-01-01T00:00:00'
   dataset:
     merge:
     - data_path: /climate-default
@@ -41,53 +41,76 @@ data_writer:
       lon_extent: [140.0, 180.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
+      format:
+        name: zarr
     - label: gulf_stream_monthly
       names: [SST_degK]
       lat_extent: [35.0, 45.0]
       lon_extent: [285.0, 315.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
+      format:
+        name: zarr
     - label: n_atlantic_subpolar_monthly
       names: [SST_degK]
       lat_extent: [50.0, 65.0]
       lon_extent: [300.0, 340.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
+      format:
+        name: zarr
     - label: acc_monthly
       names: [SST_degK]
       lat_extent: [-60.0, -45.0]
       lon_extent: [0.0, 360.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
+      format:
+        name: zarr
     - label: n_pacific_gyre_monthly
       names: [SST_degK]
       lat_extent: [25.0, 40.0]
       lon_extent: [180.0, 220.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
+      format:
+        name: zarr
     - label: tropical_pacific_monthly_sst
       names: [SST_degK, hfds_total_area]
       lat_extent: [-20.0, 20.0]
       lon_extent: [120.0, 290.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
+      format:
+        name: zarr
     - label: arctic_hfds
       names: [hfds_total_area]
       lat_extent: [40.0, 90.0]
       lon_extent: [0.0, 360.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
+      format:
+        name: zarr
     - label: antarctic_hfds
       names: [hfds_total_area]
       lat_extent: [-90.0, -50.0]
       lon_extent: [0.0, 360.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
+      format:
+        name: zarr
+    - label: ocean_maps_monthly
+      names: [ocean_sea_ice_thickness_mean, ocean_sea_ice_fraction]
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+      format:
+        name: zarr

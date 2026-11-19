@@ -1,9 +1,9 @@
 # job_runner/evaluate.sh configs/experiments/<exper> . \
-#   --config-dir configs/experiments/SamudrACEv2/ocean/eval
-# Adapted from configs/experiments/cm4_eval/ocean/evaluator-config-piC-ic0151-200yr-maps.yaml:
-# SamudrACEv2 stores (2026-11-13), sst -> SST_degK, sea_ice_volume -> ocean_sea_ice_thickness_mean.
+#   --config-dir configs/experiments/SamudrACEv2/eval/ocean/oos
+# Adapted from configs/experiments/SamudrACEv2/ocean/eval/oos/evaluator-config-1pct-ic0036-20yr-maps.yaml at 1275e7093: correction_maps on, no reference (target) output.
+# Out-of-sample crossing (training_splits.yaml): unused to 0041-01-01, val_1pct_early 0041-01-06 to 0046-01-01, train from 0046-01-06 (crossing).
 experiment_dir: /results
-n_forward_steps: 14598  # --min-runtime 2h
+n_forward_steps: 1460  # exactly 20 noleap years
 forward_steps_in_memory: 40
 checkpoint_path: /ckpt.tar
 logging:
@@ -15,20 +15,22 @@ logging:
 loader:
   start_indices:
     times:
-    - '0151-01-06T00:00:00'
+    - '0036-01-01T00:00:00'
   dataset:
     merge:
     - data_path: /climate-default
-      file_pattern: 2026-11-13-om4-picontrol-1deg-coupled-ocean.zarr
+      file_pattern: 2026-11-13-om4-1pctco2-1deg-coupled-ocean.zarr
       engine: zarr
     - data_path: /climate-default
-      file_pattern: 2026-11-13-om4-picontrol-1deg-ocean-5daily.zarr
+      file_pattern: 2026-11-13-om4-1pctco2-1deg-ocean-5daily.zarr
       engine: zarr
   num_data_workers: 4
 aggregator:
   log_histograms: true
   log_nino34_index: true
   log_ipo_index: true
+  step_diagnostics:
+    correction_maps: true
 data_writer:
   save_prediction_files: false
   save_monthly_files: false
@@ -39,7 +41,7 @@ data_writer:
       lon_extent: [140.0, 180.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
       format:
         name: zarr
     - label: gulf_stream_monthly
@@ -48,7 +50,7 @@ data_writer:
       lon_extent: [285.0, 315.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
       format:
         name: zarr
     - label: n_atlantic_subpolar_monthly
@@ -57,7 +59,7 @@ data_writer:
       lon_extent: [300.0, 340.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
       format:
         name: zarr
     - label: acc_monthly
@@ -66,7 +68,7 @@ data_writer:
       lon_extent: [0.0, 360.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
       format:
         name: zarr
     - label: n_pacific_gyre_monthly
@@ -75,7 +77,7 @@ data_writer:
       lon_extent: [180.0, 220.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
       format:
         name: zarr
     - label: tropical_pacific_monthly_sst
@@ -84,7 +86,7 @@ data_writer:
       lon_extent: [120.0, 290.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
       format:
         name: zarr
     - label: arctic_hfds
@@ -93,7 +95,7 @@ data_writer:
       lon_extent: [0.0, 360.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
       format:
         name: zarr
     - label: antarctic_hfds
@@ -102,13 +104,13 @@ data_writer:
       lon_extent: [0.0, 360.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
       format:
         name: zarr
     - label: ocean_maps_monthly
-      names: [ocean_sea_ice_thickness_mean, ocean_sea_ice_fraction]
+      names: [ocean_heat_content, ocean_sea_ice_thickness_mean, ocean_sea_ice_fraction, thetao_0, thetao_1, thetao_2, thetao_3, thetao_4, thetao_5, thetao_6, thetao_7, thetao_8, thetao_9, thetao_10, thetao_11, thetao_12, thetao_13, thetao_14, thetao_15, thetao_16, thetao_17, thetao_18]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
       format:
         name: zarr

@@ -1,5 +1,5 @@
 # job_runner/evaluate.sh configs/experiments/<exper> . \
-#   --config-dir configs/experiments/SamudrACEv2/ocean/eval
+#   --config-dir configs/experiments/SamudrACEv2/eval/ocean
 # Adapted from configs/experiments/cm4_eval/ocean/evaluator-config-piC-ic0151-200yr.yaml:
 # SamudrACEv2 stores (2026-11-13), sst -> SST_degK.
 experiment_dir: /results
@@ -29,6 +29,8 @@ aggregator:
   log_histograms: true
   log_nino34_index: true
   log_ipo_index: true
+  step_diagnostics:
+    correction_maps: true
 data_writer:
   save_prediction_files: false
   save_monthly_files: false
@@ -39,53 +41,53 @@ data_writer:
       lon_extent: [140.0, 180.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
     - label: gulf_stream_monthly
       names: [SST_degK]
       lat_extent: [35.0, 45.0]
       lon_extent: [285.0, 315.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
     - label: n_atlantic_subpolar_monthly
       names: [SST_degK]
       lat_extent: [50.0, 65.0]
       lon_extent: [300.0, 340.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
     - label: acc_monthly
       names: [SST_degK]
       lat_extent: [-60.0, -45.0]
       lon_extent: [0.0, 360.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
     - label: n_pacific_gyre_monthly
       names: [SST_degK]
       lat_extent: [25.0, 40.0]
       lon_extent: [180.0, 220.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
     - label: tropical_pacific_monthly_sst
       names: [SST_degK, hfds_total_area]
       lat_extent: [-20.0, 20.0]
       lon_extent: [120.0, 290.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
     - label: arctic_hfds
       names: [hfds_total_area]
       lat_extent: [40.0, 90.0]
       lon_extent: [0.0, 360.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
     - label: antarctic_hfds
       names: [hfds_total_area]
       lat_extent: [-90.0, -50.0]
       lon_extent: [0.0, 360.0]
       time_coarsen:
         method: monthly_mean
-      save_reference: true
+      save_reference: false
