@@ -1,0 +1,94 @@
+# Written by make_configs.py: no_tmp2m_acf, multidiffusion.
+# experiment_dir is replaced by $AGENT_OUTPUT_DIR in run_in_job.sh.
+experiment_dir: /climate-default/agents/annak/REPLACED_AT_RUNTIME
+n_samples: 1
+patch:
+  divide_generation: true
+  composite_prediction: true
+  coarse_horizontal_overlap: 1
+  multidiffusion: true
+model:
+  denoising_expert_configs:
+  - checkpoint_config:
+      checkpoint_path: /checkpoints_low_sigma/best.ckpt
+    sigma_min: 0.005
+    sigma_max: 200.0
+  - checkpoint_config:
+      checkpoint_path: /checkpoints_high_sigma/best.ckpt
+    sigma_min: 200.0
+    sigma_max: 2000.0
+  num_diffusion_generation_steps: 18
+  churn: 0.0
+data:
+  coarse:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 100km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2023-01-01T00:00:00'
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: prmsl_100km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2023-01-01T00:00:00'
+  fine:
+  - merge:
+    - data_path: /climate-default/2025-09-25-downscaling-data-X-SHiELD-AMIP-downscaling
+      file_pattern: 3km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2023-01-01T00:00:00'
+    - data_path: /climate-default/2026-02-03-downscaling-data-X-SHiELD-AMIP-pressure-data
+      file_pattern: instantaneous_surface_and_sea_level_pressure_3km.zarr
+      engine: zarr
+      subset:
+        start_time: '2023-01-01T00:00:00'
+        stop_time: '2023-01-01T00:00:00'
+  lat_extent:
+    start: 0
+    stop: 16
+  lon_extent:
+    start: 0
+    stop: 16
+  batch_size: 1
+  num_data_workers: 2
+  strict_ensemble: false
+logging:
+  log_to_screen: true
+  log_to_wandb: false
+  log_to_file: true
+  project: ace-downscaling
+  entity: ai2cm
+events:
+- name: multidiffusion_20230208T0000
+  date: 2023-02-08T00:00
+  n_samples: 1
+  save_generated_samples: true
+  lat_extent: &id001
+    start: -65.0
+    stop: 65.0
+  lon_extent: &id002
+    start: 0.0
+    stop: 360.0
+- name: multidiffusion_20230415T0600
+  date: 2023-04-15T06:00
+  n_samples: 1
+  save_generated_samples: true
+  lat_extent: *id001
+  lon_extent: *id002
+- name: multidiffusion_20230625T1200
+  date: 2023-06-25T12:00
+  n_samples: 1
+  save_generated_samples: true
+  lat_extent: *id001
+  lon_extent: *id002
+- name: multidiffusion_20231202T1800
+  date: 2023-12-02T18:00
+  n_samples: 1
+  save_generated_samples: true
+  lat_extent: *id001
+  lon_extent: *id002
