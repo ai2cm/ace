@@ -22,8 +22,7 @@ cd $REPO_ROOT && gantry run \
     --description 'Run ACE2-ERA5 evaluator' \
     --beaker-image "$(cat $REPO_ROOT/latest_deps_only_image.txt)" \
     --workspace ai2/ace \
-    --priority normal \
-    --not-preemptible \
+    --min-runtime 24h \
     --cluster ai2/saturn-cirrascale \
     --cluster ai2/ceres-cirrascale \
     --env WANDB_USERNAME=$BEAKER_USERNAME \
