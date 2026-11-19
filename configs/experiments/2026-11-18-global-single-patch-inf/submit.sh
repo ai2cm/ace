@@ -49,7 +49,7 @@ for model in no_tmp2m_acf tmp2m_acf_matched; do
             "${cluster_args[@]}" \
             --gpus 1 \
             --shared-memory 64GiB \
-            --priority normal \
+            --priority high \
             --min-runtime 8h \
             --task-timeout 12h \
             --beaker-image oliverwm/fme-deps-only-54045d546 \
