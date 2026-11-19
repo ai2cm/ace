@@ -13,7 +13,7 @@ from torch_harmonics.quadrature import (
     lobatto_weights,
 )
 
-# Upstream distributed wrappers (re-exports from torch_harmonics.distributed)
+# Distributed transforms (compile-safe subclasses) and helpers
 from fme.core.sht._distributed import (
     DistributedDiscreteContinuousConvS2,
     DistributedInverseRealSHT,
