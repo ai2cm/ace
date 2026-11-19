@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import torch
+import torch_harmonics
 import xarray as xr
 from xarray.coding.times import CFDatetimeCoder
 
@@ -920,6 +921,65 @@ def test_overwrite(mock_monthly_netcdfs):
         dataset_overwrite["foo"], torch.ones_like(dataset["foo"]) * const
     )
     assert torch.equal(dataset_overwrite["bar"], dataset["bar"] * multiple)
+
+
+def test_sht_roundtrip_variables(mock_monthly_netcdfs):
+    names = mock_monthly_netcdfs.var_names.all_names
+    config = XarrayDataConfig(data_path=mock_monthly_netcdfs.tmpdir)
+    data = xarray_dataset_constructor(config, names, 2)[0][0]
+    config_roundtrip = XarrayDataConfig(
+        data_path=mock_monthly_netcdfs.tmpdir,
+        sht_roundtrip_variables=["foo", "constant_var"],
+    )
+    dataset_roundtrip = xarray_dataset_constructor(config_roundtrip, names, 2)
+    data_roundtrip = dataset_roundtrip[0][0]
+
+    coords = dataset_roundtrip.properties.horizontal_coordinates
+    nlat, nlon = coords.shape
+    grid = coords.grid
+    sht = torch_harmonics.RealSHT(nlat, nlon, grid=grid).double()
+    isht = torch_harmonics.InverseRealSHT(nlat, nlon, grid=grid).double()
+    for name in ["foo", "constant_var"]:
+        expected = isht(sht(data[name].double())).float()
+        assert not torch.allclose(data_roundtrip[name], data[name])
+        torch.testing.assert_close(data_roundtrip[name], expected)
+        assert data_roundtrip[name].dtype == data[name].dtype
+    torch.testing.assert_close(data_roundtrip["bar"], data["bar"], rtol=0, atol=0)
+
+
+def test_sht_roundtrip_variables_missing_variable(mock_monthly_netcdfs):
+    config = XarrayDataConfig(
+        data_path=mock_monthly_netcdfs.tmpdir, sht_roundtrip_variables=["baz"]
+    )
+    with pytest.raises(ValueError, match="baz"):
+        xarray_dataset_constructor(config, mock_monthly_netcdfs.var_names.all_names, 2)
+
+
+def test_sht_roundtrip_variables_nans(mock_monthly_netcdfs_with_nans):
+    names = mock_monthly_netcdfs_with_nans.var_names.all_names
+    config = XarrayDataConfig(
+        data_path=mock_monthly_netcdfs_with_nans.tmpdir,
+        sht_roundtrip_variables=["foo"],
+    )
+    dataset = xarray_dataset_constructor(config, names, 2)
+    with pytest.raises(ValueError, match="foo.*NaN"):
+        dataset[0]
+    config_filled = XarrayDataConfig(
+        data_path=mock_monthly_netcdfs_with_nans.tmpdir,
+        sht_roundtrip_variables=["foo"],
+        fill_nans=FillNaNsConfig(),
+    )
+    data = xarray_dataset_constructor(config_filled, names, 2)[0][0]
+    assert not torch.isnan(data["foo"]).any()
+
+
+def test_sht_roundtrip_variables_requires_latlon():
+    with pytest.raises(ValueError, match="latlon"):
+        XarrayDataConfig(
+            data_path="/some/path",
+            spatial_dimensions="healpix",
+            sht_roundtrip_variables=["foo"],
+        )
 
 
 def test_repeated_interval_boolean_mask_subset(mock_monthly_netcdfs):
