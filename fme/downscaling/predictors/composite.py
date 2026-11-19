@@ -59,6 +59,12 @@ class PatchPredictionConfig:
             return True
         return False
 
+    def build(self, model: DiffusionModel | DenoisingMoEPredictor) -> "PatchPredictor":
+        return PatchPredictor(
+            model=model,
+            coarse_horizontal_overlap=self.coarse_horizontal_overlap,
+        )
+
 
 class PatchPredictor:
     """
@@ -258,13 +264,16 @@ def get_generation_model(
         requires_training_patch_shape=model.requires_training_patch_shape,
         name=name,
     )
-    if patch.needs_patch_predictor and input_shape != model.coarse_shape:
-        suffix = f" for {name}" if name else ""
+    if input_shape == model.coarse_shape:
+        return model
+    suffix = f" for {name}" if name else ""
+    if patch.needs_patch_predictor:
         logging.info(f"Using PatchPredictor{suffix}")
-        return PatchPredictor(
-            model=model,
-            coarse_horizontal_overlap=patch.coarse_horizontal_overlap,
-        )
+        return patch.build(model)
+    logging.info(
+        f"Generating on the full input extent {input_shape}{suffix}, which is "
+        f"larger than the model patch size {model.coarse_shape}"
+    )
     return model
 
 
