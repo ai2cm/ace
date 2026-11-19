@@ -105,6 +105,11 @@ aggregator:
     name: trend
     enabled: false
     strict: false
+  global_mean_drift:
+    variables: null
+    name: global_mean_drift
+    enabled: true
+    strict: false
   near_zero_fraction:
     variables: []
     eps: 0.0
