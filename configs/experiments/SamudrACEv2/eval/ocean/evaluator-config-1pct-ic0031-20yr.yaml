@@ -1,5 +1,5 @@
 # job_runner/evaluate.sh configs/experiments/<exper> . \
-#   --config-dir configs/experiments/SamudrACEv2/eval/ocean/oos
+#   --config-dir configs/experiments/SamudrACEv2/eval/ocean
 # Adapted from configs/experiments/SamudrACEv2/ocean/eval/oos/evaluator-config-1pct-ic0031-20yr-maps.yaml at 1275e7093: correction_maps on, no reference (target) output.
 # Out-of-sample crossing (training_splits.yaml): unused to 0041-01-01, val_1pct_early 0041-01-06 to 0046-01-01, train from 0046-01-06 (crossing).
 experiment_dir: /results
