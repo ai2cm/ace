@@ -431,18 +431,27 @@ def _wright97_ocean_data(data, deptho=DEPTHO, cell_area=True) -> OceanData:
     )
 
 
-def _expected_eta_mano(data, deptho=DEPTHO) -> torch.Tensor:
-    """eta - <eta>, eta = zos + C / RHO_0, by hand: dz from idepth and deptho,
-    area mean over mask_0 > 0 and finite zos.
-    """
-    mask = _wright97_mask()
-    C = torch.zeros_like(data["zos"])
+def _expected_column_density(data, deptho=DEPTHO, dtype=torch.float32) -> torch.Tensor:
+    """C = sum_k rho_k * dz_k by hand: dz from idepth and deptho."""
+    mask = _wright97_mask().to(dtype)
+    C = torch.zeros_like(data["thetao_0"], dtype=dtype)
     for k in range(N_LEVELS):
         z_top, z_bot = float(IDEPTH[k]), float(IDEPTH[k + 1])
-        dz = (deptho.clamp(z_top, z_bot) - z_top) * mask[..., k]
-        p = torch.tensor(RHO_0 * G_EARTH * 0.5 * (z_top + z_bot))
-        rho = wright97_anomaly(S=data[f"so_{k}"], theta=data[f"thetao_{k}"], p=p)
+        dz = (deptho.to(dtype).clamp(z_top, z_bot) - z_top) * mask[..., k]
+        p = torch.tensor(RHO_0 * G_EARTH * 0.5 * (z_top + z_bot), dtype=dtype)
+        rho = wright97_anomaly(
+            S=data[f"so_{k}"].to(dtype), theta=data[f"thetao_{k}"].to(dtype), p=p
+        )
         C = C + torch.where((mask[..., k] > 0) & rho.isfinite(), rho * dz, 0.0)
+    return C
+
+
+def _expected_eta_mano(data, deptho=DEPTHO) -> torch.Tensor:
+    """eta - <eta>, eta = zos + C / RHO_0, by hand: area mean over mask_0 > 0
+    and finite zos.
+    """
+    mask = _wright97_mask()
+    C = _expected_column_density(data, deptho)
     wet = (mask[..., 0] > 0) & data["zos"].isfinite()
     w = _cell_area().area_weights_m2 * wet
     eta = data["zos"].nan_to_num() + C / RHO_0
@@ -532,9 +541,94 @@ def test_wright97_one_dimensional_mask_matches_expanded():
         DepthCoordinate(IDEPTH, mask_1d.expand(N_LAT, N_LON, N_LEVELS)),
         cell_area_provider=cell_area,
     )
-    for name in ("rho_wright97", "mld_wright97", "manometric_sea_level_wright97"):
+    for name in (
+        "rho_wright97",
+        "mld_wright97",
+        "manometric_sea_level_wright97",
+        "steric_sea_level_wright97",
+    ):
         torch.testing.assert_close(out_1d[name], out_3d[name])
         assert out_1d[name].isfinite().all()
+
+
+def test_steric_sea_level_wright97_values_and_mask():
+    data = _wright97_data()
+    eta_steric = _wright97_ocean_data(data).steric_sea_level_wright97
+    expected = -_expected_column_density(data, dtype=torch.float64) / RHO_0
+    land = _wright97_mask()[..., 0] == 0
+    torch.testing.assert_close(
+        eta_steric[..., ~land].double(),
+        expected[..., ~land],
+        atol=1e-5,  # float32 against float64 at |C / RHO_0| ~ 5 m
+        rtol=0,
+    )
+    assert eta_steric[..., land].isnan().all()
+    # the dry level 1 in row 1 contributes 0
+    single = OceanData(
+        {k: v for k, v in data.items() if k.endswith("_0")},
+        DepthCoordinate(IDEPTH[:2], _wright97_mask()[..., :1], DEPTHO),
+    ).steric_sea_level_wright97
+    torch.testing.assert_close(eta_steric[:, :, 1], single[:, :, 1])
+
+
+def test_steric_sea_level_wright97_nan_wet_level_counts_as_zero():
+    data = _wright97_data()
+    data["thetao_1"][0, 0, 3, 2] = torch.nan
+    eta_steric = _wright97_ocean_data(data).steric_sea_level_wright97
+    assert eta_steric[0, 0, 3, 2].isfinite()
+    expected = -_expected_column_density(data, dtype=torch.float64) / RHO_0
+    torch.testing.assert_close(
+        eta_steric[0, 0, 3, 2].double(), expected[0, 0, 3, 2], atol=1e-5, rtol=0
+    )
+
+
+@pytest.mark.parametrize("perturbation", ["warm", "fresh"])
+def test_steric_sea_level_wright97_sign(perturbation):
+    data = _wright97_data()
+    eta_steric = _wright97_ocean_data(data).steric_sea_level_wright97
+    perturbed = dict(data)
+    for k in range(N_LEVELS):
+        if perturbation == "warm":
+            perturbed[f"thetao_{k}"] = data[f"thetao_{k}"] + 1.0
+        else:
+            perturbed[f"so_{k}"] = data[f"so_{k}"] - 1.0
+    change = _wright97_ocean_data(perturbed).steric_sea_level_wright97 - eta_steric
+    assert (change[:, :, 1:] > 0).all()
+
+
+def test_steric_plus_manometric_recovers_zos():
+    data = _wright97_data()
+    data["zos"][0, 0, 2, 3] = torch.nan
+    ocean_data = _wright97_ocean_data(data)
+    eta_steric = ocean_data.steric_sea_level_wright97
+    wet = (_wright97_mask()[..., 0] > 0) & data["zos"].isfinite()
+    w = _cell_area().area_weights_m2 * wet
+
+    def demeaned(x):
+        mean = (x.nan_to_num() * w).sum((-2, -1), keepdim=True) / w.sum(
+            (-2, -1), keepdim=True
+        )
+        return torch.where(wet, x - mean, torch.nan)
+
+    torch.testing.assert_close(
+        demeaned(data["zos"]),
+        demeaned(eta_steric) + ocean_data.manometric_sea_level_wright97,
+        equal_nan=True,
+        atol=1e-6,  # float32 at |C / RHO_0| ~ 10 m
+        rtol=0,
+    )
+
+
+@pytest.mark.parametrize("missing", ["zos", "cell_area"])
+def test_steric_sea_level_wright97_without_cell_area_or_zos(missing):
+    data = _wright97_data()
+    expected = _wright97_ocean_data(data).steric_sea_level_wright97
+    if missing == "zos":
+        del data["zos"]
+    eta_steric = _wright97_ocean_data(
+        data, cell_area=missing != "cell_area"
+    ).steric_sea_level_wright97
+    torch.testing.assert_close(eta_steric, expected, equal_nan=True)
 
 
 @pytest.mark.parametrize("missing", ["zos", "cell_area", "area_weights_m2"])
@@ -555,7 +649,13 @@ def test_manometric_sea_level_wright97_missing_inputs_raise_key_error(missing):
 
 
 @pytest.mark.parametrize(
-    "name", ["rho_wright97", "mld_wright97", "manometric_sea_level_wright97"]
+    "name",
+    [
+        "rho_wright97",
+        "mld_wright97",
+        "manometric_sea_level_wright97",
+        "steric_sea_level_wright97",
+    ],
 )
 def test_wright97_extra_levels_raise_value_error(name):
     data = _wright97_data()
@@ -565,7 +665,13 @@ def test_wright97_extra_levels_raise_value_error(name):
 
 
 @pytest.mark.parametrize(
-    "name", ["rho_wright97", "mld_wright97", "manometric_sea_level_wright97"]
+    "name",
+    [
+        "rho_wright97",
+        "mld_wright97",
+        "manometric_sea_level_wright97",
+        "steric_sea_level_wright97",
+    ],
 )
 def test_wright97_missing_profiles_raise_key_error_before_geometry(name):
     data = {"zos": torch.zeros(1, 1, N_LAT, N_LON)}
@@ -575,7 +681,14 @@ def test_wright97_missing_profiles_raise_key_error_before_geometry(name):
             _ = getattr(ocean_data, name)
 
 
-@pytest.mark.parametrize("name", ["rho_wright97", "manometric_sea_level_wright97"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "rho_wright97",
+        "manometric_sea_level_wright97",
+        "steric_sea_level_wright97",
+    ],
+)
 def test_wright97_without_layer_geometry_raises_value_error(name):
     data = _wright97_data()
     for coord in (None, _IntegralOnly()):
