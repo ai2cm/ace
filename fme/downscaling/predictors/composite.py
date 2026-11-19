@@ -53,11 +53,11 @@ class PatchPredictionConfig:
             memory, moving each patch to the GPU only for its network call,
             so GPU memory does not grow with the domain size. Requires
             multidiffusion=True.
-        generate_full_extent: if True, run the model on the whole input
-            extent in one pass even when it is larger than the model's
-            training patch. Only valid for fully convolutional modules;
-            outputs on extents larger than the training patch are out of
-            sample. Cannot be combined with divide_generation.
+
+    With neither divide_generation nor multidiffusion set, an input larger
+    than the model's training patch is generated in a single pass over the
+    whole extent. This is only meaningful for fully convolutional modules,
+    and outputs on extents larger than the training patch are out of sample.
     """
 
     divide_generation: bool = False
@@ -66,7 +66,6 @@ class PatchPredictionConfig:
     multidiffusion: bool = False
     multidiffusion_sampler_dtype: Literal["float32", "float64"] = "float64"
     multidiffusion_sampler_state_on_cpu: bool = False
-    generate_full_extent: bool = False
 
     def __post_init__(self):
         if self.divide_generation and not self.composite_prediction:
@@ -89,11 +88,6 @@ class PatchPredictionConfig:
             raise ValueError(
                 "multidiffusion_sampler_dtype and multidiffusion_sampler_state_on_cpu "
                 "require multidiffusion=True."
-            )
-        if self.generate_full_extent and self.divide_generation:
-            raise ValueError(
-                "generate_full_extent=True cannot be combined with "
-                "divide_generation=True."
             )
 
     @property
@@ -314,16 +308,8 @@ def check_input_shape_supported(
             " to be at least as large as the model's input patch size "
             f"{model_coarse_shape}."
         )
-    # If data shape is larger than model input shape, currently require patch prediction
-    # as the models predict very biased results for out-of-sample input shapes.
-    if not patch.needs_patch_predictor and not patch.generate_full_extent:
-        raise ValueError(
-            f"Input datashape {input_shape}{suffix} is larger than the model input "
-            f"patch size {model_coarse_shape} and patch prediction is not configured. "
-            "Generation for larger domains requires patch prediction configured with "
-            "composite_prediction=True and divide_generation=True, or opt in to "
-            "single-pass generation with generate_full_extent=True."
-        )
+    # A larger input without patch prediction is generated in a single pass
+    # over the whole extent (out of sample for the model).
 
 
 def _get_full_extent_from_patches(patches: list[Patch]) -> tuple[int, int]:

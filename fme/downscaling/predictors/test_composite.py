@@ -81,26 +81,9 @@ def test_check_input_shape_supported_raises_when_too_small(input_shape):
         check_input_shape_supported((16, 16), input_shape, _COMPOSITE_PATCH)
 
 
-def test_check_input_shape_supported_raises_when_larger_without_patching():
-    """Raise when the extent differs from the patch but patching isn't configured."""
-    with pytest.raises(ValueError, match="requires patch prediction"):
-        check_input_shape_supported((16, 16), (32, 32), _NO_PATCH)
-
-
-def test_check_input_shape_supported_larger_with_full_extent():
-    """A larger extent is supported when single-pass generation is opted in to."""
-    check_input_shape_supported(
-        (16, 16), (28, 65), PatchPredictionConfig(generate_full_extent=True)
-    )
-
-
-def test_full_extent_cannot_combine_with_divide_generation():
-    with pytest.raises(ValueError, match="generate_full_extent"):
-        PatchPredictionConfig(
-            divide_generation=True,
-            composite_prediction=True,
-            generate_full_extent=True,
-        )
+def test_check_input_shape_supported_larger_without_patching():
+    """Without patching, a larger extent is accepted (single-pass generation)."""
+    check_input_shape_supported((16, 16), (28, 65), _NO_PATCH)
 
 
 class DummyModel:
