@@ -12,7 +12,10 @@ SamudrACEv2-hybridSSTdiag-muon|mae-null-lr50e-4|01M7PQDVB80BJ11JTJFZRQTHQ9|train
 
 SamudrACEv2-hybridSSTdiag-muon|mae-null-lr70e-4|01M7PQE67DDT0ZKQMR9711VYKC|training|best_inference_ckpt|normal|--min-runtime 8h
 
-SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr1e-4|01M7PQEH3C5PDG49WW9Y27KVCZ|training|best_inference_ckpt|normal|--min-runtime 8h
+# --config-dir configs/experiments/SamudrACEv2/ocean/eval
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr1e-4|01M7PQEH3C5PDG49WW9Y27KVCZ|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr1e-4|01M7PQEH3C5PDG49WW9Y27KVCZ|run_piC-ic0151-200yr-maps|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr1e-4|01M7PQEH3C5PDG49WW9Y27KVCZ|run_piC-ic0151-200yr-x0c|best_inference_ckpt|high|--min-runtime 2h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr2e-4|01M7PQEWR7SV8Q17VTSFRY4967|training|best_inference_ckpt|normal|--min-runtime 8h
 
