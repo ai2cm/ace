@@ -40,6 +40,7 @@ randco2_smoke_test:
 		--member $(MEMBER) \
 		--num-timesteps $(SMOKE_NUM_TIMESTEPS) \
 		--output-path $(RANDCO2_SMOKE_OUTPUT_PATH) \
+		--ace-commit $(ACE_COMMIT) \
 		--runner DirectRunner \
 		--job_server_timeout 3600
 	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.randco2.check_output \
@@ -64,6 +65,7 @@ randco2_smoke_test_repeat_fails:
 		--member $(RANDCO2_REPEAT_MEMBER) \
 		--num-timesteps $(SMOKE_NUM_TIMESTEPS) \
 		--output-path $(RANDCO2_SMOKE_OUTPUT_ROOT)/smoke-$(RANDCO2_REPEAT_MEMBER).zarr \
+		--ace-commit $(ACE_COMMIT) \
 		--runner DirectRunner \
 		--job_server_timeout 3600
 
@@ -84,6 +86,7 @@ randco2_smoke_test_shard_boundary:
 		--num-timesteps $(RANDCO2_BOUNDARY_NUM_TIMESTEPS) \
 		--time-shard-size $(RANDCO2_BOUNDARY_TIME_SHARD_SIZE) \
 		--output-path $(RANDCO2_BOUNDARY_OUTPUT_PATH) \
+		--ace-commit $(ACE_COMMIT) \
 		--runner DirectRunner \
 		--job_server_timeout 3600
 	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.randco2.check_output \
@@ -107,7 +110,8 @@ randco2_dataflow: check_dataflow_image
 	$(if $(MEMBER),,$(error set MEMBER to one of: $(RANDCO2_MEMBERS)))
 	SDK_CONTAINER_IMAGE=$(IMAGE_NAME) \
 		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
-		./run-dataflow.sh randco2 DataflowRunner $(RANDCO2_CONFIG) --member $(MEMBER)
+		./run-dataflow.sh randco2 DataflowRunner $(RANDCO2_CONFIG) --member $(MEMBER) \
+		--ace-commit $(ACE_COMMIT) --image-tag $(IMAGE_TAG)
 
 # Per-member production launch, e.g. make randco2_dataflow_random-CO2-1xCO2-ic_0001.
 # The explicit randco2_dataflow_all below takes precedence over this pattern.

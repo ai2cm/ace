@@ -1,7 +1,7 @@
 # 1-daily 1-degree ocean (Samudra) store from the 140-year CM4 1pctCO2
 # simulation.
 target_grid: F90
-weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/om4-tripolar-0.25deg-to-F90
+weights_url: gs://vcm-ml-intermediate/2026-07-15-gfdl-om4-pipeline-inputs/regridding-weights/native-area-v1/om4-tripolar-0.25deg-to-F90
 expected_level_count: 19
 shift_timestamps_to_avg_interval_midpoint: false
 # The daily snapshot store carries one initial-condition instant before the

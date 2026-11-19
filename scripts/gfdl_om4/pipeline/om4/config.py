@@ -15,7 +15,7 @@ import dataclasses
 
 import dacite
 
-from ..config_io import OutputConfig, WetmaskConfig, load_yaml
+from ..config_io import OutputConfig, StaticsConfig, WetmaskConfig, load_yaml
 from ..postprocess import (
     Postprocess,
     PostprocessConfig,
@@ -63,11 +63,11 @@ class StreamConfig:
             ``time_subsample_stride`` and with the pipeline's
             ``shift_timestamps_to_avg_interval_midpoint``.
         full_cell_variables: variables additionally regridded with full-cell
-            semantics — NaN filled with 0 over the whole grid (land
-            included) and conservatively regridded without ocean-fraction
-            normalization — written under their source name, with NaN over
-            land applied after. Each must also have a ``renaming`` entry so
-            its wetmask-normalized twin doesn't collide.
+            semantics — zeroed over land (wetmask) and conservatively
+            regridded without ocean-fraction normalization — written under
+            their source name, with NaN over land applied after. Each must
+            also have a ``renaming`` entry so its wetmask-normalized twin
+            doesn't collide.
         postprocess: post-regrid transforms to apply per chunk, in order
             (see pipeline/om4/postprocess.py): a registry name, or a
             :class:`~pipeline.postprocess.PostprocessConfig` naming the
@@ -151,19 +151,6 @@ class StreamConfig:
         return resolve_postprocess(
             POSTPROCESS, self.postprocess, f"stream {self.name!r}"
         )
-
-
-@dataclasses.dataclass
-class StaticsConfig:
-    """Static (time-invariant) fields for the output store.
-
-    Attributes:
-        store: URL of the static source zarr store.
-        variables: tracer-point fields to regrid onto the target grid.
-    """
-
-    store: str
-    variables: list[str]
 
 
 @dataclasses.dataclass

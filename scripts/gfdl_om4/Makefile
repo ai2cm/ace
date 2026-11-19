@@ -1,7 +1,7 @@
 LOCAL_ENVIRONMENT ?= gfdl-om4-ingestion
 
 # One worker image for both pipelines (om4.mk, randco2.mk).
-VERSION ?= 2026-09-29-gfdl-om4-xrbeam-pipeline
+VERSION ?= 2026-10-22-gfdl-om4-native-area
 IMAGE_NAME ?= us-central1-docker.pkg.dev/vcm-ml/full-model/gfdl-om4-ingest-dataflow:$(VERSION)
 
 # Durable pipeline inputs (static grid files, regridding weights, face masks)
@@ -29,7 +29,34 @@ generate_weights_four_degree:
 		--target-grid F22.5 \
 		--output-url $(WEIGHTS_URL_ROOT)/om4-tripolar-0.25deg-to-F22.5
 
+# Weights rebuilt in native cell areas (pipeline/native_area_weights.py) from
+# the artifacts above. Artifacts are immutable: a superseding build bumps the
+# version. a_i is the areacello of om4-picontrol-1deg-5daily.yaml's statics store.
+NATIVE_AREA_WEIGHTS_VERSION ?= native-area-v1
+NATIVE_AREA_A_SOURCE_URL ?= gs://vcm-ml-raw-flexible-retention/2026-06-19-CM4-ocean-and-sea-ice-piControl-and-1pctCO2/zarrs/piControl/ocean_static.zarr
+
+native_area_weights_one_degree:
+	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.native_area_weights \
+		--source-weights-url $(WEIGHTS_URL_ROOT)/om4-tripolar-0.25deg-to-F90 \
+		--target-grid F90 \
+		--a-source-url $(NATIVE_AREA_A_SOURCE_URL) \
+		--output-url $(WEIGHTS_URL_ROOT)/$(NATIVE_AREA_WEIGHTS_VERSION)/om4-tripolar-0.25deg-to-F90
+
+native_area_weights_four_degree:
+	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.native_area_weights \
+		--source-weights-url $(WEIGHTS_URL_ROOT)/om4-tripolar-0.25deg-to-F22.5 \
+		--target-grid F22.5 \
+		--a-source-url $(NATIVE_AREA_A_SOURCE_URL) \
+		--output-url $(WEIGHTS_URL_ROOT)/$(NATIVE_AREA_WEIGHTS_VERSION)/om4-tripolar-0.25deg-to-F22.5
+
 SMOKE_NUM_TIMESTEPS ?= 6
+
+# Recorded in each store's root attrs (D22(a)): every run passes
+# --ace-commit; Dataflow launches also pass --image-tag $(IMAGE_TAG).
+ACE_COMMIT ?= $(shell git rev-parse HEAD)
+
+test:
+	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pytest --confcutdir=. pipeline
 
 build_dataflow:
 	docker build --platform=linux/amd64 -t $(IMAGE_NAME) .
@@ -58,7 +85,8 @@ check_dataflow_image:
 		exit 1; }
 
 .PHONY: create_environment generate_weights generate_weights_one_degree \
-	generate_weights_four_degree build_dataflow push_dataflow enter \
-	check_dataflow_image
+	generate_weights_four_degree native_area_weights_one_degree \
+	native_area_weights_four_degree build_dataflow push_dataflow enter \
+	check_dataflow_image test
 
 include om4.mk randco2.mk

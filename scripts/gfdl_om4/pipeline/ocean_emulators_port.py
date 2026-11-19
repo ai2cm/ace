@@ -133,15 +133,15 @@ def regrid_normalized(
     are NaN.
 
     ``wetmask`` may be 2D or include a level dimension; it must be
-    broadcastable against each variable. Returns the regridded dataset and
-    the regridded ocean fraction.
+    broadcastable against each variable. Returns the regridded dataset, in
+    float64, and the regridded ocean fraction.
     """
     ocean_fraction = regridder(wetmask.astype("float64"), keep_attrs=False).fillna(0.0)
     divisor = ocean_fraction.where(ocean_fraction > OCEAN_FRACTION_THRESHOLD)
     out = xr.Dataset(attrs=ds.attrs)
     for name, da in ds.data_vars.items():
-        masked = da.where(wetmask).fillna(0.0)
-        out[name] = (regridder(masked, keep_attrs=True) / divisor).astype(da.dtype)
+        masked = da.astype("float64").where(wetmask).fillna(0.0)
+        out[name] = regridder(masked, keep_attrs=True) / divisor
         out[name].attrs = da.attrs
     ocean_fraction.attrs = {
         "long_name": "fraction of target cell overlapping ocean source cells",

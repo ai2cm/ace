@@ -48,6 +48,7 @@ smoke_test:
 		--config $(CONFIG) $(MEMBER_FLAG) \
 		--num-timesteps $(SMOKE_NUM_TIMESTEPS) \
 		--output-path $(SMOKE_OUTPUT_PATH) \
+		--ace-commit $(ACE_COMMIT) \
 		--runner DirectRunner \
 		--job_server_timeout 3600
 	conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) python -m pipeline.om4.check_output \
@@ -87,6 +88,7 @@ smoke_test_repeat_fails:
 		--config $(CONFIG) $(MEMBER_FLAG) \
 		--num-timesteps $(SMOKE_NUM_TIMESTEPS) \
 		--output-path $(SMOKE_OUTPUT_PATH) \
+		--ace-commit $(ACE_COMMIT) \
 		--runner DirectRunner \
 		--job_server_timeout 3600
 
@@ -116,7 +118,8 @@ smoke_tests_1daily: check_wetmask_equivalence_1daily \
 dataflow: check_dataflow_image
 	SDK_CONTAINER_IMAGE=$(IMAGE_NAME) \
 		conda run --no-capture-output -n $(LOCAL_ENVIRONMENT) \
-		./run-dataflow.sh om4 DataflowRunner $(CONFIG) $(MEMBER_FLAG)
+		./run-dataflow.sh om4 DataflowRunner $(CONFIG) $(MEMBER_FLAG) \
+		--ace-commit $(ACE_COMMIT) --image-tag $(IMAGE_TAG)
 
 dataflow_picontrol_1deg:
 	$(MAKE) dataflow CONFIG=configs/om4-picontrol-1deg-5daily.yaml
