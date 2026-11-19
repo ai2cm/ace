@@ -284,3 +284,23 @@ def hfds(
 ) -> torch.Tensor:
     """Compute the net downward surface heat flux."""
     return data.net_downward_surface_heat_flux
+
+
+@register(VariableMetadata("m", "Mixed layer depth, Wright (1997) density threshold"))
+def mld_wright97(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Density-threshold mixed layer depth, positive down."""
+    return data.mld_wright97
+
+
+@register(
+    VariableMetadata("m", "Globally demeaned manometric sea level, Wright (1997)")
+)
+def manometric_sea_level_wright97(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Globally demeaned manometric sea level, zos minus steric sea level."""
+    return data.manometric_sea_level_wright97
