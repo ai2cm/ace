@@ -1,5 +1,6 @@
 import copy
 import dataclasses
+import math
 import pathlib
 import subprocess
 import tempfile
@@ -1275,3 +1276,41 @@ def test_train_config_with_stepper_config_sets_stepper_config(tmp_path: pathlib.
         inference=[],
     )
     assert train_config.stepper_config is stepper
+
+
+@pytest.mark.medium_duration
+def test_train_writes_drift_gated_soup_checkpoint(tmp_path):
+    # inline inference spans 800 days, long enough for the global-mean drift
+    # metric, so the soup window is drift-gated rather than ungated
+    train_config, _ = _setup(
+        tmp_path,
+        "SphericalFourierNeuralOperatorNet",
+        log_to_wandb=True,
+        max_epochs=2,
+        segment_epochs=2,
+        timestep_days=40,
+        n_time=22,
+        inference_forward_steps=20,
+    )
+    with open(train_config) as f:
+        config_dict = yaml.safe_load(f)
+    config_dict["ema_checkpoint_save_epochs"] = {"start": 1}
+    config_dict["checkpoint_selection"] = {"window": 2, "t_cutoff": 3.1}
+    with open(train_config, "w") as f:
+        yaml.dump(config_dict, f)
+    with mock_wandb() as wandb:
+        train_main(yaml_config=train_config)
+        epoch_logs = [log for log in wandb.get_logs() if "epoch" in log]
+    assert epoch_logs[0]["soup/status"] == "partial"
+    assert epoch_logs[-1]["soup/status"] in ("passed", "fallback")
+    assert epoch_logs[-1]["soup/epochs"] == "1-2"
+    checkpoint_dir = tmp_path / "results" / "training_checkpoints"
+    soup = torch.load(
+        checkpoint_dir / "soup_ckpt.tar", map_location="cpu", weights_only=False
+    )
+    assert soup["soup"]["sources"] == [
+        str(checkpoint_dir / "ema_ckpt_0001.tar"),
+        str(checkpoint_dir / "ema_ckpt_0002.tar"),
+    ]
+    # the drift gate read the per-epoch max |t| logged by the drift metric
+    assert not math.isnan(epoch_logs[-1]["soup/drift"])

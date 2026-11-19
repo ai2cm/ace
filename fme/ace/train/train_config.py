@@ -38,6 +38,7 @@ from fme.core.dataset_info import DatasetInfo
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
+from fme.core.generics.checkpoint_selection import CheckpointSelectionConfig
 from fme.core.generics.lr_tuning import LRTuningConfig, ValidateStepper
 from fme.core.generics.train_stepper import TrainStepperABC
 from fme.core.generics.trainer import (
@@ -51,6 +52,7 @@ from fme.core.generics.trainer import (
     ValidationTask,
     build_inference_callback,
     build_validation_callback,
+    validate_checkpoint_selection,
 )
 from fme.core.generics.validation import run_validation_loop
 from fme.core.logging_utils import LoggingConfig
@@ -393,6 +395,14 @@ class TrainConfig:
             subdirectory, then it is assumed that this is a new run to resume a
             previously completed run and resume_results.existing_dir is recursively
             copied to experiment_dir.
+        checkpoint_selection: If given, write ``soup_ckpt.tar`` during
+            training: the average of the EMA epoch checkpoints of a window of
+            inference epochs selected by weighted inference error, gated on
+            the global-mean drift of the inference entries with weight > 0.
+            Requires ``ema_checkpoint_save_epochs`` to include every epoch and
+            an inference entry with weight > 0. The soup averages EMA weights
+            regardless of ``validate_using_ema``. See
+            :class:`CheckpointSelectionConfig`.
     """
 
     train_loader: DataLoaderConfig
@@ -429,6 +439,7 @@ class TrainConfig:
     save_best_inference_epoch_checkpoints: bool = False
     lr_tuning: LRTuningConfig | None = None
     resume_results: ResumeResultsConfig | None = None
+    checkpoint_selection: CheckpointSelectionConfig | None = None
 
     @functools.cached_property
     def stepper_config(self) -> StepperConfig:
@@ -478,6 +489,7 @@ class TrainConfig:
                 f"directory, got {self.experiment_dir!r}."
             )
         self._validate_weighted_inference_epochs()
+        self._validate_checkpoint_selection()
         if self.stepper_training.n_forward_steps is None:
             raise ValueError(
                 "n_forward_steps must be specified in stepper_training "
@@ -503,6 +515,34 @@ class TrainConfig:
                         "metric is comparable across epochs. Use weight=0 for "
                         "supplementary entries that run on different epochs."
                     )
+
+    def _validate_checkpoint_selection(self):
+        validate_checkpoint_selection(
+            self.checkpoint_selection,
+            max_epochs=self.max_epochs,
+            save_checkpoint=self.save_checkpoint,
+            ema_checkpoint_save_epochs=self.ema_checkpoint_save_epochs,
+        )
+        if self.checkpoint_selection is not None and not any(
+            entry.weight > 0 for entry in self.inference_list
+        ):
+            raise ValueError(
+                "checkpoint_selection requires an inference entry with weight > 0, "
+                "whose error and drift are used to select the soup window."
+            )
+
+    @property
+    def _drift_log_keys(self) -> list[str]:
+        """Log keys of the drift max |t| of inference entries with weight > 0."""
+        keys = []
+        for name, entry in zip(self.inference_names, self.inference_list):
+            # the legacy aggregator config does not compute drift
+            if entry.weight > 0 and isinstance(
+                entry.aggregator, InferenceEvaluatorAggregatorConfig
+            ):
+                drift_name = entry.aggregator.global_mean_drift.name
+                keys.append(f"{name}/{drift_name}/max_abs_t")
+        return keys
 
     def set_random_seed(self):
         if self.seed is not None:
@@ -600,6 +640,8 @@ class TrainConfig:
                 self.save_best_inference_epoch_checkpoints
             ),
             lr_tuning=self.lr_tuning,
+            checkpoint_selection=self.checkpoint_selection,
+            checkpoint_selection_drift_log_keys=self._drift_log_keys,
         )
 
     def _get_n_forward_steps(self) -> int | IntSchedule:

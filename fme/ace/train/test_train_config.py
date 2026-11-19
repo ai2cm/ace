@@ -28,6 +28,7 @@ from fme.ace.train.train_config import (
 )
 from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.generics.aggregator import AggregatorSummary, InferenceSummary
+from fme.core.generics.checkpoint_selection import CheckpointSelectionConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.optimization import OptimizationConfig
 from fme.core.step.single_module import SingleModuleStepConfig
@@ -621,3 +622,60 @@ class TestGetInferenceCallback:
                 entries,
                 [InferenceSummary(logs={"a/other_metric": 1.0}, loss=None)],
             )
+
+
+def _make_checkpoint_selection_train_config(
+    tmp_path,
+    inference: InlineInferenceConfig | list[InlineInferenceConfig],
+    ema_checkpoint_save_epochs: Slice | None = Slice(start=1),
+) -> TrainConfig:
+    return dataclasses.replace(
+        _make_train_config(tmp_path, inference),
+        save_checkpoint=True,
+        ema_checkpoint_save_epochs=ema_checkpoint_save_epochs,
+        checkpoint_selection=dacite.from_dict(
+            CheckpointSelectionConfig,
+            {"window": 3, "t_cutoff": 2.5, "mode": "final_window"},
+            config=dacite.Config(strict=True),
+        ),
+    )
+
+
+def test_checkpoint_selection_passed_to_trainer_params(tmp_path):
+    config = _make_checkpoint_selection_train_config(tmp_path, _make_inference_config())
+    assert config.get_trainer_params().checkpoint_selection == (
+        CheckpointSelectionConfig(window=3, t_cutoff=2.5, mode="final_window")
+    )
+
+
+def test_checkpoint_selection_drift_log_keys_of_weighted_entries(tmp_path):
+    config = _make_checkpoint_selection_train_config(
+        tmp_path,
+        [
+            _make_inference_config(name="climate", weight=1.0),
+            _make_inference_config(name="weather", weight=0.0),
+        ],
+    )
+    assert list(config.get_trainer_params().checkpoint_selection_drift_log_keys) == [
+        "climate/global_mean_drift/max_abs_t"
+    ]
+
+
+def test_checkpoint_selection_disabled_by_default(tmp_path):
+    config = _make_train_config(tmp_path, _make_inference_config())
+    assert config.checkpoint_selection is None
+    assert config.get_trainer_params().checkpoint_selection is None
+
+
+def test_checkpoint_selection_requires_weighted_inference(tmp_path):
+    with pytest.raises(ValueError, match="weight > 0"):
+        _make_checkpoint_selection_train_config(
+            tmp_path, _make_inference_config(weight=0.0)
+        )
+
+
+def test_checkpoint_selection_requires_ema_checkpoint_every_epoch(tmp_path):
+    with pytest.raises(ValueError, match="ema_checkpoint_save_epochs"):
+        _make_checkpoint_selection_train_config(
+            tmp_path, _make_inference_config(), ema_checkpoint_save_epochs=None
+        )

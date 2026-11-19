@@ -3,6 +3,7 @@ from ..one_step.reduced import StepMeanMetricConfig
 from .annual import AnnualMetricConfig
 from .enso.dynamic_index import EnsoIndexMetricConfig
 from .enso.enso_coefficient import EnsoCoefficientMetricConfig
+from .global_mean_drift import GlobalMeanDriftConfig
 from .histogram import HistogramMetricConfig
 from .ipo.ipo_index import IpoIndexMetricConfig
 from .main import (
