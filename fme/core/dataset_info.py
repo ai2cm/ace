@@ -5,6 +5,11 @@ from typing import Any
 
 import torch
 
+from fme.core.area_weights_provider import (
+    AreaWeightsProviderABC,
+    NullAreaWeightsProvider,
+    area_weights_provider_from_state,
+)
 from fme.core.atmosphere_data import HasAtmosphereVerticalIntegral
 from fme.core.coordinates import (
     HorizontalCoordinates,
@@ -50,6 +55,7 @@ class DatasetInfo:
         gridded_operations: GriddedOperations | None = None,
         img_shape: tuple[int, int] | None = None,
         all_labels: set[str] | None = None,
+        area_weights_provider: AreaWeightsProviderABC | None = None,
     ):
         self._horizontal_coordinates = horizontal_coordinates
         self._vertical_coordinate = vertical_coordinate
@@ -59,6 +65,10 @@ class DatasetInfo:
         if all_labels is None:
             all_labels = set()
         self._all_labels = all_labels
+        if area_weights_provider is None or area_weights_provider.area_weights is None:
+            self._area_weights_provider: AreaWeightsProviderABC | None = None
+        else:
+            self._area_weights_provider = area_weights_provider
 
         # The gridded_operations and img_shape arguments are only provided for backwards
         # compatibility with older serialized states that have these attributes instead
@@ -81,6 +91,7 @@ class DatasetInfo:
             and self._horizontal_coordinates == other._horizontal_coordinates
             and self._vertical_coordinate == other._vertical_coordinate
             and self._spatial_mask_provider == other._spatial_mask_provider
+            and self._area_weights_provider == other._area_weights_provider
             and self._timestep == other._timestep
             and self._variable_metadata == other._variable_metadata
         )
@@ -92,6 +103,7 @@ class DatasetInfo:
             f"vertical_coordinate={self._vertical_coordinate}, "
             f"timestep={self._timestep}), "
             f"spatial_mask_provider={self._spatial_mask_provider}, "
+            f"area_weights_provider={self._area_weights_provider}, "
             f"variable_metadata={self._variable_metadata}, "
             f"all_labels={self._all_labels})"
         )
@@ -129,6 +141,16 @@ class DatasetInfo:
                 )
             except AssertionError as e:
                 issues.append(f"spatial_mask_provider is not compatible: {e}")
+        if (
+            self._area_weights_provider is not None
+            and other._area_weights_provider is not None
+        ):
+            try:
+                self._area_weights_provider.assert_compatible_with(
+                    other._area_weights_provider
+                )
+            except AssertionError as e:
+                issues.append(f"area_weights_provider is not compatible: {e}")
         if self._timestep is not None:
             if self._timestep != other._timestep:
                 issues.append(
@@ -164,6 +186,16 @@ class DatasetInfo:
 
     @property
     def gridded_operations(self) -> GriddedOperations:
+        return self.get_gridded_operations()
+
+    def get_gridded_operations(
+        self, use_area_weights_provider: bool = True
+    ) -> GriddedOperations:
+        """
+        Args:
+            use_area_weights_provider: If False, area-weighted reductions use
+                latitude weights even when an area weights provider is present.
+        """
         if self._gridded_operations is not None:
             return self._gridded_operations
         if self._horizontal_coordinates is None:
@@ -172,8 +204,12 @@ class DatasetInfo:
             mp: SpatialMaskProviderABC = NullSpatialMaskProvider
         else:
             mp = self._spatial_mask_provider
+        if use_area_weights_provider:
+            awp = self.area_weights_provider
+        else:
+            awp = NullAreaWeightsProvider
         return self._horizontal_coordinates.get_gridded_operations(
-            spatial_mask_provider=mp
+            spatial_mask_provider=mp, area_weights_provider=awp
         )
 
     @property
@@ -223,6 +259,12 @@ class DatasetInfo:
         return self._spatial_mask_provider
 
     @property
+    def area_weights_provider(self) -> AreaWeightsProviderABC:
+        if self._area_weights_provider is None:
+            return NullAreaWeightsProvider
+        return self._area_weights_provider
+
+    @property
     def timestep(self) -> datetime.timedelta:
         if self._timestep is None:
             raise MissingDatasetInfo("timestep")
@@ -249,6 +291,7 @@ class DatasetInfo:
             gridded_operations=self._gridded_operations,
             img_shape=self._img_shape,
             all_labels=self._all_labels,
+            area_weights_provider=self._area_weights_provider,
         )
 
     def get_state(self) -> dict[str, Any]:
@@ -285,6 +328,7 @@ class DatasetInfo:
             "gridded_operations": gridded_operations,
             "img_shape": img_shape,
             "all_labels": list(self._all_labels),
+            "area_weights_provider": self.area_weights_provider.get_state(),
         }
 
     @classmethod
@@ -341,6 +385,9 @@ class DatasetInfo:
             gridded_operations=gridded_ops,
             img_shape=img_shape,
             all_labels=set(state.get("all_labels", [])),
+            area_weights_provider=area_weights_provider_from_state(
+                state.get("area_weights_provider")
+            ),
         )
 
 
