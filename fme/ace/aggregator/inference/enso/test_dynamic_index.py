@@ -385,6 +385,7 @@ def test_regional_index__get_gathered_indices(use_mock_distributed):
     [
         pytest.param("surface_temperature", id="surface_temperature"),
         pytest.param("sst", id="sst"),
+        pytest.param("SST_degK", id="SST_degK"),
         pytest.param("TS", id="TS"),
     ],
 )
@@ -446,6 +447,7 @@ def test_regional_index_aggregator(variable_name):
     [
         pytest.param("surface_temperature", id="surface_temperature"),
         pytest.param("sst", id="sst"),
+        pytest.param("SST_degK", id="SST_degK"),
         pytest.param("TS", id="TS"),
     ],
 )
