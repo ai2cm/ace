@@ -62,9 +62,9 @@ SamudrACEv2-hybridSSTdiag-muon|mse-null-lr50e-4|01M7PQJ24B6BNMN4QQFNZWKST3|train
 SamudrACEv2-hybridSSTdiag-muon|mse-null-lr50e-4|01M7PQJ24B6BNMN4QQFNZWKST3|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 SamudrACEv2-hybridSSTdiag-muon|mse-null-lr50e-4|01M7PQJ24B6BNMN4QQFNZWKST3|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
-SamudrACEv2-hybridSSTdiag-muon|mse-null-lr70e-4|01M7PQJDAE0MRXNVVXM51M620Q|training|best_inference_ckpt|normal|--min-runtime 8h
-SamudrACEv2-hybridSSTdiag-muon|mse-null-lr70e-4|01M7PQJDAE0MRXNVVXM51M620Q|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
-SamudrACEv2-hybridSSTdiag-muon|mse-null-lr70e-4|01M7PQJDAE0MRXNVVXM51M620Q|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr70e-4|01M7PQJDAE0MRXNVVXM51M620Q|trained|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr70e-4|01M7PQJDAE0MRXNVVXM51M620Q|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr70e-4|01M7PQJDAE0MRXNVVXM51M620Q|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr1e-4|01M7PQJRMEFV7BKTQ0M8ZMW9J3|training|best_inference_ckpt|normal|--min-runtime 8h
 
