@@ -4,6 +4,7 @@ import copy
 import dataclasses
 import datetime
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 import numpy as np
@@ -465,3 +466,105 @@ def test_parameter_init_weights_loaded_once(tmpdir):
     )
     # the weights should not be loaded again
     mock_load_weights_and_history.assert_called_once()
+
+
+def _samudra_stepper_config(noise_embed_dim: int = 0) -> StepperConfig:
+    # noise_embed_dim > 0 wraps the Samudra in a NoiseConditionedModel.
+    builder_config: dict[str, Any] = {
+        "ch_width": [8, 12],
+        "dilation": [1, 2],
+        "n_layers": [1, 1],
+    }
+    if noise_embed_dim > 0:
+        builder_config["noise_embed_dim"] = noise_embed_dim
+        builder_config["conditioned_blocks"] = "all_blocks"
+    return StepperConfig(
+        step=StepSelector(
+            type="single_module",
+            config=dataclasses.asdict(
+                SingleModuleStepConfig(
+                    builder=ModuleSelector(type="Samudra", config=builder_config),
+                    in_names=["x"],
+                    out_names=["x"],
+                    normalization=NetworkAndLossNormalizationConfig(
+                        network=NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
+def _init_stochastic_from_deterministic(tmpdir, **config_kwargs):
+    """Save a deterministic Samudra checkpoint, then build a noise-conditioned
+    stepper initialized from it. Returns (deterministic, stochastic, initializer).
+    """
+    dataset_info = get_dataset_info()
+    deterministic = _samudra_stepper_config().get_stepper(dataset_info=dataset_info)
+    path = str(tmpdir / "weights.ckpt")
+    torch.save({"stepper": deterministic.get_state()}, path)
+    initializer = ParameterInitializationConfig(
+        weights_path=path, **config_kwargs
+    ).build(load_weights_and_history)
+    stochastic = _samudra_stepper_config(noise_embed_dim=6).get_stepper(
+        dataset_info=dataset_info, parameter_initializer=initializer
+    )
+    return deterministic, stochastic, initializer
+
+
+def test_weights_submodule_stochastic_reproduces_deterministic(tmpdir):
+    deterministic, stochastic, _ = _init_stochastic_from_deterministic(
+        tmpdir, weights_submodule="conditional_model"
+    )
+    source, loaded = deterministic.modules[0], stochastic.modules[0]
+    source.eval()
+    loaded.eval()
+    torch.manual_seed(0)
+    x = torch.randn(2, 1, 16, 32, device=get_device())
+    with torch.no_grad():
+        # FiLM layers are zero-initialized, so the noise has no effect yet.
+        assert torch.equal(loaded(x), source(x))
+        assert torch.equal(loaded(x), loaded(x))
+
+
+def test_weights_submodule_omitted_error_suggests_it(tmpdir):
+    with pytest.raises(ValueError, match="'conditional_model'.*weights_submodule"):
+        _init_stochastic_from_deterministic(tmpdir)
+
+
+def test_weights_submodule_exclude_uses_destination_names(tmpdir):
+    excluded = "module.conditional_model.layers.0.convblock.0.weight"
+    deterministic, stochastic, _ = _init_stochastic_from_deterministic(
+        tmpdir,
+        weights_submodule="conditional_model",
+        parameters=[ParameterClassification(exclude=[excluded])],
+    )
+    loaded = stochastic.modules[0].state_dict()
+    source = deterministic.modules[0].state_dict()
+    assert not torch.equal(
+        loaded[excluded], source["module.layers.0.convblock.0.weight"]
+    )
+    assert torch.equal(
+        loaded["module.conditional_model.layers.0.convblock.0.bias"],
+        source["module.layers.0.convblock.0.bias"],
+    )
+
+
+def test_weights_submodule_without_loaded_weights_raises():
+    initializer = ParameterInitializationConfig(
+        weights_submodule="conditional_model"
+    ).build(load_weights_and_history)
+    with pytest.raises(ValueError, match="no weights were loaded"):
+        initializer.apply_weights([torch.nn.Linear(2, 2)])
+
+
+def test_weights_submodule_l2_sp_regularizer(tmpdir):
+    _, stochastic, initializer = _init_stochastic_from_deterministic(
+        tmpdir, weights_submodule="conditional_model", alpha=1.0
+    )
+    regularizer = initializer.get_l2_sp_tuning_regularizer(stochastic.modules)
+    assert torch.equal(regularizer(), torch.zeros((), device=get_device()))
+    with torch.no_grad():
+        for parameter in stochastic.modules[0].parameters():
+            parameter.add_(1.0)
+    assert regularizer() > 0.0
