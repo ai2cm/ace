@@ -25,6 +25,11 @@ CONFIG_PATH="$SCRIPT_PATH/evaluator-baseline-constant-co2.yaml"
 # 01M70VEE6375A7G3X0SSV97HDG (muon-4deg-pretrain-rs1, wandb b6v0uw1j)
 CHECKPOINT_DATASET=01M7536HDXJ6MDGVXAXZKNCJ2M
 
+# Clusters default to jupiter and titan; override with e.g.
+# CLUSTERS="ai2/titan" to route around a faulty node.
+cluster_args=()
+for c in ${CLUSTERS:-ai2/jupiter ai2/titan}; do cluster_args+=(--cluster "$c"); done
+
 cd "$REPO_ROOT"
 python -m fme.ace.validate_config --config_type evaluator "$CONFIG_PATH"
 
@@ -35,8 +40,7 @@ gantry run \
   --workspace ai2/ace \
   --priority "${PRIORITY:-high}" \
   --not-preemptible \
-  --cluster ai2/jupiter \
-  --cluster ai2/titan \
+  "${cluster_args[@]}" \
   --env WANDB_USERNAME="$WANDB_USERNAME" \
   --env WANDB_NAME="$JOB_NAME" \
   --env WANDB_JOB_TYPE=inference \

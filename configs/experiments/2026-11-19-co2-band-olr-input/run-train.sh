@@ -84,6 +84,11 @@ PY
 }
 # === END GUARDRAILS =========================================================
 
+# Clusters default to jupiter and titan; override with e.g.
+# CLUSTERS="ai2/titan" to route around a faulty node.
+cluster_args=()
+for c in ${CLUSTERS:-ai2/jupiter ai2/titan}; do cluster_args+=(--cluster "$c"); done
+
 cd "$REPO_ROOT"
 
 run_training() {
@@ -122,8 +127,7 @@ run_training() {
     --workspace ai2/ace \
     --priority "${PRIORITY:-high}" \
     --min-runtime "${MIN_RUNTIME:-8h}" \
-    --cluster ai2/jupiter \
-    --cluster ai2/titan \
+    "${cluster_args[@]}" \
     --env WANDB_USERNAME="$WANDB_USERNAME" \
     --env WANDB_NAME="$job_name" \
     --env WANDB_JOB_TYPE=training \
