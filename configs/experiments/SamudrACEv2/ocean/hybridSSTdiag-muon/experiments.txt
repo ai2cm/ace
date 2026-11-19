@@ -1,43 +1,70 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
 
 SamudrACEv2-hybridSSTdiag-muon|mae-null-lr10e-4|01M7PQCE6PHPK3H7FJF0PDCZH2|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr10e-4|01M7PQCE6PHPK3H7FJF0PDCZH2|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr10e-4|01M7PQCE6PHPK3H7FJF0PDCZH2|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-null-lr15e-4|01M7PQCSPGGQC852G08P9M13TK|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr15e-4|01M7PQCSPGGQC852G08P9M13TK|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr15e-4|01M7PQCSPGGQC852G08P9M13TK|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-null-lr20e-4|01M7PQD59JT7ER82NGSM23WYSA|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr20e-4|01M7PQD59JT7ER82NGSM23WYSA|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr20e-4|01M7PQD59JT7ER82NGSM23WYSA|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-null-lr30e-4|01M7PQDG203PW0J9MRNT6DDFXS|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr30e-4|01M7PQDG203PW0J9MRNT6DDFXS|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr30e-4|01M7PQDG203PW0J9MRNT6DDFXS|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-null-lr50e-4|01M7PQDVB80BJ11JTJFZRQTHQ9|training|best_inference_ckpt|normal|--min-runtime 8h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-null-lr70e-4|01M7PQE67DDT0ZKQMR9711VYKC|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr70e-4|01M7PQE67DDT0ZKQMR9711VYKC|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr70e-4|01M7PQE67DDT0ZKQMR9711VYKC|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
-# --config-dir configs/experiments/SamudrACEv2/ocean/eval
+# --config-dir configs/experiments/SamudrACEv2/eval/ocean
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr1e-4|01M7PQEH3C5PDG49WW9Y27KVCZ|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
-SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr1e-4|01M7PQEH3C5PDG49WW9Y27KVCZ|run_piC-ic0151-200yr-maps|best_inference_ckpt|high|--min-runtime 2h
-SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr1e-4|01M7PQEH3C5PDG49WW9Y27KVCZ|run_piC-ic0151-200yr-x0c|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr1e-4|01M7PQEH3C5PDG49WW9Y27KVCZ|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr2e-4|01M7PQEWR7SV8Q17VTSFRY4967|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr2e-4|01M7PQEWR7SV8Q17VTSFRY4967|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr2e-4|01M7PQEWR7SV8Q17VTSFRY4967|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr3e-4|01M7PQF85EZYJSEK7HWGBV60DK|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr3e-4|01M7PQF85EZYJSEK7HWGBV60DK|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr3e-4|01M7PQF85EZYJSEK7HWGBV60DK|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr6e-4|01M7PQFK513X0TRA33V9HBR7NZ|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr6e-4|01M7PQFK513X0TRA33V9HBR7NZ|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr6e-4|01M7PQFK513X0TRA33V9HBR7NZ|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr10e-4|01M7PQFYBBSPP8S6CZDDAAZ5PN|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr10e-4|01M7PQFYBBSPP8S6CZDDAAZ5PN|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr10e-4|01M7PQFYBBSPP8S6CZDDAAZ5PN|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr30e-4|01M7PQG9A2D98WRV8NSWSCRENC|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr30e-4|01M7PQG9A2D98WRV8NSWSCRENC|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr30e-4|01M7PQG9A2D98WRV8NSWSCRENC|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-null-lr10e-4|01M7PQGMMRMMDYKV4R96G1AHAQ|training|best_inference_ckpt|normal|--min-runtime 8h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-null-lr15e-4|01M7PQH0JZ6SQB944YGS43X8JH|training|best_inference_ckpt|normal|--min-runtime 8h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-null-lr20e-4|01M7PQHBQSC63KX7909P20E6G7|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr20e-4|01M7PQHBQSC63KX7909P20E6G7|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr20e-4|01M7PQHBQSC63KX7909P20E6G7|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-null-lr30e-4|01M7PQHPTCYHX56SKPWR9VP8H0|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr30e-4|01M7PQHPTCYHX56SKPWR9VP8H0|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr30e-4|01M7PQHPTCYHX56SKPWR9VP8H0|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-null-lr50e-4|01M7PQJ24B6BNMN4QQFNZWKST3|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr50e-4|01M7PQJ24B6BNMN4QQFNZWKST3|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr50e-4|01M7PQJ24B6BNMN4QQFNZWKST3|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-null-lr70e-4|01M7PQJDAE0MRXNVVXM51M620Q|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr70e-4|01M7PQJDAE0MRXNVVXM51M620Q|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr70e-4|01M7PQJDAE0MRXNVVXM51M620Q|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr1e-4|01M7PQJRMEFV7BKTQ0M8ZMW9J3|training|best_inference_ckpt|normal|--min-runtime 8h
 
@@ -48,15 +75,27 @@ SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr3e-4|01M7PQKEKR4HFY4YYZ5EASFB07|traini
 SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr6e-4|01M7PQKT501FH6QERPXX58TSF2|training|best_inference_ckpt|normal|--min-runtime 8h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr10e-4|01M7PQM5BY6BFPJJTCMAPQ1X8F|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr10e-4|01M7PQM5BY6BFPJJTCMAPQ1X8F|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr10e-4|01M7PQM5BY6BFPJJTCMAPQ1X8F|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr30e-4|01M7PQMGBKAJGZTJX68DTFSN0W|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr30e-4|01M7PQMGBKAJGZTJX68DTFSN0W|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr30e-4|01M7PQMGBKAJGZTJX68DTFSN0W|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-null-lr100e-4|01M7QS4C64ACCDFZR7WP95BHQN|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr100e-4|01M7QS4C64ACCDFZR7WP95BHQN|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mae-null-lr100e-4|01M7QS4C64ACCDFZR7WP95BHQN|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-null-lr100e-4|01M7QTQHFV8Z2HX024YZSZNQDN|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr100e-4|01M7QTQHFV8Z2HX024YZSZNQDN|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr100e-4|01M7QTQHFV8Z2HX024YZSZNQDN|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-null-lr150e-4|01M7QTQZ8YXV16N6J0V05SMK8K|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr150e-4|01M7QTQZ8YXV16N6J0V05SMK8K|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr150e-4|01M7QTQZ8YXV16N6J0V05SMK8K|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr60e-4|01M7QTRCAS26Q9J5MRY5Q1QWE8|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr60e-4|01M7QTRCAS26Q9J5MRY5Q1QWE8|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr60e-4|01M7QTRCAS26Q9J5MRY5Q1QWE8|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr100e-4|01M7QTRV2F08HX05M0X8TQT6G0|training|best_inference_ckpt|normal|--min-runtime 8h

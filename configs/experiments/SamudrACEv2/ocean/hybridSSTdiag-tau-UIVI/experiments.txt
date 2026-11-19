@@ -1,3 +1,6 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
 
+# --config-dir configs/experiments/SamudrACEv2/eval/ocean
 SamudrACEv2-hybridSSTdiag-tau-UIVI|rs0|01M7R8CGWTP6GA8VTA7M6VTK89|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-tau-UIVI|rs0|01M7R8CGWTP6GA8VTA7M6VTK89|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-tau-UIVI|rs0|01M7R8CGWTP6GA8VTA7M6VTK89|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h

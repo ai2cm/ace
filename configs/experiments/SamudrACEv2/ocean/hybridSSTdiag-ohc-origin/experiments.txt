@@ -1,9 +1,18 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
 
+# --config-dir configs/experiments/SamudrACEv2/eval/ocean
 SamudrACEv2-hybridSSTdiag-ohc-origin|Tref-neg2-w1|01M7PXGDHQ99WFDCR6VPZND5H4|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-ohc-origin|Tref-neg2-w1|01M7PXGDHQ99WFDCR6VPZND5H4|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-ohc-origin|Tref-neg2-w1|01M7PXGDHQ99WFDCR6VPZND5H4|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-ohc-origin|Tref-neg32-w1|01M7PXGSTTB78M17KCMHJBNTG5|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-ohc-origin|Tref-neg32-w1|01M7PXGSTTB78M17KCMHJBNTG5|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-ohc-origin|Tref-neg32-w1|01M7PXGSTTB78M17KCMHJBNTG5|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-ohc-origin|Tref-neg273-w1|01M7PXH6W8MEFMZRAGH6FWGSJ6|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-ohc-origin|Tref-neg273-w1|01M7PXH6W8MEFMZRAGH6FWGSJ6|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-ohc-origin|Tref-neg273-w1|01M7PXH6W8MEFMZRAGH6FWGSJ6|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-ohc-origin|Tref-neg273-wlearned|01M7PXHKH4GBRRG8VSJBS6TGK6|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-ohc-origin|Tref-neg273-wlearned|01M7PXHKH4GBRRG8VSJBS6TGK6|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-ohc-origin|Tref-neg273-wlearned|01M7PXHKH4GBRRG8VSJBS6TGK6|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
