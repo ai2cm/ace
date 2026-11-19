@@ -23,8 +23,8 @@ SamudrACEv2-hybridSSTdiag-muon|mae-null-lr70e-4|01M7PQE67DDT0ZKQMR9711VYKC|wait_
 SamudrACEv2-hybridSSTdiag-muon|mae-null-lr70e-4|01M7PQE67DDT0ZKQMR9711VYKC|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 # --config-dir configs/experiments/SamudrACEv2/eval/ocean
-SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr1e-4|01M7PQEH3C5PDG49WW9Y27KVCZ|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
-SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr1e-4|01M7PQEH3C5PDG49WW9Y27KVCZ|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr1e-4|01M7PQEH3C5PDG49WW9Y27KVCZ|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr1e-4|01M7PQEH3C5PDG49WW9Y27KVCZ|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr2e-4|01M7PQEWR7SV8Q17VTSFRY4967|training|best_inference_ckpt|normal|--min-runtime 8h
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr2e-4|01M7PQEWR7SV8Q17VTSFRY4967|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
@@ -39,8 +39,8 @@ SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr6e-4|01M7PQFK513X0TRA33V9HBR7NZ|wait_p
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr6e-4|01M7PQFK513X0TRA33V9HBR7NZ|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr10e-4|01M7PQFYBBSPP8S6CZDDAAZ5PN|trained|best_inference_ckpt|normal|--min-runtime 8h
-SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr10e-4|01M7PQFYBBSPP8S6CZDDAAZ5PN|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
-SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr10e-4|01M7PQFYBBSPP8S6CZDDAAZ5PN|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr10e-4|01M7PQFYBBSPP8S6CZDDAAZ5PN|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr10e-4|01M7PQFYBBSPP8S6CZDDAAZ5PN|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr30e-4|01M7PQG9A2D98WRV8NSWSCRENC|training|best_inference_ckpt|normal|--min-runtime 8h
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr30e-4|01M7PQG9A2D98WRV8NSWSCRENC|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
