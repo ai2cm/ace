@@ -1,0 +1,14 @@
+# Normalization stats for the 4-degree GLORYS12 + ERA5 5-day ocean training set
+# produced by `make glorys_dataflow_four_degree` in scripts/glorys/Makefile. The
+# run name matches that target (DATE-DATASET_NAME_FOUR_DEGREE); update it
+# whenever the pipeline is re-run. Same stats window as the 1-degree set: the
+# years from 2022 overlap GLO12 and are held out of the normalization.
+runs:
+  2026-10-21-glorys12-ocean-4deg-19level-5day-1993-2025: ""
+data_output_directory: gs://vcm-ml-intermediate
+stats:
+  output_directory: gs://vcm-ml-intermediate/glorys12-ocean-4deg-19level-5day-stats
+  beaker_dataset: glorys12-ocean-4deg-19level-5day-stats
+  data_type: UFS_REPLAY  # same variable set and layout as the UFS replay ocean
+  start_date: "1993-01-01"
+  end_date: "2021-12-31"
