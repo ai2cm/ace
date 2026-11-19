@@ -1,3 +1,19 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
 
-1deg-hybridsstdiag-randco2ft-x5d-pclr-replayonly-tb6xf0ju||01M7PTPNH811WEV5AS4EBQDJKE|training|best_inference_ckpt|normal|--min-runtime 8h
+# U10 begin X5d
+# X5d 01M7PTPNH811WEV5AS4EBQDJKE: training finished (jobs[-1] 01M7PTPNNGP2R0C32NJK4AA6WJ: exit 0); results dataset 01M7PTPNHJCGS0MKXTNP8MR2MJ.
+# training row: 1deg-hybridsstdiag-randco2ft-x5d-pclr-replayonly-tb6xf0ju||01M7PTPNH811WEV5AS4EBQDJKE|training|best_inference_ckpt|normal|--min-runtime 8h
+# Rows written by analysis/2026-11-15-2110-coupled-ft-enso-randco2-training/scripts/U10_eval_rows.py;
+# deferred_upload_* rows wait for the results dataset to be committed with their EMA file (rerun the script);
+# running_/ran_/failed_* rows are already launched (queue_evals.py mark prefixes).
+# launch: ./job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_randco2ft_x5d . --config-dir configs/experiments/cm4_eval/coupled
+# --config-dir configs/experiments/cm4_eval/coupled
+1deg-hybridsstdiag-randco2ft-x5d-pclr-replayonly-tb6xf0ju||01M7PTPNH811WEV5AS4EBQDJKE|run_1pct-ic0001-130yr|ema_ckpt_0001|high|--min-runtime 8h||01M7PTPNHJCGS0MKXTNP8MR2MJ
+1deg-hybridsstdiag-randco2ft-x5d-pclr-replayonly-tb6xf0ju||01M7PTPNH811WEV5AS4EBQDJKE|run_piC-ic0151-200yr|ema_ckpt_0001|high|--min-runtime 8h||01M7PTPNHJCGS0MKXTNP8MR2MJ
+1deg-hybridsstdiag-randco2ft-x5d-pclr-replayonly-tb6xf0ju||01M7PTPNH811WEV5AS4EBQDJKE|run_1pct-ic0001-130yr|ema_ckpt_0002|high|--min-runtime 8h||01M7PTPNHJCGS0MKXTNP8MR2MJ
+1deg-hybridsstdiag-randco2ft-x5d-pclr-replayonly-tb6xf0ju||01M7PTPNH811WEV5AS4EBQDJKE|run_piC-ic0151-200yr|ema_ckpt_0002|high|--min-runtime 8h||01M7PTPNHJCGS0MKXTNP8MR2MJ
+1deg-hybridsstdiag-randco2ft-x5d-pclr-replayonly-tb6xf0ju||01M7PTPNH811WEV5AS4EBQDJKE|run_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 8h||01M7PTPNHJCGS0MKXTNP8MR2MJ
+1deg-hybridsstdiag-randco2ft-x5d-pclr-replayonly-tb6xf0ju||01M7PTPNH811WEV5AS4EBQDJKE|run_piC-ic0151-200yr|ema_ckpt_0003|high|--min-runtime 8h||01M7PTPNHJCGS0MKXTNP8MR2MJ
+1deg-hybridsstdiag-randco2ft-x5d-pclr-replayonly-tb6xf0ju||01M7PTPNH811WEV5AS4EBQDJKE|run_1pct-ic0001-130yr|ema_ckpt_0004|high|--min-runtime 8h||01M7PTPNHJCGS0MKXTNP8MR2MJ
+1deg-hybridsstdiag-randco2ft-x5d-pclr-replayonly-tb6xf0ju||01M7PTPNH811WEV5AS4EBQDJKE|run_piC-ic0151-200yr|ema_ckpt_0004|high|--min-runtime 8h||01M7PTPNHJCGS0MKXTNP8MR2MJ
+# U10 end X5d
