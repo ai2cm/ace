@@ -683,7 +683,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
     def _forward_features(self, x):
         for blk in self.blocks:
             if self.checkpointing >= 3:
-                x = checkpoint(blk, x)
+                x = checkpoint(blk, x, use_reentrant=False)
             else:
                 x = blk(x)
 
@@ -695,7 +695,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             residual = self.residual_filter_up(self.residual_filter_down(x))
 
         if self.checkpointing >= 1:
-            x = checkpoint(self.encoder, x)
+            x = checkpoint(self.encoder, x, use_reentrant=False)
         else:
             x = self.encoder(x)
 
@@ -721,7 +721,7 @@ class SphericalFourierNeuralOperatorNet(torch.nn.Module):
             x = torch.cat((x, residual), dim=1)
 
         if self.checkpointing >= 1:
-            x = checkpoint(self.decoder, x)
+            x = checkpoint(self.decoder, x, use_reentrant=False)
         else:
             x = self.decoder(x)
 
