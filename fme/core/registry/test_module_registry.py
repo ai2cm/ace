@@ -37,7 +37,15 @@ class MockModuleBuilder(ModuleConfig):
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
         return dict(state)
 
-    def build(self, n_in_channels, n_out_channels, dataset_info):
+    def build(
+        self,
+        n_in_channels,
+        n_out_channels,
+        dataset_info,
+        *,
+        in_names=None,
+        out_names=None,
+    ):
         return MockModule(self.param_shapes)
 
     def get_state(self):
@@ -56,7 +64,15 @@ class MockModuleBuilderWithDefault(ModuleConfig):
     def remove_deprecated_keys(cls, state: Mapping[str, Any]) -> dict[str, Any]:
         return dict(state)
 
-    def build(self, n_in_channels, n_out_channels, dataset_info):
+    def build(
+        self,
+        n_in_channels,
+        n_out_channels,
+        dataset_info,
+        *,
+        in_names=None,
+        out_names=None,
+    ):
         return MockModule(self.param_shapes)
 
 
@@ -76,7 +92,15 @@ class MockModuleBuilderWithDeprecation(ModuleConfig):
             result["new_name"] = result.pop("old_name")
         return result
 
-    def build(self, n_in_channels, n_out_channels, dataset_info):
+    def build(
+        self,
+        n_in_channels,
+        n_out_channels,
+        dataset_info,
+        *,
+        in_names=None,
+        out_names=None,
+    ):
         return MockModule(self.param_shapes)
 
 
