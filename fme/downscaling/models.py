@@ -138,14 +138,11 @@ class UpsamplingConfig:
     @property
     def requires_training_patch_shape(self) -> bool:
         """
-        Whether generation must use inputs of the training patch shape.
-
         Bicubic or bilinear interpolation with align_corners=True has offset
         errors in the upsampled domain that grow when the generated domain size
         differs from the training patch size, so domains larger than the
         training patch must be generated in training-sized patches.
         """
-        # align_corners=True is only allowed for bicubic and bilinear modes
         return self.align_corners
 
     @classmethod

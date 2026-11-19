@@ -245,10 +245,10 @@ def get_generation_model(
 ) -> DiffusionModel | DenoisingMoEPredictor | PatchPredictor:
     """
     Validate that the model supports generating on inputs of ``input_shape``
-    and return the model to generate with: a PatchPredictor wrapping the model
-    when patch prediction is configured and the input extent differs from the
-    model's training patch size, otherwise the model itself, which generates
-    on the full input extent at once.
+    and return the model to generate with either i) PatchPredictor wrapping the
+    model when patch prediction is configured and the input extent is larger
+    than the model's training patch size, otherwise ii) the model itself,
+    which generates on the full input extent at once.
 
     Args:
         model: the model to generate with.
