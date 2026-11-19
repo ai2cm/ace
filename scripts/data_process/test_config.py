@@ -92,7 +92,11 @@ def test_valid_dataset_append_config(filename, cls):
 def test_valid_create_coupled_datasets_config(filename):
     with open(filename, "r") as f:
         config_data = yaml.load(f, Loader=yaml.CLoader)
-    dacite.from_dict(data_class=CreateCoupledDatasetsConfig, data=config_data)
+    dacite.from_dict(
+        data_class=CreateCoupledDatasetsConfig,
+        data=config_data,
+        config=dacite.Config(cast=[tuple], strict=True),
+    )
 
 
 @pytest.mark.parametrize("filename", COUPLED_IC_CONFIG_YAMLS)

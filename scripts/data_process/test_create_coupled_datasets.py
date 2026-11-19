@@ -14,6 +14,9 @@ from coupled_dataset_utils import (
     CoupledSeaIceConfig,
     CoupledSeaSurfaceConfig,
     CoupledSurfaceTemperatureConfig,
+    ExtraFieldsConfig,
+    SeaIceMaskConfig,
+    SeaIceMaskLatitudeLimits,
     compute_coupled_sea_ice,
 )
 from create_coupled_datasets import (
@@ -37,6 +40,9 @@ NLON = 8
 N_ATMOS_TIMES = 40  # 6-hourly steps covering ten days
 FIRST_WINDOW_END = "2000-01-06T00:00:00"
 LAND_LON = 0  # longitude index of the all-land column in inputs with land
+# masks the 26.7 deg N row of lat = linspace(-80, 80, NLAT), not the 26.7 deg S row
+MASK_LIMIT_NORTH = 30.0
+MASK_LIMIT_SOUTH = 20.0
 
 # get_dataset opens inputs with xr.open_zarr(chunks=...), which needs dask
 requires_dask = pytest.mark.skipif(
@@ -140,6 +146,11 @@ def _make_config(tmp_path, with_land=False):
                     window_timedelta="120h",
                     first_timestamp=FIRST_WINDOW_END,
                     subset_names=["latent_heat_flux"],
+                ),
+                sea_ice_mask=SeaIceMaskConfig(
+                    latitude_limits=SeaIceMaskLatitudeLimits(
+                        north=MASK_LIMIT_NORTH, south=MASK_LIMIT_SOUTH
+                    )
                 ),
             ),
             output_writer=OutputWriterConfig(n_split=1),
@@ -451,6 +462,56 @@ def test_exclude_runs_on_single_dataset_raises(tmp_path):
         dataclasses.replace(config, stats=CoupledStatsConfig(exclude_runs=["run-a"]))
 
 
+@pytest.mark.parametrize(
+    "extra_fields, raises",
+    [
+        pytest.param(["HI"], True, id="name"),
+        pytest.param(["sea_ice_"], True, id="prefix"),
+        pytest.param(["H", "sea_ice_volume_"], False, id="no-match"),
+    ],
+)
+@pytest.mark.parametrize("ensemble", [False, True])
+def test_sea_ice_masked_names_must_not_match_ocean_extra_fields(
+    tmp_path, extra_fields, raises, ensemble
+):
+    config = (
+        _make_ensemble_config(tmp_path, ["run-a"], exclude_runs=[])
+        if ensemble
+        else _make_config(tmp_path)
+    )
+    sea_surface = config.coupled_datasets.coupled_sea_surface
+    assert sea_surface is not None
+    coupled = dataclasses.replace(
+        config.coupled_datasets,
+        coupled_sea_surface=dataclasses.replace(
+            sea_surface,
+            sea_ice_mask=SeaIceMaskConfig(extra_masked_names=["HI", "sea_ice_volume"]),
+        ),
+    )
+    ocean = CoupledInputDatasetConfig(
+        zarr_path="ocean.zarr",
+        time_chunk_size=2,
+        extra_fields=ExtraFieldsConfig(names_and_prefixes=extra_fields),
+    )
+    if ensemble:
+        runs = config.input_datasets.runs
+        clean = runs["run-a"]
+        inputs = dataclasses.replace(
+            config.input_datasets,
+            runs={
+                "run-a": clean,
+                "run-b": dataclasses.replace(clean, ocean=ocean),
+            },
+        )
+    else:
+        inputs = dataclasses.replace(config.input_datasets, ocean=ocean)
+    if raises:
+        with pytest.raises(ValueError, match="also match the ocean input"):
+            dataclasses.replace(config, coupled_datasets=coupled, input_datasets=inputs)
+    else:
+        dataclasses.replace(config, coupled_datasets=coupled, input_datasets=inputs)
+
+
 @pytest.mark.parametrize("with_sea_surface", [False, True])
 def test_validate_coupled_ts_requires_ocean_input(tmp_path, with_sea_surface):
     single = _make_config(tmp_path)
@@ -689,15 +750,21 @@ def test_only_ocean_store_keeps_land_nan(tmp_path):
     for name in ["sea_ice_fraction", "ocean_sea_ice_fraction", "hfds_total_area"]:
         assert ocean[name].isel(lon=LAND_LON).isnull().all(), name
     wet = ocean["sea_surface_fraction"] > 0
+    in_strip = (ocean.lat > -MASK_LIMIT_SOUTH) & (ocean.lat < MASK_LIMIT_NORTH)
+    assert (wet & in_strip).any() and (wet & ~in_strip).any()
     for name in ["sea_ice_fraction", "ocean_sea_ice_fraction"]:
-        assert not (ocean[name].isnull() & wet).any(), name
+        xr.testing.assert_equal(ocean[f"mask_{name}"], (wet & ~in_strip).astype(float))
+        assert ocean[name].where(wet & in_strip).isnull().all(), name
+        assert ocean[name].where(wet & ~in_strip).notnull().sum() == (
+            ocean[name].time.size * int((wet & ~in_strip).sum())
+        ), name
 
     after_lead = slice(ocean.time.values[0], None)
     _assert_no_nan(sea_ice.sel(time=after_lead))
     _assert_no_nan(atmos.sel(time=after_lead))
 
     # atmosphere fractions: the sea ice store snapshot at each ocean step, held
-    # forward; equal to the ocean store off land
+    # forward; equal to the ocean store wherever that is unmasked
     for name in ["sea_ice_fraction", "ocean_fraction"]:
         held = (
             sea_ice[name]
@@ -712,8 +779,8 @@ def test_only_ocean_store_keeps_land_nan(tmp_path):
         .sel(time=after_lead)
     )
     atmos_ifrac = atmos["sea_ice_fraction"].sel(time=after_lead)
-    off_land = ocean_held.notnull()
-    xr.testing.assert_allclose(atmos_ifrac.where(off_land), ocean_held.where(off_land))
+    unmasked = ocean_held.notnull()
+    xr.testing.assert_allclose(atmos_ifrac.where(unmasked), ocean_held.where(unmasked))
 
 
 @requires_dask

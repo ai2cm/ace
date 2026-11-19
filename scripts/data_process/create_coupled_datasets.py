@@ -34,7 +34,7 @@ three stages; the ocean and atmosphere stages both depend on the sea ice stage:
     compute_coupled_sea_ice -> compute_coupled_ocean
     compute_coupled_sea_ice -> compute_coupled_atmosphere
 
-Only the coupled ocean dataset keeps NaN on land.
+Only the coupled ocean dataset keeps NaN on land and outside the sea ice mask.
 The coupled sea ice and atmosphere datasets take their fractions from the
 unmasked coupled sea ice fields. Without coupled_sea_surface the ocean stage is
 skipped.
@@ -460,7 +460,7 @@ class CoupledDatasetsConfig:
     Parameters:
         coupled_ts: Configuration for surface temperature in coupled atmosphere.
             Its fractions come from the coupled sea ice dataset, so they carry
-            no land NaN.
+            no land or sea ice mask NaN.
         coupled_sea_surface: Configuration for sea ice in coupled ocean.
         coupled_sea_ice: Configuration for for sea ice in the uncoupled atmosphere.
         input_field_names: Names of input fields.
@@ -677,7 +677,7 @@ class CoupledDatasetsConfig:
             coupled_atmos = compute_coupled_atmosphere(
                 atmos=atmos,
                 ocean=ocean,
-                # unmasked fractions: only the ocean store keeps land NaN
+                # unmasked fractions: only the ocean store keeps land and mask NaN
                 coupled_ocean=coupled_sea_ice,
                 config=self.coupled_ts,
                 input_field_names=self.input_field_names,
@@ -827,7 +827,33 @@ class CreateCoupledDatasetsConfig:
     def __post_init__(self):
         """Initialize and print dataset information after dataclass construction."""
         self._validate_exclude_runs()
+        self._validate_sea_ice_masked_names()
         self.input_datasets.log_info()
+
+    def _validate_sea_ice_masked_names(self):
+        sea_surface = self.coupled_datasets.coupled_sea_surface
+        if sea_surface is None:
+            return
+        if isinstance(self.input_datasets, InputEnsembleConfig):
+            oceans = [run.ocean for run in self.input_datasets.runs.values()]
+        else:
+            oceans = [self.input_datasets.ocean]
+        # copy_extra_data_vars runs after masking: an overlap would replace the
+        # masked copy with the unmasked input variable
+        overlap = sorted(
+            {
+                name
+                for ocean in oceans
+                if ocean.extra_fields is not None
+                for name in sea_surface.sea_ice_mask.extra_masked_names
+                if ocean.extra_fields.matches(name)
+            }
+        )
+        if overlap:
+            raise ValueError(
+                "coupled_sea_surface.sea_ice_mask.extra_masked_names "
+                f"{overlap} also match the ocean input extra_fields."
+            )
 
     def _validate_exclude_runs(self):
         exclude_runs = self.stats.exclude_runs

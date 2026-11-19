@@ -6,6 +6,8 @@ coupled_datasets:
   coupled_ts:
     how: interpolate_sst
   coupled_sea_surface:
+    sea_ice_mask:
+      extra_masked_names: ["sea_ice_volume"]
     surface_flux_window_avg:
       window_timedelta: 120h
       first_timestamp: "0401-01-03T12:00:00"

@@ -7,6 +7,20 @@ coupled_datasets:
   coupled_ts:
     how: interpolate_sst
   coupled_sea_surface:
+    sea_ice_mask:
+      # Latitude limits (rows at the limits stay unmasked) from the piControl
+      # OM4 sea ice fraction, unrounded; the command prints this block:
+      #   python scripts/sea_ice/compute_sea_ice_mask_limits.py \
+      #     gs://vcm-ml-intermediate/2026-11-13-om4-picontrol-1deg-ocean-5daily.zarr \
+      #     sea_ice_fraction
+      latitude_limits:
+        north: 27.42370865495453
+        south: 45.37373851405115
+      extra_masked_names:
+        ["HI", "sea_ice_volume", "UI", "VI", "sfdsi", "ocean_sea_ice_thickness_mean"]
+      extra_fill_values:
+        UI: 0.0
+        VI: 0.0
     surface_flux_window_avg:
       window_timedelta: 120h
       # The ocean store labels its 5-day intervals at the interval end, so the
