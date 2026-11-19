@@ -165,11 +165,27 @@ class UpsamplingConfig:
         )
 
 
+def _saved_upsampling_state(state: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """
+    Return the saved upsampling settings from a DiffusionModelConfig state.
+
+    Checkpoints trained on exp/downscaling-interpolation (e.g. acbf45f) saved
+    these settings under ``interpolation`` (fields ``mode`` and
+    ``align_corners``) rather than ``upsampling``. Use them when present so
+    such checkpoints keep the align_corners they were trained with instead of
+    falling back to the legacy align_corners=True.
+    """
+    if state.get("upsampling") is not None:
+        return state["upsampling"]
+    return state.get("interpolation")
+
+
 def _with_legacy_upsampling(state: Mapping[str, Any]) -> dict[str, Any]:
     state = dict(state)
     state["upsampling"] = dataclasses.asdict(
-        UpsamplingConfig.from_state(state.get("upsampling"))
+        UpsamplingConfig.from_state(_saved_upsampling_state(state))
     )
+    state.pop("interpolation", None)
     return state
 
 
@@ -792,7 +808,7 @@ class DiffusionModel:
         started before upsampling was configurable with a config that does
         not set it explicitly.
         """
-        saved = UpsamplingConfig.from_state(state["config"].get("upsampling"))
+        saved = UpsamplingConfig.from_state(_saved_upsampling_state(state["config"]))
         if saved != self.config.upsampling:
             raise ValueError(
                 f"Saved model state uses upsampling {saved}, but this model uses "
