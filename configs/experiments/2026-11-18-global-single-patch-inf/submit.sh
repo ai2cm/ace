@@ -50,7 +50,7 @@ for model in no_tmp2m_acf tmp2m_acf_matched; do
             --gpus 1 \
             --shared-memory 64GiB \
             --priority normal \
-            --min-runtime 1h \
+            --min-runtime 8h \
             --task-timeout 12h \
             --beaker-image oliverwm/fme-deps-only-54045d546 \
             --no-python \
