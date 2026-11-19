@@ -27,8 +27,8 @@ SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr1e-4|01M7PQEH3C5PDG49WW9Y27KVCZ|ran_pi
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr1e-4|01M7PQEH3C5PDG49WW9Y27KVCZ|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr2e-4|01M7PQEWR7SV8Q17VTSFRY4967|trained|best_inference_ckpt|normal|--min-runtime 8h
-SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr2e-4|01M7PQEWR7SV8Q17VTSFRY4967|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
-SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr2e-4|01M7PQEWR7SV8Q17VTSFRY4967|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr2e-4|01M7PQEWR7SV8Q17VTSFRY4967|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr2e-4|01M7PQEWR7SV8Q17VTSFRY4967|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr3e-4|01M7PQF85EZYJSEK7HWGBV60DK|training|best_inference_ckpt|normal|--min-runtime 8h
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr3e-4|01M7PQF85EZYJSEK7HWGBV60DK|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
@@ -39,12 +39,12 @@ SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr6e-4|01M7PQFK513X0TRA33V9HBR7NZ|wait_p
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr6e-4|01M7PQFK513X0TRA33V9HBR7NZ|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr10e-4|01M7PQFYBBSPP8S6CZDDAAZ5PN|trained|best_inference_ckpt|normal|--min-runtime 8h
-SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr10e-4|01M7PQFYBBSPP8S6CZDDAAZ5PN|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
-SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr10e-4|01M7PQFYBBSPP8S6CZDDAAZ5PN|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr10e-4|01M7PQFYBBSPP8S6CZDDAAZ5PN|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr10e-4|01M7PQFYBBSPP8S6CZDDAAZ5PN|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr30e-4|01M7PQG9A2D98WRV8NSWSCRENC|trained|best_inference_ckpt|normal|--min-runtime 8h
 SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr30e-4|01M7PQG9A2D98WRV8NSWSCRENC|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
-SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr30e-4|01M7PQG9A2D98WRV8NSWSCRENC|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+SamudrACEv2-hybridSSTdiag-muon|mae-mrms-lr30e-4|01M7PQG9A2D98WRV8NSWSCRENC|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-null-lr10e-4|01M7PQGMMRMMDYKV4R96G1AHAQ|training|best_inference_ckpt|normal|--min-runtime 8h
 
@@ -60,11 +60,11 @@ SamudrACEv2-hybridSSTdiag-muon|mse-null-lr30e-4|01M7PQHPTCYHX56SKPWR9VP8H0|wait_
 
 SamudrACEv2-hybridSSTdiag-muon|mse-null-lr50e-4|01M7PQJ24B6BNMN4QQFNZWKST3|trained|best_inference_ckpt|normal|--min-runtime 8h
 SamudrACEv2-hybridSSTdiag-muon|mse-null-lr50e-4|01M7PQJ24B6BNMN4QQFNZWKST3|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
-SamudrACEv2-hybridSSTdiag-muon|mse-null-lr50e-4|01M7PQJ24B6BNMN4QQFNZWKST3|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr50e-4|01M7PQJ24B6BNMN4QQFNZWKST3|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-null-lr70e-4|01M7PQJDAE0MRXNVVXM51M620Q|trained|best_inference_ckpt|normal|--min-runtime 8h
 SamudrACEv2-hybridSSTdiag-muon|mse-null-lr70e-4|01M7PQJDAE0MRXNVVXM51M620Q|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
-SamudrACEv2-hybridSSTdiag-muon|mse-null-lr70e-4|01M7PQJDAE0MRXNVVXM51M620Q|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+SamudrACEv2-hybridSSTdiag-muon|mse-null-lr70e-4|01M7PQJDAE0MRXNVVXM51M620Q|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
 SamudrACEv2-hybridSSTdiag-muon|mse-mrms-lr1e-4|01M7PQJRMEFV7BKTQ0M8ZMW9J3|training|best_inference_ckpt|normal|--min-runtime 8h
 
