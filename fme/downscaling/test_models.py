@@ -951,6 +951,24 @@ def test_upsampling_backwards_compatibility(tmp_path):
     assert loaded.config.upsampling == legacy
 
 
+def test_upsampling_loads_from_interpolation_key(tmp_path):
+    """
+    Checkpoints from exp/downscaling-interpolation (acbf45f) saved the
+    settings under ``interpolation``; they must keep align_corners=False.
+    """
+    model = _get_upsampling_test_model()
+    state = model.get_state()
+    del state["config"]["upsampling"]
+    state["config"]["interpolation"] = {"mode": "bicubic", "align_corners": False}
+    expected = UpsamplingConfig(mode="bicubic", align_corners=False)
+    assert DiffusionModel.from_state(state).config.upsampling == expected
+    checkpoint_path = tmp_path / "test.ckpt"
+    torch.save({"model": state}, checkpoint_path)
+    loaded = CheckpointModelConfig(checkpoint_path=str(checkpoint_path)).build()
+    assert loaded.config.upsampling == expected
+    DiffusionModel.from_state(state).validate_upsampling_matches_state(state)
+
+
 @pytest.mark.parametrize("key", ["module", "upsampling"])
 def test_checkpoint_config_model_updates_raises_for_frozen_keys(key):
     with pytest.raises(ValueError, match=f"'{key}' cannot be updated"):
