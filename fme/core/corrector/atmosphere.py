@@ -519,6 +519,30 @@ def _clip_frozen_precipitation(gen_data: TensorMapping) -> TensorDict:
     return gen.modified_data
 
 
+def _rescale_to_global_mean(
+    field: torch.Tensor, global_mean: torch.Tensor, new_global_mean: torch.Tensor
+) -> torch.Tensor:
+    """Give ``field`` the global mean ``new_global_mean``.
+
+    Scales ``field`` by ``new_global_mean / global_mean``. Where ``global_mean``
+    is zero or so close to zero that the ratio's gradient would overflow (e.g.
+    precipitation that force_positive clamped to zero at all but a few cells)
+    the ratio is undefined or numerically unusable, so ``new_global_mean`` is
+    added as a uniform offset instead. The denominator is made safe before
+    dividing so that the unselected branch cannot put NaN into the gradient.
+
+    A negative ``new_global_mean`` gives a negative field in either branch; it
+    is not clamped, since that would break the global budget being enforced.
+    """
+    # the gradient of the ratio scales as 1 / global_mean**2, which overflows
+    # once global_mean**2 drops below the smallest normal float
+    threshold = torch.finfo(global_mean.dtype).tiny ** 0.5
+    is_zero = global_mean.abs() < threshold
+    safe_mean = torch.where(is_zero, torch.ones_like(global_mean), global_mean)
+    scaled = field * (new_global_mean / safe_mean)
+    return torch.where(is_zero, field + new_global_mean, scaled)
+
+
 def _force_conserve_moisture(
     input_data: TensorMapping,
     gen_data: TensorMapping,
@@ -588,8 +612,11 @@ def _force_conserve_moisture(
         #        new_global_precip_rate / current_global_precip_rate
         #    ) * current_precip_rate
         gen.set_precipitation_rate(
-            gen.precipitation_rate
-            * (new_precipitation_global_mean / precipitation_global_mean)
+            _rescale_to_global_mean(
+                gen.precipitation_rate,
+                precipitation_global_mean,
+                new_precipitation_global_mean,
+            )
         )
     elif terms_to_modify.endswith("evaporation"):
         # Derived similarly as for "precipitation" case.
@@ -597,8 +624,11 @@ def _force_conserve_moisture(
             twp_tendency_global_mean + precipitation_global_mean
         )
         gen.set_evaporation_rate(
-            gen.evaporation_rate
-            * (new_evaporation_global_mean / evaporation_global_mean)
+            _rescale_to_global_mean(
+                gen.evaporation_rate,
+                evaporation_global_mean,
+                new_evaporation_global_mean,
+            )
         )
     if terms_to_modify.startswith("advection"):
         # Having already corrected the global-mean budget, we recompute
