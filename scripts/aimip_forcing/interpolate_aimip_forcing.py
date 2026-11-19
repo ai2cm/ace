@@ -24,6 +24,11 @@ EXISTING_ERA5_FORCING_VARIABLES = [
 ]
 START_TIME = "1978-10-01T00:00:00"
 END_TIME = "2024-12-31T18:00:00"
+# Empty extension start = no extension; the repeat-source defaults below pair with
+# the 2022-ending 2024-06-20 store.
+DEFAULT_EXTENSION_START = ""
+DEFAULT_REPEAT_SOURCE_START = "2020-12-31T00:00:00"
+DEFAULT_REPEAT_SOURCE_END = "2022-12-31T18:00:00"
 
 
 def open_aimip_forcing_data(
@@ -197,12 +202,37 @@ def write_output_zarr(ds: xr.Dataset, output_data_file: str):
     default=ACE2_ERA5_DATA,
     help="Path to ACE2 ERA5 data in GCS.",
 )
+@click.option(
+    "--extension-start",
+    type=str,
+    default=DEFAULT_EXTENSION_START,
+    help=(
+        "Start of a synthetic period beyond the source's coverage, over which "
+        "insolation is repeated. Empty (default) requires the source to span the "
+        "full window."
+    ),
+)
+@click.option(
+    "--repeat-source-start",
+    type=str,
+    default=DEFAULT_REPEAT_SOURCE_START,
+    help="Start of the insolation window repeated over the extension period.",
+)
+@click.option(
+    "--repeat-source-end",
+    type=str,
+    default=DEFAULT_REPEAT_SOURCE_END,
+    help="End of the insolation window repeated over the extension period.",
+)
 def main(
     input_data_file: str,
     output_data_file: str,
     ace2_era5_gcs_data: str,
     start_time: str,
     end_time: str,
+    extension_start: str,
+    repeat_source_start: str,
+    repeat_source_end: str,
 ):
     logging.basicConfig(level=logging.INFO)
     monthly_aimip_forcing = open_aimip_forcing_data(input_data_file)
@@ -218,11 +248,20 @@ def main(
         end_time,
     )
 
-    time_coord = get_time_coordinate(
-        existing_era5_forcing.time.drop_vars("time"),
-        extension_start="2023-01-01T00:00:00",
-        extension_end=end_time,
-    )
+    if extension_start:
+        time_coord = get_time_coordinate(
+            existing_era5_forcing.time.drop_vars("time"),
+            extension_start=extension_start,
+            extension_end=end_time,
+        )
+    else:
+        era5_end = existing_era5_forcing.time.values[-1]
+        if era5_end < np.datetime64(end_time):
+            raise ValueError(
+                f"Forcing source ends at {era5_end}, before --end-time {end_time}. "
+                "Set --extension-start, or an --end-time the source covers."
+            )
+        time_coord = existing_era5_forcing.time.drop_vars("time")
 
     logging.info("Interpolating AIMIP forcing data to ACE2-ERA5 time coordinate.")
     interpolated_aimip_forcing = monthly_aimip_forcing.interp(time=time_coord)
@@ -232,21 +271,23 @@ def main(
     ].where(sst_mask)
 
     logging.info("Merging interpolated AIMIP forcing with existing ERA5 forcing.")
-    repeated_era5_forcing_DSWRFtoa = get_repeated_insolation(
-        existing_era5_forcing.DSWRFtoa,
-        start_repeat="2023-01-01T00:00:00",
-        end_repeat=end_time,
-        source_start="2020-12-31T00:00:00",
-        source_end="2022-12-31T18:00:00",
-    )
-
-    era5_forcing_DSWRFtoa = xr.concat(
-        [
+    if extension_start:
+        repeated_era5_forcing_DSWRFtoa = get_repeated_insolation(
             existing_era5_forcing.DSWRFtoa,
-            repeated_era5_forcing_DSWRFtoa,
-        ],
-        dim="time",
-    )
+            start_repeat=extension_start,
+            end_repeat=end_time,
+            source_start=repeat_source_start,
+            source_end=repeat_source_end,
+        )
+        era5_forcing_DSWRFtoa = xr.concat(
+            [
+                existing_era5_forcing.DSWRFtoa,
+                repeated_era5_forcing_DSWRFtoa,
+            ],
+            dim="time",
+        )
+    else:
+        era5_forcing_DSWRFtoa = existing_era5_forcing.DSWRFtoa
 
     logging.info("Finalizing interpolated AIMIP forcing data.")
     interpolated_forcing = xr.merge(
