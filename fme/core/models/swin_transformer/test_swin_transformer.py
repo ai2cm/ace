@@ -10,6 +10,8 @@ from fme.core.testing.regression import validate_tensor_dict
 
 from .swin_layers import (
     ColumnMixer,
+    PatchExpanding,
+    PatchMerging,
     WindowAttention2D,
     _cos_lat_scaled_coords_log,
     window_lat_mean,
@@ -32,12 +34,15 @@ def _build_net(
     context_config: ContextConfig | None = None,
     conditioning: Literal["adaln", "cln"] = "adaln",
     use_skip: bool = True,
+    skip_projection: bool = False,
     embed_dim: int = 32,
     num_heads: tuple[int, ...] = (2, 4, 4, 2),
     window_size: tuple[int, int] = (4, 4),
     mlp_layer: str = "mlp",
     lat_coords: torch.Tensor | None = None,
     padding_conf: dict | None = None,
+    patch_size: tuple[int, int] = (1, 1),
+    num_levels: int = 1,
 ) -> SwinTransformerNet:
     """A small Swin U-Net for tests. ``conditioning="cln"`` without an explicit
     ``context_config`` builds the noise-conditioned variant with
@@ -55,11 +60,14 @@ def _build_net(
         mlp_ratio=2.0,
         drop_path_rate=0.0,
         use_skip=use_skip,
+        skip_projection=skip_projection,
         context_config=context_config,
         conditioning=conditioning,
         mlp_layer=mlp_layer,
         lat_coords=lat_coords,
         padding_conf=padding_conf,
+        patch_size=patch_size,
+        num_levels=num_levels,
     )
 
 
@@ -129,6 +137,204 @@ def test_no_skip():
     x = torch.randn(n, in_chans, *img_shape, device=device)
     out = net(x)
     assert out.shape == (n, out_chans, *img_shape)
+
+
+def test_skip_projection_runs_decoder_at_embed_dim():
+    """With skip_projection the decoder stage has embed_dim channels and fewer
+    parameters, the projection gets gradients, and the output shape is
+    unchanged."""
+    in_chans, out_chans = 5, 3
+    img_shape = (16, 32)
+    n = 2
+    device = get_device()
+    net = _build_net(in_chans, out_chans, img_shape, skip_projection=True).to(device)
+    assert len(net.skip_projs) == 1
+    assert net.layer4.blocks[0].dim == 32
+    n_params_concat = sum(
+        p.numel() for p in _build_net(in_chans, out_chans, img_shape).parameters()
+    )
+    assert sum(p.numel() for p in net.parameters()) < n_params_concat
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    out = net(x)
+    assert out.shape == (n, out_chans, *img_shape)
+    out.sum().backward()
+    for name, param in net.named_parameters():
+        assert param.grad is not None, f"No gradient for {name}"
+
+
+def test_skip_projection_absent_by_default():
+    """The default adds no parameters, so existing checkpoints keep loading."""
+    net = _build_net(5, 3, (16, 32))
+    assert len(net.skip_projs) == 0
+    assert not any("skip_proj" in k for k in net.state_dict())
+    assert net.layer4.blocks[0].dim == 64
+
+
+_EARTH_PADDING_CONF = {
+    "activate": True,
+    "mode": "earth",
+    "pad_lat": [2, 1],
+    "pad_lon": [2, 2],
+}
+
+
+@pytest.mark.parametrize(
+    "conditioning, img_shape, options",
+    [
+        ("adaln", (16, 32), dict(patch_size=(2, 2))),
+        ("adaln", (16, 32), dict(patch_size=(2, 4))),
+        ("adaln", (9, 18), dict(patch_size=(2, 2), padding_conf=_EARTH_PADDING_CONF)),
+        ("cln", (9, 18), dict(patch_size=(2, 2), padding_conf=_EARTH_PADDING_CONF)),
+        ("adaln", (32, 64), dict(num_levels=2)),
+        ("adaln", (32, 64), dict(num_levels=2, use_skip=False)),
+        ("adaln", (32, 64), dict(num_levels=2, skip_projection=True)),
+        (
+            "adaln",
+            (9, 18),
+            dict(
+                num_levels=2,
+                lat_coords=torch.linspace(-80.0, 80.0, 9),
+                padding_conf=_EARTH_PADDING_CONF,
+            ),
+        ),
+        ("cln", (32, 64), dict(num_levels=2)),
+        ("cln", (9, 18), dict(num_levels=2, patch_size=(2, 2))),
+    ],
+)
+def test_token_grid_options_forward_backward(
+    conditioning: Literal["adaln", "cln"], img_shape: tuple[int, int], options: dict
+):
+    """A coarser token grid and/or extra U-Net levels, with or without padding
+    up to the token/window multiple, still return the original pixel
+    resolution, and every parameter receives a gradient."""
+    n, in_chans, out_chans = 2, 4, 2
+    device = get_device()
+    net = _build_net(
+        in_chans, out_chans, img_shape, conditioning=conditioning, **options
+    ).to(device)
+    x = torch.randn(n, in_chans, *img_shape, device=device)
+    context = _cln_context(n, img_shape) if conditioning == "cln" else None
+    out = net(x, context)
+    assert out.shape == (n, out_chans, *img_shape)
+    out.sum().backward()
+    for name, param in net.named_parameters():
+        assert param.grad is not None, f"No gradient for {name}"
+
+
+def test_patch_size_sets_token_grid():
+    """The U-Net stages run on the padded pixel grid divided by patch_size."""
+    net = _build_net(4, 2, (16, 32), patch_size=(2, 2))
+    assert net.padded_shape == (16, 32)
+    assert net.token_shape == (8, 16)
+    assert net.layer1.blocks[0].input_resolution == (8, 16)
+    assert net.layer2.blocks[0].input_resolution == (4, 8)
+
+
+def test_default_options_keep_parameter_shapes():
+    """The defaults reproduce the previous network's parameter names and
+    shapes, so existing checkpoints keep loading."""
+    state = _build_net(5, 3, (16, 32)).state_dict()
+    assert state["encoder.weight"].shape == (32, 5, 3, 3)
+    assert state["final_linear.weight"].shape == (32, 64)
+    assert not any("skip_proj" in k or "extra_" in k for k in state)
+
+
+@pytest.mark.parametrize(
+    "options, match",
+    [
+        (dict(patch_size=(0, 2)), "patch_size"),
+        (dict(num_levels=0), "num_levels"),
+        (dict(use_skip=False, skip_projection=True), "requires use_skip"),
+    ],
+)
+def test_option_validation(options: dict, match: str):
+    with pytest.raises(ValueError, match=match):
+        _build_net(4, 2, (16, 32), **options)
+
+
+def test_num_levels_keeps_bottleneck_and_halves_its_grid():
+    """Extra levels are dim-preserving, so the bottleneck stages and the
+    merge/expand around them are unchanged in size; each extra level halves
+    the token grid they run on."""
+    img_shape = (32, 64)
+    one = _build_net(5, 3, img_shape, num_levels=1)
+    two = _build_net(5, 3, img_shape, num_levels=2)
+    for name in ("layer2", "layer3", "downsample", "upsample"):
+        n_one = sum(p.numel() for p in getattr(one, name).parameters())
+        n_two = sum(p.numel() for p in getattr(two, name).parameters())
+        assert n_one == n_two, name
+    assert sum(p.numel() for p in two.parameters()) > sum(
+        p.numel() for p in one.parameters()
+    )
+    assert two.layer1.blocks[0].input_resolution == (32, 64)
+    assert len(two.extra_encoders) == len(two.extra_decoders) == 1
+    assert two.extra_encoders[0].blocks[0].input_resolution == (16, 32)
+    assert two.extra_decoders[0].blocks[0].input_resolution == (16, 32)
+    assert two.layer2.blocks[0].input_resolution == (8, 16)
+    assert one.layer2.blocks[0].input_resolution == (16, 32)
+
+
+def test_one_degree_shape_matches_four_degree_bottleneck():
+    """patch_size (2, 2) + num_levels 2 at 1 degree gives the same bottleneck
+    token grid and bottleneck parameter count as the 4-degree model."""
+
+    def build(
+        img_shape: tuple[int, int], patch_size: tuple[int, int], num_levels: int
+    ) -> SwinTransformerNet:
+        return _build_net(
+            3,
+            3,
+            img_shape,
+            embed_dim=16,
+            num_heads=(2, 2, 2, 2),
+            window_size=(4, 8),
+            padding_conf={**_EARTH_PADDING_CONF, "pad_lon": [3, 3]},
+            patch_size=patch_size,
+            num_levels=num_levels,
+            lat_coords=torch.linspace(-89.0, 89.0, img_shape[0]),
+        )
+
+    four_degree = build((45, 90), patch_size=(1, 1), num_levels=1)
+    one_degree = build((180, 360), patch_size=(2, 2), num_levels=2)
+    assert (
+        one_degree.layer2.blocks[0].input_resolution
+        == four_degree.layer2.blocks[0].input_resolution
+    )
+    for name in ("layer2", "layer3"):
+        assert sum(p.numel() for p in getattr(one_degree, name).parameters()) == sum(
+            p.numel() for p in getattr(four_degree, name).parameters()
+        ), name
+    device = get_device()
+    one_degree = one_degree.to(device)
+    with torch.no_grad():
+        out = one_degree(torch.randn(1, 3, 180, 360, device=device))
+    assert out.shape == (1, 3, 180, 360)
+
+
+@pytest.mark.parametrize(
+    "module, default_shapes, preserving_shapes",
+    [
+        (PatchMerging, {"reduction": (16, 32)}, {"reduction": (8, 32)}),
+        (
+            PatchExpanding,
+            {"expand": (16, 8), "linear": (4, 4)},
+            {"expand": (32, 8), "linear": (8, 8)},
+        ),
+    ],
+)
+def test_merge_expand_out_dim(module, default_shapes: dict, preserving_shapes: dict):
+    """out_dim overrides the default channel doubling / halving; the default
+    is unchanged."""
+    for out_dim, shapes in [(None, default_shapes), (8, preserving_shapes)]:
+        layer = module(8, out_dim=out_dim)
+        for name, shape in shapes.items():
+            assert getattr(layer, name).weight.shape == shape, (out_dim, name)
+    x = torch.randn(2, 4, 8, 8)
+    assert PatchMerging(8, out_dim=8)(x).shape == (2, 2, 4, 8)
+    assert PatchExpanding(8, out_dim=8)(x).shape == (2, 8, 16, 8)
+    with pytest.raises(ValueError, match="must be even"):
+        PatchExpanding(7)
+    assert PatchExpanding(7, out_dim=4)(torch.randn(2, 4, 8, 7)).shape == (2, 8, 16, 4)
 
 
 def test_column_mixer():
