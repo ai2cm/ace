@@ -174,7 +174,7 @@ optimization:
   max_grad_norm: 1.0
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
-  lr: 0.001 # Muon group; archive/hybridSSTdiag-muon row mae-mrms-lr10e-4 (HITL D22)
+  lr: 0.001 # Muon group; from archive/hybridSSTdiag-muon run mae-mrms-lr10e-4, the sweep run picked as baseline on training and eval score
   optimizer_type: Muon
   kwargs:
     adjust_lr_fn: match_rms_adamw

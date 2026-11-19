@@ -1,6 +1,6 @@
 # job_runner/evaluate.sh configs/experiments/<exper> . \
 #   --config-dir configs/experiments/SamudrACEv2/eval/ocean
-# Adapted from configs/experiments/SamudrACEv2/ocean/eval/oos/evaluator-config-1pct-ic0121-20yr-maps.yaml at 1275e7093: correction_maps on, no reference (target) output. IC 0127 (1 yr after the last train sample 0126-01-01), 4 yr, no ENSO index [maintainer D20].
+# Adapted from configs/experiments/SamudrACEv2/ocean/eval/oos/evaluator-config-1pct-ic0121-20yr-maps.yaml at 1275e7093: correction_maps on, no reference (target) output. IC 0127 (1 yr after the last train sample 0126-01-01), 4 yr, no ENSO index (the rollout targets warm-climate biases, not ENSO).
 # Warm-side (training_splits.yaml): IC 0127-01-01 and steps 1..292 (0127-01-06 to 0131-01-01, its last sample) all in val_1pct_late; no train or holdout step.
 experiment_dir: /results
 n_forward_steps: 292  # exactly 4 noleap years
