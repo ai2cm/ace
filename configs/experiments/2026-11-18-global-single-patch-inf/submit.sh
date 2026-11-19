@@ -27,9 +27,9 @@ declare -A LOW=(
     [no_tmp2m_acf]=01M5JP3AHKQ5BE48EKH2SN1ZE2
     [tmp2m_acf_matched]=01M72ASTXQX1CFVE5ZQTR5MYH8
 )
-# The single pass needs the most GPU memory: B300 (holmes) or B200 (titan).
+# The single pass needs the most GPU memory: B200 (titan). Never use ai2/holmes.
 declare -A CLUSTERS=(
-    [single_pass]="ai2/holmes ai2/titan"
+    [single_pass]="ai2/titan"
     [tiles]="ai2/titan ai2/jupiter"
     [multidiffusion]="ai2/titan ai2/jupiter"
 )
