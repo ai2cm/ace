@@ -52,6 +52,84 @@ def test_ema_updates_parameters(decay: float, faster_decay_at_start: bool):
         )
 
 
+class _MixedDtypeModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        device = get_device()
+        self.linear = nn.Linear(4, 3, device=device)
+        self.bf16 = nn.Parameter(torch.randn(5, device=device, dtype=torch.bfloat16))
+        self.frozen = nn.Parameter(torch.randn(2, device=device), requires_grad=False)
+
+
+def _per_parameter_ema_update(
+    ema_params: dict[str, torch.Tensor],
+    model: nn.Module,
+    decay: float,
+    faster_decay_at_start: bool,
+    num_updates: int,
+):
+    """Reference: the per-parameter EMA update formula, with the decay held
+    as a float32 tensor like EMATracker holds it."""
+    device = get_device()
+    decay_tensor = torch.tensor(decay, dtype=torch.float32, device=device)
+    if faster_decay_at_start:
+        n = torch.tensor(num_updates, dtype=torch.int, device=device)
+        decay_tensor = min(decay_tensor, (1 + n) / (10 + n))
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            ema = ema_params[name].type_as(param)
+            ema_params[name] = ema - (1.0 - decay_tensor) * (ema - param.detach())
+
+
+@pytest.mark.parametrize("faster_decay_at_start", [True, False])
+def test_ema_update_matches_per_parameter_formula(faster_decay_at_start: bool):
+    torch.manual_seed(0)
+    model = _MixedDtypeModel()
+    decay = 0.9
+    ema = EMATracker(model, decay=decay, faster_decay_at_start=faster_decay_at_start)
+    expected = {
+        name: param.detach().clone()
+        for name, param in model.named_parameters()
+        if param.requires_grad
+    }
+    for num_updates in range(1, 6):
+        with torch.no_grad():
+            for param in model.parameters():
+                param.add_(torch.randn_like(param))
+        if num_updates == 3:
+            # the EMA weights follow a change in the model's dtype
+            model.linear.to(torch.float16)
+        ema(model)
+        _per_parameter_ema_update(
+            expected, model, decay, faster_decay_at_start, num_updates
+        )
+    for name, ema_name in ema._module_name_to_ema_name.items():
+        actual = ema._ema_params[ema_name]
+        assert actual.dtype == dict(model.named_parameters())[name].dtype
+        if actual.element_size() == 2:
+            # the foreach kernels round 16-bit results differently from the
+            # reference, by under 2 eps relative to 1 + |value|
+            tol = 2 * torch.finfo(actual.dtype).eps
+            torch.testing.assert_close(actual, expected[name], atol=tol, rtol=tol)
+        else:
+            torch.testing.assert_close(actual, expected[name])
+    assert "frozen" not in ema._module_name_to_ema_name
+
+
+def test_ema_update_follows_model_to_new_device():
+    model = nn.Linear(4, 3)
+    ema = EMATracker(model, decay=0.9, faster_decay_at_start=False)
+    model.to(get_device())
+    expected = {
+        name: param.detach().clone() for name, param in model.named_parameters()
+    }
+    ema(model)
+    for name, ema_name in ema._module_name_to_ema_name.items():
+        actual = ema._ema_params[ema_name]
+        assert actual.device == expected[name].device
+        torch.testing.assert_close(actual, expected[name])
+
+
 def compare_states(state1: dict, state2: dict):
     assert state1.keys() == state2.keys()
     for key in state1.keys():
