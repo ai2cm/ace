@@ -1,12 +1,18 @@
 import dataclasses
 import logging
 import os
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 import torch
 
 from fme.ace.aggregator.one_step.main import OneStepAggregatorConfig
+from fme.ace.data_loading.gridded_data import (
+    InferenceGriddedData as AceInferenceGriddedData,
+)
+from fme.ace.train.train_config import InlineInferenceConfig as AceInlineInferenceConfig
 from fme.core.cli import ResumeResultsConfig
+from fme.core.dataset.data_typing import VariableMetadata
+from fme.core.dataset_info import DatasetInfo
 from fme.core.derived_variables import get_derived_variable_metadata
 from fme.core.distributed import Distributed
 from fme.core.ema import EMAConfig, EMATracker
@@ -240,6 +246,24 @@ class InlineInferenceConfig:
         return factory
 
 
+@dataclasses.dataclass
+class AtmosphereInlineInferenceConfig(AceInlineInferenceConfig):
+    """
+    Inline inference of the coupled model's atmosphere alone, with the ocean
+    surface prescribed from the data, as in an atmosphere-only evaluator run on
+    a checkpoint extracted from the coupled one. Takes the parameters of
+    ``fme.ace`` ``InlineInferenceConfig``, with ``weight`` defaulting to 0 so
+    the entry does not affect checkpoint selection unless set.
+    """
+
+    weight: float = 0.0
+
+
+_AtmosphereInferenceEntry = tuple[
+    AtmosphereInlineInferenceConfig, AceInferenceGriddedData, DatasetInfo, str
+]
+
+
 def _get_validation_callback(
     validation_entries: Sequence[tuple[InlineValidationConfig, GriddedData, str]],
     stepper: TrainStepperABC,
@@ -312,6 +336,8 @@ def _get_inference_callback(
     dataset_info: CoupledDatasetInfo,
     output_dir: str,
     save_per_epoch_diagnostics: bool,
+    atmosphere_inference_entries: Sequence[_AtmosphereInferenceEntry] = (),
+    atmosphere_inference_epoch_sets: Sequence[set[int]] = (),
 ) -> InferenceCallback:
     tasks: list[InferenceTask] = []
     for i, (entry_config, data, name) in enumerate(inference_entries):
@@ -329,6 +355,26 @@ def _get_inference_callback(
                 ),
                 epoch_set=frozenset(inference_epoch_sets[i]),
                 weight=entry_config.weight,
+            )
+        )
+    for j, (atmos_config, atmos_data, atmos_dataset_info, name) in enumerate(
+        atmosphere_inference_entries
+    ):
+        tasks.append(
+            InferenceTask(
+                name=name,
+                data=atmos_data,
+                aggregator_factory=atmos_config.build_aggregator_factory(
+                    data=atmos_data,
+                    entry_dataset_info=atmos_dataset_info,
+                    name=name,
+                    stepper=stepper.atmosphere,
+                    output_dir=output_dir,
+                    save_per_epoch_diagnostics=save_per_epoch_diagnostics,
+                ),
+                epoch_set=frozenset(atmosphere_inference_epoch_sets[j]),
+                weight=atmos_config.weight,
+                predict=stepper.atmosphere.predict_paired,
             )
         )
 
@@ -363,6 +409,12 @@ class TrainConfig:
             InlineInferenceConfig or a list of them. The weighted sum of each
             run's error is used for checkpoint selection. Each entry can specify
             a name (used as wandb log prefix) and weight.
+        atmosphere_inference: Inline inference runs of the coupled model's
+            atmosphere alone, with the ocean surface prescribed from the data.
+            Names default to "atmosphere_inference" for a single entry and
+            "atmosphere_inference_{i}" for several, and must not collide with
+            other inference or validation names. Weights default to 0, so these
+            runs do not affect checkpoint selection unless set.
         n_coupled_steps: Number of coupled forward steps to take gradient over.
             This is equal to the number of forward steps of the ocean model.
         seed: Random seed for reproducibility. If set, is used for all types of
@@ -415,6 +467,9 @@ class TrainConfig:
     inference: InlineInferenceConfig | list[InlineInferenceConfig] = dataclasses.field(
         default_factory=list
     )
+    atmosphere_inference: list[AtmosphereInlineInferenceConfig] = dataclasses.field(
+        default_factory=list
+    )
     seed: int | None = None
     copy_weights_after_batch: CopyWeightsConfig = dataclasses.field(
         default_factory=lambda: CopyWeightsConfig(exclude=["*"])
@@ -449,6 +504,21 @@ class TrainConfig:
             raise ValueError(
                 f"Inference names {sorted(reserved_overlap)} collide with "
                 f"reserved names {sorted(self._RESERVED_NAMES)}"
+            )
+        atmosphere_names = self.atmosphere_inference_names
+        if len(atmosphere_names) != len(set(atmosphere_names)):
+            raise ValueError(
+                f"Duplicate atmosphere inference names: {atmosphere_names}"
+            )
+        atmosphere_overlap = set(atmosphere_names) & (
+            set(resolved_inference_names)
+            | set(resolved_validation_names)
+            | self._RESERVED_NAMES
+        )
+        if atmosphere_overlap:
+            raise ValueError(
+                f"Atmosphere inference names {sorted(atmosphere_overlap)} collide "
+                "with inference, validation or reserved names"
             )
         if self.lr_tuning is not None and self.optimization.has_lr_schedule:
             raise ValueError(
@@ -523,19 +593,39 @@ class TrainConfig:
                 names.append(f"inference_{i}")
         return names
 
-    def get_inference_epoch_sets(self) -> list[set[int]]:
-        inference = self.inference_list
-        if not inference:
-            return []
+    @property
+    def atmosphere_inference_names(self) -> list[str]:
+        entries = self.atmosphere_inference
+        names = []
+        for i, entry in enumerate(entries):
+            if entry.name is not None:
+                names.append(entry.name)
+            elif len(entries) == 1:
+                names.append("atmosphere_inference")
+            else:
+                names.append(f"atmosphere_inference_{i}")
+        return names
+
+    def _get_epoch_sets(self, epoch_slices: Sequence[Slice]) -> list[set[int]]:
         training_epochs = list(range(1, self.max_epochs + 1))
         pre_training_epochs = {0} if self.evaluate_before_training else set()
         return [
-            set(training_epochs[entry.epochs.slice]) | pre_training_epochs
-            for entry in inference
+            set(training_epochs[epochs.slice]) | pre_training_epochs
+            for epochs in epoch_slices
         ]
 
+    def get_inference_epoch_sets(self) -> list[set[int]]:
+        return self._get_epoch_sets([entry.epochs for entry in self.inference_list])
+
+    def get_atmosphere_inference_epoch_sets(self) -> list[set[int]]:
+        return self._get_epoch_sets(
+            [entry.epochs for entry in self.atmosphere_inference]
+        )
+
     def get_inference_epochs(self) -> list[int]:
-        epoch_sets = self.get_inference_epoch_sets()
+        epoch_sets = (
+            self.get_inference_epoch_sets() + self.get_atmosphere_inference_epoch_sets()
+        )
         if not epoch_sets:
             return []
         return sorted(set().union(*epoch_sets))
@@ -589,6 +679,34 @@ class TrainConfig:
             entries.append((entry, data, name))
         return entries
 
+    def _get_atmosphere_inference_data(
+        self,
+        variable_metadata: Mapping[str, VariableMetadata],
+    ) -> list[_AtmosphereInferenceEntry]:
+        atmosphere_config = self.stepper.atmosphere.stepper
+        initial_condition = atmosphere_config.get_prognostic_state_data_requirements()
+        entries: list[_AtmosphereInferenceEntry] = []
+        for entry, name in zip(
+            self.atmosphere_inference, self.atmosphere_inference_names
+        ):
+            data = entry.get_inference_data(
+                window_requirements=(
+                    atmosphere_config.get_evaluation_window_data_requirements(
+                        entry.forward_steps_in_memory
+                    )
+                ),
+                initial_condition=initial_condition,
+            )
+            if data.dataset_info.timestep != self.stepper.atmosphere_timestep:
+                raise ValueError(
+                    f"Atmosphere inference {name!r} data timestep "
+                    f"{data.dataset_info.timestep} does not match the atmosphere "
+                    f"timestep {self.stepper.atmosphere_timestep}."
+                )
+            dataset_info = data.dataset_info.update_variable_metadata(variable_metadata)
+            entries.append((entry, data, dataset_info, name))
+        return entries
+
     def _get_optimization(self, parameters) -> Optimization:
         return self.optimization.build(parameters, self.max_epochs)
 
@@ -631,6 +749,11 @@ class TrainConfig:
         else:
             logging.info("Skipping inline inference")
         inference_entries = self._get_inference_data()
+        if self.atmosphere_inference:
+            logging.info("Initializing inline atmosphere inference data loaders")
+        atmosphere_inference_entries = self._get_atmosphere_inference_data(
+            variable_metadata
+        )
         inference_epochs = self.get_inference_epochs()
         inference_epoch_sets = self.get_inference_epoch_sets()
 
@@ -668,6 +791,10 @@ class TrainConfig:
             dataset_info=dataset_info,
             output_dir=self.output_dir,
             save_per_epoch_diagnostics=self.save_per_epoch_diagnostics,
+            atmosphere_inference_entries=atmosphere_inference_entries,
+            atmosphere_inference_epoch_sets=(
+                self.get_atmosphere_inference_epoch_sets()
+            ),
         )
 
         return Trainer(
