@@ -516,7 +516,7 @@ def test_manometric_sea_level_wright97_nan_wet_level_counts_as_zero():
     eta_mano = ocean_data.manometric_sea_level_wright97
     assert eta_mano[0, 0, 3, 2].isfinite()
     torch.testing.assert_close(eta_mano, _expected_eta_mano(data), equal_nan=True)
-    # D4: the MLD of the same cell is NaN
+    # unlike eta_mano, any non-finite wet-level input makes the column's MLD NaN
     assert ocean_data.mld_wright97[0, 0, 3, 2].isnan()
 
 
