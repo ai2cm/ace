@@ -1,11 +1,11 @@
-# job_runner/uncoupled_train.sh configs/experiments/SamudrACEv2/ocean/hybridSSTdiag-muon . \
+# job_runner/uncoupled_train.sh configs/experiments/SamudrACEv2/ocean/archive/hybridSSTdiag-tau-UIVI . \
 #   --coupled_stats andrep/2026-11-13-om4-1pctco2-1deg-coupled-stats
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 30 # 160 yr x 73/yr / bs 16 = 730 iter/epoch -> ~21,900 iterations
+max_epochs: 45 # 160 yr x 73/yr / bs 16 = 730 iter/epoch -> ~36,500 iterations
 ema_checkpoint_save_epochs:
   step: 15
 inference:
@@ -174,13 +174,11 @@ optimization:
   max_grad_norm: 1.0
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
-  lr: 0.003 # Muon group; training.txt rows set lr, loss and adjust_lr_fn
-  optimizer_type: Muon
+  lr: 0.0001
+  optimizer_type: AdamW
   kwargs:
-    adjust_lr_fn: null
-    adamw_lr: 0.0003
+    fused: true
     weight_decay: 0.01
-    adamw_weight_decay: 0.01
 stepper_training:
   n_forward_steps: 4
   loss:
@@ -451,6 +449,10 @@ stepper:
         - hfds_total_area
         - calving_residue_total_area
         - hfrunoffds_total_area
+        - tauuo
+        - tauvo
+        - UI
+        - VI
         - SSS
         - SST_degK
       residual_prediction:

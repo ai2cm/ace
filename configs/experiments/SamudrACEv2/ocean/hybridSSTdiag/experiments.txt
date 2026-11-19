@@ -1,7 +1,2 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
 
-# --config-dir configs/experiments/SamudrACEv2/eval/ocean
-SamudrACEv2-hybridSSTdiag|rs0|01M7P0NR8VBAMZ1DP4NZTRS2R4|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
-SamudrACEv2-hybridSSTdiag|rs0|01M7P0NR8VBAMZ1DP4NZTRS2R4|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
-SamudrACEv2-hybridSSTdiag|rs0|01M7P0NR8VBAMZ1DP4NZTRS2R4|failed_piC-ic0151-200yr-maps|best_inference_ckpt|high|--min-runtime 2h
-SamudrACEv2-hybridSSTdiag|rs0|01M7P0NR8VBAMZ1DP4NZTRS2R4|failed_piC-ic0151-200yr-x0c|best_inference_ckpt|high|--min-runtime 2h

@@ -1,5 +1,3 @@
 group|tag|skip_or_trained|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
 
-SamudrACEv2-hybridSSTdiag|rs0|train|urgent|jupiter|4||3|ai2/ace|seed=0|8h
-SamudrACEv2-hybridSSTdiag|rs1|skip|urgent|jupiter|4||3|ai2/ace|seed=1|8h
-SamudrACEv2-hybridSSTdiag|rs2|skip|urgent|jupiter|4||3|ai2/ace|seed=2|8h
+SamudrACEv2-hybridSSTdiag|p2-rs0|skip|urgent|jupiter|4||3|ai2/ace|seed=0|8h

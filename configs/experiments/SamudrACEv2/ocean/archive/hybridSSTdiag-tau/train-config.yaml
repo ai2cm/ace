@@ -1,4 +1,4 @@
-# job_runner/uncoupled_train.sh configs/experiments/SamudrACEv2/ocean/hybridSSTdiag-ohc-origin . \
+# job_runner/uncoupled_train.sh configs/experiments/SamudrACEv2/ocean/archive/hybridSSTdiag-tau . \
 #   --coupled_stats andrep/2026-11-13-om4-1pctco2-1deg-coupled-stats
 experiment_dir: /results
 save_checkpoint: true
@@ -227,7 +227,6 @@ stepper:
           corrector_disabled_epochs: 1
           ocean_heat_content_correction:
             method: scaled_temperature
-            origin_deg_C: -2.0 # training.txt rows set origin_deg_C and level weights
           surface_energy_flux_correction:
             method: prescribed_open_ocean
           force_positive_names:
@@ -450,6 +449,8 @@ stepper:
         - hfds_total_area
         - calving_residue_total_area
         - hfrunoffds_total_area
+        - tauuo
+        - tauvo
         - SSS
         - SST_degK
       residual_prediction:

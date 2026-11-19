@@ -5,7 +5,7 @@ save_checkpoint: true
 validate_using_ema: true
 ema:
   decay: 0.999
-max_epochs: 45 # 160 yr x 73/yr / bs 16 = 730 iter/epoch -> ~36,500 iterations
+max_epochs: 30 # 160 yr x 73/yr / bs 16 = 730 iter/epoch -> ~21,900 iterations
 ema_checkpoint_save_epochs:
   step: 15
 inference:
@@ -174,15 +174,17 @@ optimization:
   max_grad_norm: 1.0
   use_gradient_accumulation: true
   enable_automatic_mixed_precision: false
-  lr: 0.0001
-  optimizer_type: AdamW
+  lr: 0.001 # Muon group; archive/hybridSSTdiag-muon row mae-mrms-lr10e-4 (HITL D22)
+  optimizer_type: Muon
   kwargs:
-    fused: true
+    adjust_lr_fn: match_rms_adamw
+    adamw_lr: 0.0003
     weight_decay: 0.01
+    adamw_weight_decay: 0.01
 stepper_training:
   n_forward_steps: 4
   loss:
-    type: MSE
+    type: L1
 stepper:
   input_masking:
     mask_value: 0
@@ -449,6 +451,8 @@ stepper:
         - hfds_total_area
         - calving_residue_total_area
         - hfrunoffds_total_area
+        - tauuo
+        - tauvo
         - SSS
         - SST_degK
       residual_prediction:

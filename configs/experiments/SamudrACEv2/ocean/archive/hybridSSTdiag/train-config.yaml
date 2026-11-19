@@ -1,4 +1,4 @@
-# job_runner/uncoupled_train.sh configs/experiments/SamudrACEv2/ocean/hybridSSTdiag-tau-UIVI . \
+# job_runner/uncoupled_train.sh configs/experiments/SamudrACEv2/ocean/archive/hybridSSTdiag . \
 #   --coupled_stats andrep/2026-11-13-om4-1pctco2-1deg-coupled-stats
 experiment_dir: /results
 save_checkpoint: true
@@ -449,10 +449,6 @@ stepper:
         - hfds_total_area
         - calving_residue_total_area
         - hfrunoffds_total_area
-        - tauuo
-        - tauvo
-        - UI
-        - VI
         - SSS
         - SST_degK
       residual_prediction:
