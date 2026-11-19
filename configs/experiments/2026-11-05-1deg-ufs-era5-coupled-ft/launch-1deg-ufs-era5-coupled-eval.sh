@@ -42,5 +42,5 @@ launch() {  # job name, config file
 if [ -n "$HINDCAST_YEARS" ]; then
   for Y in $HINDCAST_YEARS; do launch "samudra-ufs1deg-era5-${NAME}-hindcast-${Y}" "coupled-evaluator-config-ufs1deg-era5-hindcast-${Y}-singleckpt${CFG_SUFFIX}.yaml"; done
 else
-  launch "samudra-ufs1deg-era5-${NAME}-fullrecord-1994" "$CFG"
+  launch "samudra-ufs1deg-era5-${NAME}-${RUN_LABEL:-fullrecord-1994}" "$CFG"
 fi
