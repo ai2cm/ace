@@ -1,2 +1,4 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
 
+
+SamudrACEv2-hybridSSTdiag-fiz|rs0|01M7TQVV2XEHKDBC46QVHYN0PF|training|best_inference_ckpt|normal|--min-runtime 8h
