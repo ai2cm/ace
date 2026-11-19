@@ -1,0 +1,40 @@
+# Control for the CO2-band-flux input experiment: the CO2-input baseline
+# (muon-4deg-pretrain-rs1, wandb b6v0uw1j, EMA weights at epoch 120) rolled
+# out over the same 81 years and initial conditions as its inline
+# long_81year inference, with global_mean_co2 held at its initial-condition
+# (1940) value. Matches the long_81year_constant_co2 inline entry of
+# pretrain-muon-4deg-co2-band-olr-rs1.yaml.
+experiment_dir: /results
+n_forward_steps: 29565
+forward_steps_in_memory: 73
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace
+  entity: ai2cm
+loader:
+  persistence_names:
+  - global_mean_co2
+  start_indices:
+    times:
+    - '1940-01-03T00:00:00'
+    - '1940-01-04T00:00:00'
+    - '1940-01-05T00:00:00'
+    - '1940-01-06T00:00:00'
+    - '1940-01-07T00:00:00'
+    - '1940-01-08T00:00:00'
+    - '1940-01-09T00:00:00'
+    - '1940-01-10T00:00:00'
+  dataset:
+    data_path: /climate-default
+    file_pattern: 2026-09-08-era5-4deg-8layer-daily-1940-2025.zarr
+    engine: zarr
+  num_data_workers: 8
+aggregator:
+  log_histograms: true
+  time_mean_reference_data: /climate-default/2026-09-08-era5-4deg-8layer-daily-stats-1990-2019/2026-09-08-era5-4deg-8layer-daily-1940-2025/time-mean.nc
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false

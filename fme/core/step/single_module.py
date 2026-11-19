@@ -22,6 +22,7 @@ from fme.core.optimization import NullOptimization
 from fme.core.packer import Packer
 from fme.core.registry import CorrectorSelector, ModuleSelector
 from fme.core.step.args import StepArgs
+from fme.core.step.co2_band_olr import CO2BandOLRInput, CO2BandOLRInputConfig
 from fme.core.step.global_mean_removal import (
     GlobalMeanRemoval,
     GlobalMeanRemovalConfigUnion,
@@ -115,6 +116,9 @@ class SingleModuleStepConfig(StepConfigABC):
             from fields before normalization and restoring them after
             denormalization. Supports shared (single reference field) or
             per-channel removal, with optional extra input channels.
+        co2_band_olr_input: Optional replacement of the CO2 input channel
+            with a Step-derived, normalized estimate of the clear-sky outgoing
+            longwave flux in the CO2 band. See ``CO2BandOLRInputConfig``.
         input_dropout: Optional training-time input channel dropout. When set,
             a random subset of input channels is zeroed on each optimized
             training step, with the same mask broadcast across the whole
@@ -141,8 +145,11 @@ class SingleModuleStepConfig(StepConfigABC):
     include_channel_mask_inputs: bool = False
     global_mean_removal: GlobalMeanRemovalConfigUnion | None = None
     input_dropout: VariableMaskingConfig | None = None
+    co2_band_olr_input: CO2BandOLRInputConfig | None = None
 
     def __post_init__(self):
+        if self.co2_band_olr_input is not None:
+            self.co2_band_olr_input.validate_names(self.in_names)
         self.crps_training = None  # unused, kept for backwards compatibility
         residual_prediction = self.residual_prediction
         if isinstance(residual_prediction, bool):
@@ -380,6 +387,13 @@ class SingleModuleStep(StepABC):
             )
         else:
             self._global_mean_removal = NoGlobalMeanRemoval()
+        self._co2_band_olr_input: CO2BandOLRInput | None = (
+            config.co2_band_olr_input.build(
+                dataset_info.vertical_coordinate, config.in_names
+            )
+            if config.co2_band_olr_input is not None
+            else None
+        )
         # Synthetic GMR channels are packed alongside real inputs so they
         # flow through the packer and channel-mask machinery uniformly.
         packed_in_names = (
@@ -565,6 +579,11 @@ class SingleModuleStep(StepABC):
             global_mean_removal=self._global_mean_removal,
             data_mask=args.data_mask,
             stepper_state=args.stepper_state,
+            normalized_input_overrides=(
+                self._co2_band_olr_input.normalized_overrides
+                if self._co2_band_olr_input is not None
+                else None
+            ),
         )
 
     def _draw_input_dropout_mask(self) -> TensorMapping | None:
@@ -730,6 +749,7 @@ def step_with_adjustments(
     global_mean_removal: GlobalMeanRemoval | None = None,
     data_mask: TensorMapping | None = None,
     stepper_state: StepperState | None = None,
+    normalized_input_overrides: Callable[[TensorMapping], TensorMapping] | None = None,
 ) -> StepOutput:
     """
     Step the model forward one timestep given input data.
@@ -769,6 +789,9 @@ def step_with_adjustments(
             the corrector and any updates are written back into the returned
             ``StepperState``; the other fields (e.g. ``random_state``) pass
             through unchanged. Pass-through unchanged when no corrector is set.
+        normalized_input_overrides: Optional function mapping the denormalized
+            input to already-normalized tensors that replace the named
+            channels of the network input.
 
     Returns:
         A ``StepOutput`` carrying the denormalized data at the next time step,
@@ -789,6 +812,10 @@ def step_with_adjustments(
         input_norm = {**input_norm, **global_mean_removal.extras_normalized(gmr_state)}
     else:
         input_norm = normalizer.normalize(input)
+    if normalized_input_overrides is not None:
+        # Step-derived channels are computed from the denormalized input and
+        # arrive already normalized, replacing the named input channels.
+        input_norm = {**input_norm, **normalized_input_overrides(input)}
     output_norm = network_calls(input_norm)
     if residual_names is not None:
         if residual_transform is not None:
