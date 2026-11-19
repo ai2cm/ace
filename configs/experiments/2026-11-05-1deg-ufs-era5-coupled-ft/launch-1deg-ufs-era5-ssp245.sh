@@ -8,6 +8,7 @@ ARM="${ARM:?arm tag (ssp/ufs1deg-ssp245-<ARM>.yaml)}"
 CKPT_DS="${CKPT_DS:?coupled fine-tune results dataset}"
 CKPT_FILE="${CKPT_FILE:-training_checkpoints/best_inference_ckpt.tar}"
 OCEAN_FORCING_DS="${OCEAN_FORCING_DS:-01M7AYRDF38RSF8X1Q08AZPNA4}"
+EXTRA_DS="${EXTRA_DS:-}"   # ACE2.5 atmosphere arms: the extra SSP store (carbon_dioxide ppmv + lake_fraction), mounted at /ace2p5forcing
 MIN_RUNTIME="${MIN_RUNTIME:-6h}"
 PRIORITY="${PRIORITY:-high}"
 CLUSTERS="${CLUSTERS:-ai2/titan ai2/jupiter ai2/ceres}"
@@ -30,6 +31,7 @@ out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
   --dataset "${CKPT_DS}:${CKPT_FILE}:/ckpt.tar" \
   --dataset "${OCEAN_FORCING_DS}:/oceanforcing/ocean_forcing_ssp245.zarr" \
+  ${EXTRA_DS:+--dataset "${EXTRA_DS}:/ace2p5forcing/ace2p5_ssp245_forcing.zarr"} \
   --gpus 1 --shared-memory 200GiB --budget ai2/atec-climate \
   --allow-dirty --system-python --install "pip install --no-deps ." \
   -- python -I -m fme.coupled.inference "${SCRIPT_PATH}/ssp/${C}" 2>&1) || true
