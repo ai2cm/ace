@@ -1,4 +1,4 @@
-# job_runner/uncoupled_train.sh configs/experiments/SamudrACEv2/ocean/hybridSSTdiag . \
+# job_runner/uncoupled_train.sh configs/experiments/SamudrACEv2/ocean/hybridSSTdiag-fiz . \
 #   --coupled_stats andrep/2026-11-13-om4-1pctco2-1deg-coupled-stats
 experiment_dir: /results
 save_checkpoint: true
@@ -192,6 +192,9 @@ stepper:
     exclude_names_and_prefixes:
       - land_fraction
       - sea_surface_fraction
+    fill_value_overrides:
+      ocean_sea_ice_fraction: 0.0
+      ocean_sea_ice_thickness_mean: 0.0
   step:
     type: single_module
     config:
