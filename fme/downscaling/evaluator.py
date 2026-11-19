@@ -25,7 +25,7 @@ from fme.downscaling.predictors import (
     DenoisingMoEPredictor,
     PatchPredictionConfig,
     PatchPredictor,
-    check_input_shape_supported,
+    get_generation_model,
 )
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -198,23 +198,12 @@ class EvaluatorConfig:
         coarse_lon = dataset.coarse_extent_latlon_coords.lon
         # No-op when coarse_lon does not cross the prime meridian.
         model = model.with_rolled_lon(coarse_lon)
-        check_input_shape_supported(
-            model.coarse_shape,
+        evaluator_model = get_generation_model(
+            model,
             dataset.coarse_shape,
             self.patch,
             name="evaluator",
         )
-        evaluator_model: DiffusionModel | DenoisingMoEPredictor | PatchPredictor
-        if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (
-            dataset.coarse_shape[1] > model.coarse_shape[1]
-        ):
-            evaluator_model = PatchPredictor(
-                model,
-                coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
-            )
-        else:
-            evaluator_model = model
-
         return Evaluator(
             data=dataset,
             model=evaluator_model,
@@ -227,8 +216,6 @@ class EvaluatorConfig:
         event_config: PairedEventConfig,
         model: DiffusionModel | DenoisingMoEPredictor,
     ) -> EventEvaluator:
-        evaluator_model: DiffusionModel | DenoisingMoEPredictor | PatchPredictor
-
         dataset = event_config.get_paired_gridded_data(
             base_data_config=self.data,
             requirements=self.model.data_requirements,
@@ -236,21 +223,12 @@ class EvaluatorConfig:
         coarse_lon = dataset.coarse_extent_latlon_coords.lon
         # No-op when coarse_lon does not cross the prime meridian.
         model = model.with_rolled_lon(coarse_lon)
-        check_input_shape_supported(
-            model.coarse_shape,
+        evaluator_model = get_generation_model(
+            model,
             dataset.coarse_shape,
             self.patch,
             name=f"event {event_config.name}",
         )
-        if (dataset.coarse_shape[0] > model.coarse_shape[0]) or (
-            dataset.coarse_shape[1] > model.coarse_shape[1]
-        ):
-            evaluator_model = PatchPredictor(
-                model=model,
-                coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
-            )
-        else:
-            evaluator_model = model
 
         return EventEvaluator(
             event_name=event_config.name,

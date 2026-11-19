@@ -1,4 +1,5 @@
 import dataclasses
+import logging
 
 import torch
 
@@ -204,6 +205,36 @@ def check_input_shape_supported(
             "Generation for larger domains requires patch prediction configured with "
             "composite_prediction=True and divide_generation=True."
         )
+
+
+def get_generation_model(
+    model: DiffusionModel | DenoisingMoEPredictor,
+    input_shape: tuple[int, int],
+    patch: PatchPredictionConfig,
+    name: str = "",
+) -> DiffusionModel | DenoisingMoEPredictor | PatchPredictor:
+    """
+    Validate that the model supports generating on inputs of ``input_shape``
+    and return the model to generate with: the model itself, or a
+    PatchPredictor wrapping it when patch prediction is configured and the
+    input extent differs from the model's training patch size.
+
+    Args:
+        model: the model to generate with.
+        input_shape: the coarse (lat, lon) extent of the input data.
+        patch: the patch prediction configuration.
+        name: optional name of the generation target, used in log and
+            error messages.
+    """
+    check_input_shape_supported(model.coarse_shape, input_shape, patch, name=name)
+    if patch.needs_patch_predictor and input_shape != model.coarse_shape:
+        suffix = f" for {name}" if name else ""
+        logging.info(f"Using PatchPredictor{suffix}")
+        return PatchPredictor(
+            model=model,
+            coarse_horizontal_overlap=patch.coarse_horizontal_overlap,
+        )
+    return model
 
 
 def _get_full_extent_from_patches(patches: list[Patch]) -> tuple[int, int]:

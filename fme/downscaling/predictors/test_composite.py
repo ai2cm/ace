@@ -15,6 +15,7 @@ from fme.downscaling.predictors.composite import (
     PatchPredictor,
     check_input_shape_supported,
     composite_patch_predictions,
+    get_generation_model,
 )
 
 
@@ -112,6 +113,25 @@ class DummyModel:
             for k, v in batch.data.items()
         }
         return prediction_data
+
+
+@pytest.mark.parametrize("patch", [_NO_PATCH, _COMPOSITE_PATCH])
+def test_get_generation_model_returns_model_for_exact_match(patch):
+    model = DummyModel(coarse_shape=(16, 16), downscale_factor=2)
+    # DummyModel duck-types the model interface used by get_generation_model
+    assert get_generation_model(model, (16, 16), patch) is model  # type: ignore
+
+
+def test_get_generation_model_wraps_larger_input_with_patch_predictor():
+    model = DummyModel(coarse_shape=(16, 16), downscale_factor=2)
+    generation_model = get_generation_model(
+        model,  # type: ignore
+        (32, 32),
+        _COMPOSITE_PATCH,
+    )
+    assert isinstance(generation_model, PatchPredictor)
+    assert generation_model.model is model
+    assert generation_model.coarse_shape == (16, 16)
 
 
 def get_paired_test_data(

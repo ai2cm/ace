@@ -19,7 +19,7 @@ from ..predictors import (
     DenoisingMoEPredictor,
     PatchPredictionConfig,
     PatchPredictor,
-    check_input_shape_supported,
+    get_generation_model,
 )
 from .output import DownscalingOutput, EventConfig, TimeRangeConfig
 from .work_items import LoadedSliceWorkItem
@@ -77,19 +77,11 @@ class Downscaler:
         input_shape = (len(coarse_coords.lat), len(coarse_coords.lon))
         # No-op when coarse_lon does not cross the prime meridian.
         base_model = self.model.with_rolled_lon(coarse_coords.lon)
-        check_input_shape_supported(
-            base_model.coarse_shape,
+        return get_generation_model(
+            base_model,
             input_shape,
             output.patch,
             name=f"output {output.name}",
-        )
-        if base_model.coarse_shape == input_shape:
-            return base_model
-
-        logging.info(f"Using PatchPredictor for output: {output.name}")
-        return PatchPredictor(
-            model=base_model,
-            coarse_horizontal_overlap=output.patch.coarse_horizontal_overlap,
         )
 
     def _on_device_generator(self, loader):
