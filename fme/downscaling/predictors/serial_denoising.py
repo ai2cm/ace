@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import torch
@@ -16,6 +16,7 @@ from fme.downscaling.models import (
 )
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.samplers import stochastic_sampler as edm_sampler
+from fme.downscaling.typing_ import Denoiser
 
 
 @dataclasses.dataclass
@@ -246,6 +247,35 @@ class DenoisingMoEPredictor:
             expert_renames=self._expert_renames,
         )
 
+    @property
+    def base_model(self) -> DiffusionModel:
+        """Expert used for input preparation and output postprocessing."""
+        return self._primary
+
+    def run_sampler(
+        self,
+        latents: torch.Tensor,
+        inputs: torch.Tensor,
+        wrap_denoiser: Callable[[Denoiser], Denoiser] | None = None,
+        record_latent_steps: bool = True,
+    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        """Run the EDM sampler over the full sigma schedule, dispatching to
+        experts by sigma, optionally wrapping the dispatching denoiser.
+        """
+        net: Denoiser = self._dispatch_module
+        if wrap_denoiser is not None:
+            net = wrap_denoiser(net)
+        return edm_sampler(
+            net,
+            latents,
+            inputs,
+            S_churn=self._churn,
+            sigma_min=self._sigma_schedule_min,
+            sigma_max=self._sigma_schedule_max,
+            num_steps=self._num_diffusion_generation_steps,
+            record_latent_steps=record_latent_steps,
+        )
+
     @torch.no_grad()
     def generate(
         self,
@@ -256,15 +286,7 @@ class DenoisingMoEPredictor:
         inputs, latents = self._primary.prepare_generation_inputs(
             coarse_data, static_inputs, n_samples
         )
-        generated_norm, latent_steps = edm_sampler(
-            self._dispatch_module,
-            latents,
-            inputs,
-            S_churn=self._churn,
-            sigma_min=self._sigma_schedule_min,
-            sigma_max=self._sigma_schedule_max,
-            num_steps=self._num_diffusion_generation_steps,
-        )
+        generated_norm, latent_steps = self.run_sampler(latents, inputs)
         generated, generated_norm = self._primary.postprocess_generated(
             generated_norm, coarse_data, n_samples
         )
