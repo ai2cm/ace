@@ -24,6 +24,7 @@ OCEAN_FIELD_NAME_PREFIXES = MappingProxyType(
         "sea_ice_fraction": ["sea_ice_fraction"],
         "sea_ice_thickness": ["HI"],
         "sea_ice_volume": ["sea_ice_volume"],
+        "ocean_sea_ice_thickness_mean": ["ocean_sea_ice_thickness_mean"],
         "ocean_sea_ice_fraction": ["ocean_sea_ice_fraction"],
         "land_fraction": ["land_fraction", "LANDFRAC"],
         "net_downward_surface_heat_flux": ["hfds"],
@@ -296,33 +297,61 @@ class OceanData:
 
     @property
     def sea_ice_thickness(self) -> torch.Tensor:
-        """Returns the sea ice thickness."""
+        """Returns the sea ice thickness in m, per unit sea ice area.
+
+        Lookup order: stored ``HI``; else ``ocean_sea_ice_thickness_mean``
+        divided by ``ocean_sea_ice_fraction`` (both per unit ocean area), 0
+        where that fraction is not positive; else derived from
+        ``sea_ice_volume``. NaN where an input is NaN (land).
+        """
         try:
             return self._get("sea_ice_thickness")
         except KeyError:
-            sfrac = self.sea_surface_fraction
-            sea_ice_vol = self.sea_ice_volume
-            try:
-                sea_ice_frac = self.ocean_sea_ice_fraction * sfrac
-            except KeyError:
-                # assumes that sea_ice_fraction comes from compute_coupled_sea_ice
-                # in scripts/data_process/coupled_dataset_utils.py
-                lfrac = self.land_fraction
-                sea_ice_frac = self.sea_ice_fraction * sfrac / (1 - lfrac)
-            cell_area = self.area_weights_m2
-            return torch.where(
-                torch.isnan(sea_ice_vol),
-                float("nan"),
-                torch.nan_to_num(
-                    torch.exp(
-                        torch.log(sea_ice_vol)
-                        - torch.log(cell_area)
-                        - torch.log(sea_ice_frac)
-                    )
-                ),
-            )
+            pass
+        try:
+            thickness_mean = self.ocean_sea_ice_thickness_mean
+            ocean_sea_ice_frac = self.ocean_sea_ice_fraction
+        except KeyError:
+            return self._sea_ice_thickness_from_volume()
+        is_nan = torch.isnan(thickness_mean) | torch.isnan(ocean_sea_ice_frac)
+        has_ice = (ocean_sea_ice_frac > 0) & ~is_nan
+        # safe operands keep the unselected branch, and its gradient, finite
+        safe_numerator = torch.where(has_ice, thickness_mean, 0.0)
+        safe_denominator = torch.where(has_ice, ocean_sea_ice_frac, 1.0)
+        thickness = torch.where(has_ice, safe_numerator / safe_denominator, 0.0)
+        return torch.where(is_nan, float("nan"), thickness)
+
+    def _sea_ice_thickness_from_volume(self) -> torch.Tensor:
+        sfrac = self.sea_surface_fraction
+        sea_ice_vol = self.sea_ice_volume
+        try:
+            sea_ice_frac = self.ocean_sea_ice_fraction * sfrac
+        except KeyError:
+            # assumes that sea_ice_fraction comes from compute_coupled_sea_ice
+            # in scripts/data_process/coupled_dataset_utils.py
+            lfrac = self.land_fraction
+            sea_ice_frac = self.sea_ice_fraction * sfrac / (1 - lfrac)
+        cell_area = self.area_weights_m2
+        return torch.where(
+            torch.isnan(sea_ice_vol),
+            float("nan"),
+            torch.nan_to_num(
+                torch.exp(
+                    torch.log(sea_ice_vol)
+                    - torch.log(cell_area)
+                    - torch.log(sea_ice_frac)
+                )
+            ),
+        )
 
     @property
     def sea_ice_volume(self) -> torch.Tensor:
         """Returns the sea ice volume."""
         return self._get("sea_ice_volume")
+
+    @property
+    def ocean_sea_ice_thickness_mean(self) -> torch.Tensor:
+        """Returns sea ice thickness times sea ice fraction, averaged over the
+        ocean area of the cell (ice volume per unit ocean area), in m.
+        """
+        return self._get("ocean_sea_ice_thickness_mean")
