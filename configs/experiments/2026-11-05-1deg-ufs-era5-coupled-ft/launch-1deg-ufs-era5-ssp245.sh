@@ -17,7 +17,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 cd "$REPO_ROOT"
-JOB="samudra-ufs1deg-era5-${ARM}-ssp245-2015-2099"
+JOB="samudra-ufs1deg-era5-${ARM}-ssp245-2015-2099${TAG:+-$TAG}"
 C="ufs1deg-ssp245-${ARM}.yaml"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --description "1deg UFS + ERA5 coupled SSP2-4.5 run 2015-2099 (${C}) of ${CKPT_DS}:${CKPT_FILE}" \

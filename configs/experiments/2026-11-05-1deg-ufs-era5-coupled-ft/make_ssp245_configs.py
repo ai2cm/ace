@@ -124,13 +124,15 @@ tag = "ohc-uhm1p7-ace2p5cm4-fto-mse-then-ftalt"
 c25 = copy.deepcopy(cfg)
 forcing: dict = c25["forcing_loader"]  # type: ignore[assignment]
 forcing["atmosphere"]["dataset"] = {
+    # the extra store goes FIRST: a merge takes the first source of a variable, and the extra store's land_fraction is the
+    # UFS/MOM6 one the coupled model was trained with (the SSP store's is ERA5's, 1.9% of the globe less land)
     "merge": [
-        forcing["atmosphere"]["dataset"],
         {
             "data_path": "/ace2p5forcing",
             "file_pattern": "ace2p5_ssp245_forcing.zarr",
             "engine": "zarr",
         },
+        forcing["atmosphere"]["dataset"],
     ]
 }
 writer: dict = c25["data_writer"]  # type: ignore[assignment]

@@ -26,11 +26,11 @@ forcing_loader:
   atmosphere:
     dataset:
       merge:
-      - data_path: /climate-default
-        file_pattern: 2026-04-07-cm4-ssp245-ACE-forcing-dataset.zarr
-        engine: zarr
       - data_path: /ace2p5forcing
         file_pattern: ace2p5_ssp245_forcing.zarr
+        engine: zarr
+      - data_path: /climate-default
+        file_pattern: 2026-04-07-cm4-ssp245-ACE-forcing-dataset.zarr
         engine: zarr
   ocean:
     dataset:
