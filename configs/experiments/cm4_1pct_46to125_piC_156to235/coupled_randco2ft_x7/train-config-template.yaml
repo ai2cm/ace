@@ -1,10 +1,18 @@
-# X7: X2 (coupled_randco2ft_x1x2, X2 row: atmosphere init wgz8np8z) with X6's coupled helical `decay` LR
-# schedules (coupled_randco2ft_x6 = coupled_randco2ft_x5d; D12, D15 (a); U30 defaults at X2's T), as SequentialLR
-# of LinearLR segments. No other change: X2's objective (no joint pairs) and corrector_disabled_epochs stay.
-# X2: coupled fine-tuning from uncoupled inits, one joint stage, no FTO. Ocean init: jrgclj2f.
+# X7: X6 (coupled_randco2ft_x6) with X2's atmosphere init (row atmos_wandb_id wgz8np8z, as coupled_randco2ft_x1x2's
+# X2 row) in place of tb6xf0ju. No other change: config keys are X6's. Lines below describe X6's lineage.
+# X6: X4 (coupled_randco2ft_x4) with X5d's coupled helical `decay` LR schedules (coupled_randco2ft_x5d; D12,
+# D15 (a); U30 defaults at X4's T), as SequentialLR of LinearLR segments.
+# objective_per_batch weights (D11, maintainer 2026-11-17): ocean 1 : joint 1 : uncoupled_atmosphere 2
+# (replay share 0.5, 4 epochs and LR schedule iterations as X1c0). Another option changes max_epochs and the
+# LR schedule iteration counts too.
+# X1c0: X1 (coupled_randco2ft_x1x2, atmosphere init tb6xf0ju) with the ocean corrector on from epoch 0
+# (corrector_disabled_epochs: 0; X1 has 1).
+# X1/X2: coupled fine-tuning from uncoupled inits, one joint stage, no FTO.
+# Ocean init: jrgclj2f (row ocean_wandb_id). Atmosphere init: row atmos_wandb_id (X1 tb6xf0ju, X2 wgz8np8z).
 # Base: no228urh's config (1deg hybrid-residual diagnosed-SST Samudra). Changes:
 #   per-component optimization (ace#1631): coupled helical decay; repeat shapes x linear envelope to 0 at the last batch; piecewise linear
-#   ACE gets no coupled-batch gradient; it trains on random-CO2 sstblend replay batches only (ace#1634)
+#   ACE's coupled-batch gradient comes from joint batches only (joint_pairs, ace#1632); it also trains on
+#   random-CO2 sstblend replay batches (ace#1634)
 #   replay share 0.5; inline piC only, shorter rollouts; inline random-CO2 1x/2x/4x atmosphere entries (ace#1633)
 # Launch (maintainer's go only): job_runner/coupled_train.sh configs/experiments/cm4_1pct_46to125_piC_156to235 coupled_randco2ft_x7 --coupled_stats 01KXNT0RA6VX2YTZ8WJ936Q5RS
 experiment_dir: /results
@@ -886,9 +894,19 @@ stepper_training:
       weights:
         h500: 5
     optimize_last_step_only: true
+  joint_pairs:
+  - - 1
+    - 20
+  - - 2
+    - 40
+  - - 3
+    - 60
+  - - 4
+    - 80
   objective_per_batch:
     ocean: 1.0
-    uncoupled_atmosphere: 1.0
+    joint: 1.0
+    uncoupled_atmosphere: 2.0
   uncoupled_atmosphere:
     loss:
       type: EnsembleLoss
@@ -960,7 +978,7 @@ stepper:
           corrector:
             type: ocean_corrector
             config:
-              corrector_disabled_epochs: 1
+              corrector_disabled_epochs: 0
               ocean_heat_content_correction:
                 method: scaled_temperature
               surface_energy_flux_correction:
