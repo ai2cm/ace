@@ -28,19 +28,19 @@ class ExtraFieldsConfig:
             The output dataset with additional variables copied in.
 
         """
-        if self.names_and_prefixes is None:
-            return output_ds
-
-        def match(prefix_or_name: str, name: str):
-            if prefix_or_name.endswith("_"):
-                return name.startswith(prefix_or_name)
-            return name == prefix_or_name
-
-        for prefix_or_name in self.names_and_prefixes:
-            for name in input_ds.data_vars:
-                if match(prefix_or_name, name):
-                    output_ds[name] = input_ds[name]
+        for name in input_ds.data_vars:
+            if self.matches(str(name)):
+                output_ds[name] = input_ds[name]
         return output_ds
+
+    def matches(self, name: str) -> bool:
+        """Whether name equals an entry or starts with an entry ending in '_'."""
+        if self.names_and_prefixes is None:
+            return False
+        return any(
+            name.startswith(entry) if entry.endswith("_") else name == entry
+            for entry in self.names_and_prefixes
+        )
 
     def drop_extra_data_vars(self, ds: xr.Dataset) -> xr.Dataset:
         """Drop the additional data variables from a dataset where they were
@@ -211,31 +211,118 @@ class CoupledSurfaceTemperatureConfig:
 
 
 @dataclasses.dataclass
-class PrecomputedSeaIceMaskConfig:
-    zarr_path: str
-    name: str = "mask_sea_ice_fraction"
+class SeaIceMaskLatitudeLimits:
+    """Smallest absolute latitudes of kept sea ice, one per hemisphere.
 
-    def get_sea_ice_mask(self) -> xr.DataArray:
-        logging.info(f"Loading {self.name} from {self.zarr_path}.")
-        mask = xr.open_zarr(self.zarr_path)[self.name]
-        if len(mask.dims) != 2:
+    Parameters:
+        north: Smallest latitude in degrees north of kept Northern Hemisphere
+            sea ice.
+        south: Smallest absolute latitude in degrees south of kept Southern
+            Hemisphere sea ice.
+    """
+
+    north: float
+    south: float
+
+    def __post_init__(self):
+        for limit in [self.north, self.south]:
+            if not 0.0 <= limit <= 90.0:
+                raise ValueError(
+                    f"Sea ice mask latitude limits must be in [0, 90], got {limit}."
+                )
+
+
+@dataclasses.dataclass
+class SeaIceMaskConfig:
+    """Sea ice mask of the coupled ocean dataset.
+
+    The mask is static (lat, lon), 1 where sea ice values are kept and 0
+    where they are set to NaN:
+
+        mask = 1 if sea_surface_fraction > 0
+                 and (lat >= latitude_limits.north
+                      or lat <= -latitude_limits.south)
+               else 0
+
+    With latitude_limits unset the mask is 0 on land only.
+
+    Effect per coupled output dataset:
+        ocean: sea_ice_fraction, ocean_sea_ice_fraction and each of
+            extra_masked_names are NaN where mask is 0, and each gets a copy
+            of the mask as "mask_{name}". An extra_masked_names variable keeps
+            its ocean input attrs.
+        sea_ice, atmosphere: not masked. Their sea ice fractions keep their
+            values, with land filled with 0, and carry no "mask_*" variable.
+
+    The masked copies take effect in fme training only when the coupled ocean
+    dataset precedes the base ocean dataset in the fme data "merge" list,
+    which takes each variable from the first dataset that holds it.
+
+    Parameters:
+        latitude_limits: Latitude limits of kept sea ice; rows at the limits
+            are kept. None keeps sea ice at every latitude.
+            scripts/sea_ice/compute_sea_ice_mask_limits.py computes them from
+            a sea ice fraction dataset.
+        extra_masked_names: Ocean input variables, besides the two sea ice
+            fractions (always masked), that are masked and written to the
+            coupled ocean dataset. A name here must not also match the ocean
+            input extra_fields, whose unmasked copy would replace it.
+        extra_fill_values: Fill value for NaN in an extra_masked_names
+            variable, applied before masking, so it shows only where mask
+            is 1 (e.g. 0 ice velocity on ice-free ocean).
+    """
+
+    latitude_limits: SeaIceMaskLatitudeLimits | None = None
+    extra_masked_names: list[str] = dataclasses.field(default_factory=list)
+    extra_fill_values: dict[str, float] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self):
+        unmasked = sorted(set(self.extra_fill_values) - set(self.extra_masked_names))
+        if unmasked:
             raise ValueError(
-                f"Expected a 2D precomputed sea ice mask, but got {str(mask)}."
+                f"extra_fill_values names {unmasked} are not in extra_masked_names."
             )
-        mask = mask.load()
-        # A store still being written reads its unwritten mask as the NaN fill.
-        if not bool(mask.isin([0, 1]).all()):
+
+    def compute_mask(
+        self, sea_surface_fraction: xr.DataArray, lat: xr.DataArray
+    ) -> xr.DataArray:
+        """Sea ice mask: 1 on sea surface poleward of the latitude limits, else 0.
+
+        Args:
+            sea_surface_fraction: Static (lat, lon) sea surface fraction.
+            lat: Latitude coordinate in degrees north.
+
+        Returns:
+            Static (lat, lon) mask of 0 and 1.
+        """
+        if sea_surface_fraction.ndim != 2 or lat.name not in sea_surface_fraction.dims:
             raise ValueError(
-                f"Precomputed sea ice mask {self.name} in {self.zarr_path} has "
-                "values other than 0 and 1; is the store fully written?"
+                "Expected a static 2D sea surface fraction with a latitude "
+                f"dimension, got dims {sea_surface_fraction.dims}."
             )
+        limits = self.latitude_limits or SeaIceMaskLatitudeLimits(north=0.0, south=0.0)
+        logging.info(
+            "Computing sea ice mask on sea surface with "
+            f"lat >= {limits.north} or lat <= -{limits.south}."
+        )
+        in_band = (lat >= limits.north) | (lat <= -limits.south)
+        mask = ((sea_surface_fraction > 0) & in_band).astype(float)
+        mask.attrs = {"long_name": "sea ice mask", "units": "unitless"}
         return mask
+
+    def apply(
+        self, da: xr.DataArray, mask: xr.DataArray, name: str | None = None
+    ) -> xr.DataArray:
+        """NaN where mask is 0, after filling NaN per extra_fill_values."""
+        if name is not None and name in self.extra_fill_values:
+            da = da.fillna(self.extra_fill_values[name])
+        return da.where(mask > 0)
 
 
 @dataclasses.dataclass
 class CoupledSeaSurfaceConfig:
-    """Configuration of surface fields for the coupled ocean dataset, including
-    sea ice masking and time-averaged fluxes.
+    """Configuration of the coupled ocean dataset's sea surface fields: the
+    sea ice mask and fluxes averaged over ocean timesteps.
 
     Parameters:
         surface_flux_window_avg: Configuration for computing windowed time-averaged
@@ -243,16 +330,8 @@ class CoupledSeaSurfaceConfig:
             first_timestamp is None, the first window ends at the ocean
             dataset's first timestamp, so that an ensemble whose runs start on
             different dates can share this configuration.
-        sst_threshold: Upper threshold for the SST time mean in degrees Kelvin.
-            The resulting sea ice mask is 1 where the time mean SST < the
-            threshold and 0 otherwise.
-        ocean_extra_masked_names: Additional sea-ice-related variable names for which
-            copies of the mask will be added as "mask_{extra_name}". NOTE: The
-            sea-ice fraction and "ocean" sea-ice fraction masks don't need to be
-            specified here.
-        ocean_extra_fill_values: Dictionary where keys are a subset of
-            ocean_extra_masked_names entries and values are used to fill any
-            NaNs that are found in the non-NaN area of the sea ice mask.
+        sea_ice_mask: Sea ice mask of the coupled ocean dataset
+            (SeaIceMaskConfig).
         sea_ice_window_avg: Optional configuration for windowed time-averaging of the
             coupled sea ice dataset. If None, the coupled sea ice is simply subsampled
             to the ocean dataset temporal frequency.
@@ -261,63 +340,9 @@ class CoupledSeaSurfaceConfig:
     """
 
     surface_flux_window_avg: WindowAvgDatasetConfig
-    sst_threshold: float | None = None
-    ocean_extra_masked_names: list[str] = dataclasses.field(default_factory=list)
-    ocean_extra_fill_values: dict[str, float] = dataclasses.field(default_factory=dict)
-    precomputed_sea_ice_mask: PrecomputedSeaIceMaskConfig | None = None
+    sea_ice_mask: SeaIceMaskConfig = dataclasses.field(default_factory=SeaIceMaskConfig)
     sea_ice_window_avg: WindowAvgDatasetConfig | None = None
     timedelta: str = "120h"
-    _mask: xr.DataArray | None = None
-
-    def __post_init__(self):
-        if self.sst_threshold is None and self.precomputed_sea_ice_mask is None:
-            raise ValueError(
-                "Either sst_threshold or precomputed_sea_ice_mask must be configured."
-            )
-
-    def compute_sea_ice_mask(self, sst: xr.DataArray) -> xr.DataArray:
-        """Compute sea ice mask based on time-mean SST threshold.
-
-        Args:
-            sst: Sea surface temperature field.
-
-        Returns:
-            Binary mask (1 where sea ice is present, 0 elsewhere).
-        """
-        if self.precomputed_sea_ice_mask is not None:
-            if self.sst_threshold is not None:
-                logging.warning(
-                    f"sst_threshold={self.sst_threshold} configured ",
-                    "but precomputed_sea_ice_mask is also non-null. Ignoring "
-                    "sst_threshold and loading the precomputed mask.",
-                )
-            self._mask = self.precomputed_sea_ice_mask.get_sea_ice_mask()
-        else:
-            logging.info(
-                "Computing sea ice mask from the time-mean SST map using "
-                f"sst_threshold={self.sst_threshold}."
-            )
-            sst_tm = sst.mean(dim="time")
-            self._mask = (sst_tm < self.sst_threshold).fillna(0.0)
-        return self._mask
-
-    def apply_mask(self, da: xr.DataArray, name: str | None = None) -> xr.DataArray:
-        """Apply the computed sea ice mask to a data array.
-
-        Args:
-            da: Data array to mask.
-
-        Returns:
-            Masked data array (NaN where mask is 0).
-
-        Raises:
-            RuntimeError: If compute_sea_ice_mask has not been called first.
-        """
-        if self._mask is None:
-            raise RuntimeError("Call compute_sea_ice_mask before apply_mask.")
-        if name is not None and name in self.ocean_extra_fill_values:
-            da = da.fillna(self.ocean_extra_fill_values[name])
-        return da.where(self._mask > 0)
 
     def apply_sea_ice_window_avg(self, ds: xr.Dataset) -> xr.Dataset:
         if self.sea_ice_window_avg is not None:
@@ -608,8 +633,7 @@ def compute_coupled_sea_ice(
             - Modified land, ocean, and sea ice fractions
             - Sea ice concentration
             - Sea surface fraction
-            - Sea ice mask(s) for masking variables
-            - Additional masked sea ice variables as configured
+            - Additional variables as configured
     """
     if sea_ice is None and sea_ice_extras is not None:
         raise ValueError("Got non-None sea_ice_extras but sea_ice is None.")
@@ -764,10 +788,12 @@ def compute_coupled_ocean(
     """Create coupled ocean dataset at ocean timesteps.
 
     Selects coupled sea ice fields at ocean time coordinates and optionally
-    adds extra variables from the ocean dataset. The heat flux into sea water
-    scaled by sea surface fraction is copied from the ocean dataset when
-    already present there, and derived from the heat flux and sea surface
-    fraction otherwise.
+    adds extra variables from the ocean dataset. The sea ice fraction, sea
+    ice concentration and sea_ice_mask.extra_masked_names are NaN on land and
+    outside the sea ice mask (SeaIceMaskConfig). The heat flux into sea water
+    scaled by sea surface fraction is copied from the ocean dataset when already
+    present there, and derived from the heat flux and sea surface fraction
+    otherwise.
 
     Args:
         ocean: Ocean input dataset.
@@ -791,7 +817,6 @@ def compute_coupled_ocean(
         {latdim: atmos[latdim], londim: atmos[londim]}
     )
 
-    sst_name = input_field_names.ocean.sea_surface_temperature_name
     ifrac_name = input_field_names.atmosphere.sea_ice_fraction_name
     sic_name = input_field_names.derived.ocean_sea_ice_fraction_name
     ts_name = input_field_names.atmosphere.surface_temperature_name
@@ -826,20 +851,13 @@ def compute_coupled_ocean(
             "units": ocean[hfds_name].attrs.get("units", "W/m2"),
         }
 
-    sea_ice_mask = config.compute_sea_ice_mask(ocean[sst_name])
-    sea_ice_mask.attrs = {
-        "long_name": "sea ice mask",
-        "units": "unitless",
-    }
-
-    # apply masking to sea ice fractions
+    sea_ice_mask = config.sea_ice_mask.compute_mask(ds[sfrac_name], ds[latdim])
     for name in [ifrac_name, sic_name]:
-        ds[name] = config.apply_mask(ds[name])
+        ds[name] = config.sea_ice_mask.apply(ds[name], sea_ice_mask)
         ds[f"mask_{name}"] = sea_ice_mask
 
-    # apply masking to other sea ice variables in the ocean dataset
-    for name in config.ocean_extra_masked_names:
-        ds[name] = config.apply_mask(ocean[name], name)
+    for name in config.sea_ice_mask.extra_masked_names:
+        ds[name] = config.sea_ice_mask.apply(ocean[name], sea_ice_mask, name)
         ds[name].attrs = ocean[name].attrs
         ds[f"mask_{name}"] = sea_ice_mask
 
@@ -870,7 +888,7 @@ def compute_coupled_atmosphere(
         ocean: Ocean input dataset containing SST.
         coupled_ocean: Coupled land, ocean, sea ice and sea surface fractions.
             create_coupled_datasets passes the unmasked compute_coupled_sea_ice
-            output, so the atmosphere carries no sea ice mask NaN.
+            output, so the atmosphere carries no land or sea ice mask NaN.
         config: Configuration for surface temperature coupling.
         input_field_names: Names of input fields. If None, uses defaults.
         extras: Optional configuration for copying extra variables from atmosphere.
@@ -904,7 +922,8 @@ def compute_coupled_atmosphere(
     ts = atmos[ts_name]
     sst = ocean[sst_name]
     lfrac = coupled_ocean[lfrac_name]
-    ifrac = coupled_ocean[ifrac_name].sel({tdim: ocean[tdim]})
+    # no-op for the coupled sea ice input; fills NaN when given the coupled ocean
+    ifrac = coupled_ocean[ifrac_name].sel({tdim: ocean[tdim]}).fillna(0.0)
     ofrac = coupled_ocean[ofrac_name].sel({tdim: ocean[tdim]})
     sfrac = coupled_ocean[sfrac_name]
 

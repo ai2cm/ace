@@ -5,7 +5,8 @@ from coupled_dataset_utils import (
     CoupledSeaIceConfig,
     CoupledSeaSurfaceConfig,
     CoupledSurfaceTemperatureConfig,
-    PrecomputedSeaIceMaskConfig,
+    SeaIceMaskConfig,
+    SeaIceMaskLatitudeLimits,
     compute_coupled_atmosphere,
     compute_coupled_ocean,
     compute_coupled_sea_ice,
@@ -284,14 +285,14 @@ def test_legacy_mode_unchanged(with_sea_ice_dataset):
     )
 
 
-def _sea_surface_config() -> CoupledSeaSurfaceConfig:
+def _sea_surface_config(**kwargs) -> CoupledSeaSurfaceConfig:
     return CoupledSeaSurfaceConfig(
         surface_flux_window_avg=WindowAvgDatasetConfig(
             window_timedelta="120h",
             first_timestamp="2000-01-06T00:00:00",
             subset_names=["latent_heat_flux"],
         ),
-        sst_threshold=300.0,
+        **kwargs,
     )
 
 
@@ -366,31 +367,156 @@ def test_hfds_total_area_passthrough(native_present):
         np.testing.assert_allclose(coupled_ocean["hfds_total_area"].values, 2.0 * 0.5)
 
 
-def _write_mask(path, values) -> str:
-    store = str(path / "coupled-ocean.zarr")
-    xr.Dataset(
-        {"mask_sea_ice_fraction": (("lat", "lon"), np.array(values, dtype=float))},
-        coords={"lat": LAT, "lon": LON},
-    ).to_zarr(store)
-    return store
+def _land_and_ocean_chain(sea_surface_config=None):
+    """Coupled sea ice, ocean and atmosphere on a grid with one land cell."""
+    atmos = _synthetic_atmos(land_fraction=[[0.0, 0.3], [1.0, 0.0]])
+    ocean = _synthetic_ocean(
+        sea_surface_fraction=[[1.0, 0.7], [0.0, 1.0]],
+        ocean_sea_ice_fraction=0.0,
+    )
+    # ice-free at (0, 0) and (1, 1), ice at (0, 1), NaN on the land cell (1, 0)
+    ocean["ocean_sea_ice_fraction"] = ocean["ocean_sea_ice_fraction"] + _static(
+        [[0.0, 0.5], [np.nan, 0.0]]
+    )
+    # sea ice extras: NaN on land; UI also NaN on the ocean cell (0, 0)
+    ocean["HI"] = _time_varying(0.0, _ocean_times()) + _static(
+        [[1.0, 2.0], [np.nan, 3.0]]
+    )
+    ocean["HI"].attrs = {"units": "m"}
+    ocean["UI"] = _time_varying(0.0, _ocean_times()) + _static(
+        [[np.nan, 2.0], [np.nan, 3.0]]
+    )
+    if sea_surface_config is None:
+        sea_surface_config = _sea_surface_config()
+    coupled_sea_ice = compute_coupled_sea_ice(atmos, CoupledSeaIceConfig(), ocean=ocean)
+    coupled_ocean = compute_coupled_ocean(
+        ocean, atmos, coupled_sea_ice, sea_surface_config
+    )
+    # as create_coupled_datasets: the atmosphere reads the unmasked coupled sea ice
+    coupled_atmos = compute_coupled_atmosphere(
+        atmos,
+        ocean,
+        coupled_sea_ice,
+        CoupledSurfaceTemperatureConfig(how="threshold"),
+    )
+    return coupled_sea_ice, coupled_ocean, coupled_atmos
 
 
-def test_precomputed_sea_ice_mask_loads_binary_mask(tmp_path):
-    store = _write_mask(tmp_path, [[0.0, 1.0], [1.0, 0.0]])
-    mask = PrecomputedSeaIceMaskConfig(zarr_path=store).get_sea_ice_mask()
-    np.testing.assert_array_equal(mask.values, [[0.0, 1.0], [1.0, 0.0]])
+LAND = (1, 0)
+SEA_ICE_NAMES = ["sea_ice_fraction", "ocean_sea_ice_fraction"]
+EXTRA_NAMES = ["HI", "UI"]
+
+
+def _lat_masked_config() -> CoupledSeaSurfaceConfig:
+    """Masks the lat 0 row (LAT[0]); lat 1 (LAT[1]) sits on the north limit."""
+    return _sea_surface_config(
+        sea_ice_mask=SeaIceMaskConfig(
+            latitude_limits=SeaIceMaskLatitudeLimits(north=LAT[1], south=LAT[1]),
+            extra_masked_names=EXTRA_NAMES,
+            extra_fill_values={"UI": 0.0},
+        )
+    )
+
+
+def test_coupled_ocean_sea_ice_nan_only_on_land_without_limits():
+    _, coupled_ocean, _ = _land_and_ocean_chain()
+    for name in SEA_ICE_NAMES:
+        values = coupled_ocean[name].values
+        assert np.isnan(values[:, LAND[0], LAND[1]]).all(), name
+        is_land = np.zeros(values.shape[1:], dtype=bool)
+        is_land[LAND] = True
+        assert np.isfinite(values[:, ~is_land]).all(), name
+    # ice-free ocean is 0, not NaN
+    np.testing.assert_array_equal(
+        coupled_ocean["sea_ice_fraction"].values[:, 0, 0], 0.0
+    )
+
+
+def test_coupled_ocean_sea_ice_nan_on_land_and_in_latitude_strip():
+    _, coupled_ocean, _ = _land_and_ocean_chain(_lat_masked_config())
+    expected_mask = np.array([[0.0, 0.0], [0.0, 1.0]])
+    for name in SEA_ICE_NAMES + EXTRA_NAMES:
+        values = coupled_ocean[name].values
+        assert np.isnan(values[:, expected_mask == 0]).all(), name
+        assert np.isfinite(values[:, expected_mask == 1]).all(), name
+        mask = coupled_ocean[f"mask_{name}"]
+        assert mask.dims == ("lat", "lon"), name
+        np.testing.assert_array_equal(mask.values, expected_mask)
+    np.testing.assert_array_equal(coupled_ocean["HI"].values[:, 1, 1], 3.0)
+    assert coupled_ocean["HI"].attrs["units"] == "m"
+
+
+def test_extra_fill_values_fill_inside_mask():
+    config = _lat_masked_config()
+    config.sea_ice_mask.latitude_limits = None
+    _, coupled_ocean, _ = _land_and_ocean_chain(config)
+    np.testing.assert_array_equal(coupled_ocean["UI"].values[:, 0, 0], 0.0)
+    assert np.isnan(coupled_ocean["UI"].values[:, LAND[0], LAND[1]]).all()
+    assert np.isnan(coupled_ocean["HI"].values[:, LAND[0], LAND[1]]).all()
+
+
+@pytest.mark.parametrize("sea_surface_config", [None, "latitude"])
+@pytest.mark.parametrize("store", ["sea_ice", "atmosphere"])
+def test_coupled_sea_ice_and_atmosphere_fill_land_with_zero(store, sea_surface_config):
+    config = _lat_masked_config() if sea_surface_config == "latitude" else None
+    coupled_sea_ice, _, coupled_atmos = _land_and_ocean_chain(config)
+    ds = coupled_sea_ice if store == "sea_ice" else coupled_atmos
+    names = [name for name in SEA_ICE_NAMES if name in ds.data_vars]
+    assert "sea_ice_fraction" in names
+    for name in names:
+        assert not np.isnan(ds[name].values).any(), name
+        np.testing.assert_array_equal(ds[name].values[:, LAND[0], LAND[1]], 0.0)
+    # raw ice in the latitude strip, not the coupled ocean's mask NaN
+    assert (ds["sea_ice_fraction"].values[:, 0, 1] > 0).all()
+    assert not [name for name in ds.data_vars if name.startswith("mask_")]
+
+
+LIMIT_NORTH = 27.42370865495453
+LIMIT_SOUTH = 45.37373851405115
+TOY_LAT = [-60.0, -LIMIT_SOUTH, -30.0, 0.0, 10.0, LIMIT_NORTH, 40.0]
 
 
 @pytest.mark.parametrize(
-    "values",
+    ("north", "south", "expected_rows"),
     [
-        [[np.nan, np.nan], [np.nan, np.nan]],
-        [[0.0, 1.0], [np.nan, 0.0]],
-        [[0.5, 1.0], [1.0, 0.0]],
+        pytest.param(LIMIT_NORTH, LIMIT_SOUTH, [1, 1, 0, 0, 0, 1, 1], id="both"),
+        pytest.param(LIMIT_NORTH, 0.0, [1, 1, 1, 1, 0, 1, 1], id="north-only"),
+        pytest.param(0.0, LIMIT_SOUTH, [1, 1, 0, 1, 1, 1, 1], id="south-only"),
+        pytest.param(None, None, [1, 1, 1, 1, 1, 1, 1], id="land-only"),
     ],
-    ids=["unwritten", "partly-nan", "non-binary"],
 )
-def test_precomputed_sea_ice_mask_rejects_non_binary(tmp_path, values):
-    store = _write_mask(tmp_path, values)
-    with pytest.raises(ValueError, match="fully written"):
-        PrecomputedSeaIceMaskConfig(zarr_path=store).get_sea_ice_mask()
+def test_compute_sea_ice_mask_latitude_limits(north, south, expected_rows):
+    lat = xr.DataArray(TOY_LAT, dims="lat", coords={"lat": TOY_LAT}, name="lat")
+    lon = [0.0, 1.0, 2.0]
+    # land in column 0; fractional sea surface in column 1
+    sea_surface_fraction = xr.DataArray(
+        np.broadcast_to([0.0, 0.3, 1.0], (len(TOY_LAT), len(lon))),
+        dims=("lat", "lon"),
+        coords={"lat": TOY_LAT, "lon": lon},
+    )
+    limits = None if north is None else SeaIceMaskLatitudeLimits(north, south)
+    mask = SeaIceMaskConfig(latitude_limits=limits).compute_mask(
+        sea_surface_fraction, lat
+    )
+    expected = np.zeros((len(TOY_LAT), len(lon)))
+    expected[:, 1:] = np.asarray(expected_rows, dtype=float)[:, None]
+    np.testing.assert_array_equal(mask.values, expected)
+
+
+def test_compute_sea_ice_mask_rejects_time_varying_sea_surface_fraction():
+    sea_surface_fraction = _time_varying(1.0, _ocean_times())
+    with pytest.raises(ValueError, match="static 2D"):
+        SeaIceMaskConfig().compute_mask(
+            sea_surface_fraction, sea_surface_fraction["lat"]
+        )
+
+
+@pytest.mark.parametrize("limit", [-1.0, 91.0])
+def test_sea_ice_mask_latitude_limit_out_of_range(limit):
+    with pytest.raises(ValueError, match=r"\[0, 90\]"):
+        SeaIceMaskLatitudeLimits(north=limit, south=0.0)
+
+
+def test_sea_ice_mask_fill_value_requires_masked_name():
+    with pytest.raises(ValueError, match="not in extra_masked_names"):
+        SeaIceMaskConfig(extra_masked_names=["HI"], extra_fill_values={"UI": 0.0})

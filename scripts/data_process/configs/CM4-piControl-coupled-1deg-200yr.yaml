@@ -1,5 +1,5 @@
 # make cm4_piControl_coupled RESOLUTION=1deg
-version: "2026-07-15"
+version: "2026-11-13"
 family_name: om4-picontrol-1deg-coupled
 output_directory: gs://vcm-ml-intermediate
 
@@ -7,11 +7,20 @@ coupled_datasets:
   coupled_ts:
     how: interpolate_sst
   coupled_sea_surface:
-    sst_threshold: 291.75
-    ocean_extra_masked_names: ["HI", "sea_ice_volume", "UI", "VI", "sfdsi"]
-    ocean_extra_fill_values:
-      UI: 0.0
-      VI: 0.0
+    sea_ice_mask:
+      # Latitude limits (rows at the limits stay unmasked) from the piControl
+      # OM4 sea ice fraction, unrounded; the command prints this block:
+      #   python scripts/sea_ice/compute_sea_ice_mask_limits.py \
+      #     gs://vcm-ml-intermediate/2026-11-13-om4-picontrol-1deg-ocean-5daily.zarr \
+      #     sea_ice_fraction
+      latitude_limits:
+        north: 27.42370865495453
+        south: 45.37373851405115
+      extra_masked_names:
+        ["HI", "sea_ice_volume", "UI", "VI", "sfdsi", "ocean_sea_ice_thickness_mean"]
+      extra_fill_values:
+        UI: 0.0
+        VI: 0.0
     surface_flux_window_avg:
       window_timedelta: 120h
       # The ocean store labels its 5-day intervals at the interval end, so the
@@ -38,6 +47,9 @@ coupled_datasets:
     use_atmosphere_sea_ice_fraction_fallback: false
   output_writer:
     n_dask_workers: 32
+  input_field_names:
+    ocean:
+      sea_surface_temperature_name: SST_degK
 
 input_datasets:
   climate_data_type: "CM4"
@@ -47,13 +59,13 @@ input_datasets:
     extra_fields:
       names_and_prefixes: ["ak_", "bk_"]
   ocean:
-    zarr_path: gs://vcm-ml-intermediate/2026-07-15-om4-picontrol-1deg-ocean-5daily.zarr
+    zarr_path: gs://vcm-ml-intermediate/2026-11-13-om4-picontrol-1deg-ocean-5daily.zarr
     time_chunk_size: 365
     extra_fields:
       names_and_prefixes: ["idepth_", "mask_", "deptho"]
   stats:
     atmosphere_dir: gs://vcm-ml-intermediate/2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr-stats/combined
-    ocean_dir: gs://vcm-ml-intermediate/2026-07-15-om4-picontrol-1deg-ocean-5daily-stats
+    ocean_dir: gs://vcm-ml-intermediate/2026-11-13-om4-picontrol-1deg-ocean-5daily-stats/combined
 
 stats:
-  beaker_dataset: 2026-07-15-om4-picontrol-1deg-coupled-stats
+  beaker_dataset: 2026-11-13-om4-picontrol-1deg-coupled-stats
