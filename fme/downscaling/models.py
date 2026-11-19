@@ -135,6 +135,19 @@ class UpsamplingConfig:
             tensor, scale_factor, mode=self.mode, align_corners=self.align_corners
         )
 
+    @property
+    def requires_training_patch_shape(self) -> bool:
+        """
+        Whether generation must use inputs of the training patch shape.
+
+        Bicubic or bilinear interpolation with align_corners=True has offset
+        errors in the upsampled domain that grow when the generated domain size
+        differs from the training patch size, so domains larger than the
+        training patch must be generated in training-sized patches.
+        """
+        # align_corners=True is only allowed for bicubic and bilinear modes
+        return self.align_corners
+
     @classmethod
     def legacy(cls) -> "UpsamplingConfig":
         """Settings used by checkpoints saved before UpsamplingConfig existed."""
@@ -522,6 +535,14 @@ class DiffusionModel:
     @property
     def fine_shape(self) -> tuple[int, int]:
         return self._get_fine_shape(self.coarse_shape)
+
+    @property
+    def requires_training_patch_shape(self) -> bool:
+        """
+        Whether inputs larger than coarse_shape must be generated in patches
+        of coarse_shape, as determined by the upsampling configuration.
+        """
+        return self.config.upsampling.requires_training_patch_shape
 
     def _get_fine_shape(self, coarse_shape: tuple[int, int]) -> tuple[int, int]:
         """

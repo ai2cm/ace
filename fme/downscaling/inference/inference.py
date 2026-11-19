@@ -62,11 +62,11 @@ class Downscaler:
     ) -> DiffusionModel | DenoisingMoEPredictor | PatchPredictor:
         """
         Set up the model for inference: roll coordinates to match the coarse lon
-        convention, then wrap with PatchPredictor if needed.  While models are
-        probably capable of generating any domain size, we haven't tested for domains
-        smaller than the model patch size, so we raise an error in that case, and prompt
-        the user to use patching for larger domains because that provides better
-        generations.
+        convention, then wrap with PatchPredictor if patch prediction is configured.
+        While models are probably capable of generating any domain size, we haven't
+        tested for domains smaller than the model patch size, so we raise an error in
+        that case. Models using upsampling with align_corners=True require
+        patch prediction for domains larger than the model patch size.
 
         The coarse coordinates covering the output's full extent live on
         ``output.data`` (fixed at build time, independent of the per-batch work-item

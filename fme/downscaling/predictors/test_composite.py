@@ -65,33 +65,65 @@ _COMPOSITE_PATCH = PatchPredictionConfig(
 _NO_PATCH = PatchPredictionConfig()
 
 
-def test_check_input_shape_supported_exact_match():
+@pytest.mark.parametrize("requires_training_patch_shape", [True, False])
+def test_check_input_shape_supported_exact_match(requires_training_patch_shape):
     """Exact match is supported regardless of patch config (does not raise)."""
-    check_input_shape_supported((16, 16), (16, 16), _NO_PATCH)
+    check_input_shape_supported(
+        (16, 16), (16, 16), _NO_PATCH, requires_training_patch_shape
+    )
 
 
-def test_check_input_shape_supported_larger_with_composite():
+@pytest.mark.parametrize("requires_training_patch_shape", [True, False])
+def test_check_input_shape_supported_larger_with_composite(
+    requires_training_patch_shape,
+):
     """A larger extent is supported when composite patch prediction is configured."""
-    check_input_shape_supported((16, 16), (32, 32), _COMPOSITE_PATCH)
+    check_input_shape_supported(
+        (16, 16), (32, 32), _COMPOSITE_PATCH, requires_training_patch_shape
+    )
 
 
-@pytest.mark.parametrize("input_shape", [(8, 16), (16, 8), (8, 8)])
-def test_check_input_shape_supported_raises_when_too_small(input_shape):
+@pytest.mark.parametrize("requires_training_patch_shape", [True, False])
+@pytest.mark.parametrize("patch", [_NO_PATCH, _COMPOSITE_PATCH])
+@pytest.mark.parametrize("input_shape", [(8, 16), (16, 8), (8, 8), (8, 32)])
+def test_check_input_shape_supported_raises_when_too_small(
+    input_shape, patch, requires_training_patch_shape
+):
     """Raise when the input is smaller than the model patch in any dimension."""
     with pytest.raises(ValueError, match="smaller spatial extent"):
-        check_input_shape_supported((16, 16), input_shape, _COMPOSITE_PATCH)
+        check_input_shape_supported(
+            (16, 16), input_shape, patch, requires_training_patch_shape
+        )
 
 
-def test_check_input_shape_supported_raises_when_larger_without_patching():
-    """Raise when the extent differs from the patch but patching isn't configured."""
-    with pytest.raises(ValueError, match="requires patch prediction"):
-        check_input_shape_supported((16, 16), (32, 32), _NO_PATCH)
+def test_check_input_shape_supported_legacy_raises_when_larger_without_patching():
+    """
+    Raise when a model with align_corners=True upsampling gets a larger extent but
+    patching isn't configured.
+    """
+    with pytest.raises(ValueError, match="require patch prediction"):
+        check_input_shape_supported(
+            (16, 16), (32, 32), _NO_PATCH, requires_training_patch_shape=True
+        )
+
+
+def test_check_input_shape_supported_larger_without_patching():
+    """
+    A larger extent without patching is supported when the model does not
+    require the training patch shape.
+    """
+    check_input_shape_supported(
+        (16, 16), (32, 32), _NO_PATCH, requires_training_patch_shape=False
+    )
 
 
 class DummyModel:
-    def __init__(self, coarse_shape, downscale_factor):
+    def __init__(
+        self, coarse_shape, downscale_factor, requires_training_patch_shape=True
+    ):
         self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
+        self.requires_training_patch_shape = requires_training_patch_shape
         self.modules = []
         self.out_packer = Packer(["x"])
 
@@ -132,6 +164,30 @@ def test_get_generation_model_wraps_larger_input_with_patch_predictor():
     assert isinstance(generation_model, PatchPredictor)
     assert generation_model.model is model
     assert generation_model.coarse_shape == (16, 16)
+
+
+def test_get_generation_model_returns_model_for_larger_input_without_patching():
+    """
+    Models without align_corners=True upsampling generate on the full
+    larger extent.
+    """
+    model = DummyModel(
+        coarse_shape=(16, 16), downscale_factor=2, requires_training_patch_shape=False
+    )
+    generation_model = get_generation_model(
+        model,  # type: ignore
+        (32, 32),
+        _NO_PATCH,
+    )
+    assert generation_model is model
+
+
+def test_get_generation_model_legacy_raises_for_larger_input_without_patching():
+    model = DummyModel(
+        coarse_shape=(16, 16), downscale_factor=2, requires_training_patch_shape=True
+    )
+    with pytest.raises(ValueError, match="align_corners=True"):
+        get_generation_model(model, (32, 32), _NO_PATCH)  # type: ignore
 
 
 def get_paired_test_data(

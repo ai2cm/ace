@@ -158,6 +158,29 @@ def test_validate_experts_compatible_raises_for_different_upsampling():
         _validate_experts_compatible(experts)
 
 
+@pytest.mark.parametrize("align_corners", [True, False])
+def test_requires_training_patch_shape_follows_experts(align_corners):
+    fine_coords = make_fine_coords((16, 32))
+    experts = [
+        _get_diffusion_model(
+            coarse_shape=(8, 16),
+            downscale_factor=2,
+            full_fine_coords=fine_coords,
+            use_fine_topography=False,
+            static_inputs=StaticInputs(fields=[], coords=fine_coords),
+            upsampling=UpsamplingConfig(align_corners=align_corners),
+        )
+        for _ in range(2)
+    ]
+    predictor = DenoisingMoEPredictor(
+        experts=experts,
+        sigma_ranges=[(0.1, 0.5), (0.5, 1.0)],
+        num_diffusion_generation_steps=4,
+        churn=0.0,
+    )
+    assert predictor.requires_training_patch_shape is align_corners
+
+
 def test_generate_on_batch_returns_scalar_loss():
     """``DenoisingMoEPredictor.generate_on_batch`` must reduce the per-component
     loss list returned by ``self._primary.loss(...)`` to a scalar tensor, the

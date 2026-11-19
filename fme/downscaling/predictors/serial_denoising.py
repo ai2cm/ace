@@ -216,6 +216,11 @@ class DenoisingMoEPredictor:
         return self._primary.fine_shape
 
     @property
+    def requires_training_patch_shape(self) -> bool:
+        # Experts are validated to share metadata, including upsampling.
+        return self._primary.requires_training_patch_shape
+
+    @property
     def full_fine_coords(self) -> LatLonCoordinates:
         return self._primary.full_fine_coords
 

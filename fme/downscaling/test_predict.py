@@ -226,7 +226,9 @@ def test_predictor_runs_seam_crossing(tmp_path, cls):
         assert value.shape[-2:] == fine_shape
 
 
-def _mock_model_and_data(model_coarse_shape, data_shape):
+def _mock_model_and_data(
+    model_coarse_shape, data_shape, requires_training_patch_shape=True
+):
     """Mock a built model and GriddedData for the shape check in
     _get_generation_model, avoiding a real model or dataset build.
 
@@ -235,6 +237,7 @@ def _mock_model_and_data(model_coarse_shape, data_shape):
     """
     model = MagicMock()
     model.coarse_shape = model_coarse_shape
+    model.requires_training_patch_shape = requires_training_patch_shape
     # with_rolled_lon is a no-op here; return the same model.
     model.with_rolled_lon.return_value = model
     data = MagicMock()
@@ -257,11 +260,20 @@ def test_predictor_raises_when_domain_too_small(tmp_path, cls):
         downscaler._get_generation_model()
 
 
+@pytest.mark.parametrize("requires_training_patch_shape", [True, False])
 @pytest.mark.parametrize("cls", [predict.Downscaler, predict.EventDownscaler])
-def test_predictor_raises_when_larger_without_patching(tmp_path, cls):
-    """A region larger than the model patch requires patch prediction."""
+def test_predictor_larger_without_patching(
+    tmp_path, cls, requires_training_patch_shape
+):
+    """
+    A region larger than the model patch requires patch prediction only for
+    models with align_corners=True upsampling; otherwise the model generates the
+    full region.
+    """
     # data 4x8 coarse is larger than the (4, 4) model in lon.
-    model, data = _mock_model_and_data((4, 4), (4, 8))
+    model, data = _mock_model_and_data(
+        (4, 4), (4, 8), requires_training_patch_shape=requires_training_patch_shape
+    )
     kwargs = dict(
         data=data,
         model=model,
@@ -274,8 +286,11 @@ def test_predictor_raises_when_larger_without_patching(tmp_path, cls):
         if cls is predict.EventDownscaler
         else cls(**kwargs)
     )
-    with pytest.raises(ValueError, match="requires patch prediction"):
-        downscaler._get_generation_model()
+    if requires_training_patch_shape:
+        with pytest.raises(ValueError, match="require patch prediction"):
+            downscaler._get_generation_model()
+    else:
+        assert downscaler._get_generation_model() is model
 
 
 @pytest.mark.medium_duration

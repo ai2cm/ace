@@ -21,6 +21,11 @@ class PatchPredictionConfig:
     """
     Configuration to enable predictions on multiple patches for evaluation.
 
+    When patch prediction is disabled, inputs larger than the model's training
+    patch size are generated on the full extent at once. Models using
+    upsampling with align_corners=True (including legacy checkpoints) require
+    patch prediction for inputs larger than the training patch size.
+
     Args:
         divide_generation: enables the patched prediction of the full
             input data extent for generation.
@@ -179,8 +184,26 @@ def check_input_shape_supported(
     model_coarse_shape: tuple[int, int],
     input_shape: tuple[int, int],
     patch: PatchPredictionConfig,
+    requires_training_patch_shape: bool,
     name: str = "",
 ) -> None:
+    """
+    Raise if the model cannot generate on inputs of ``input_shape``.
+
+    Inputs smaller than the model's training patch size are never supported.
+    Inputs larger than the training patch size are supported, but when
+    ``requires_training_patch_shape`` is True (upsampling with align_corners=True,
+    including legacy checkpoints), they must be generated with patch prediction.
+
+    Args:
+        model_coarse_shape: the coarse (lat, lon) training patch size of the
+            model.
+        input_shape: the coarse (lat, lon) extent of the input data.
+        patch: the patch prediction configuration.
+        requires_training_patch_shape: whether the model requires inputs
+            larger than its training patch size to be generated in patches.
+        name: optional name of the generation target, used in error messages.
+    """
     suffix = f" for {name}" if name else ""
     if model_coarse_shape == input_shape:
         return
@@ -196,13 +219,14 @@ def check_input_shape_supported(
             " to be at least as large as the model's input patch size "
             f"{model_coarse_shape}."
         )
-    # If data shape is larger than model input shape, currently require patch prediction
-    # as the models predict very biased results for out-of-sample input shapes.
-    if not patch.needs_patch_predictor:
+    # Models using upsampling with align_corners=True predict
+    # very biased results for input shapes other than the training patch size.
+    if requires_training_patch_shape and not patch.needs_patch_predictor:
         raise ValueError(
             f"Input datashape {input_shape}{suffix} is larger than the model input "
             f"patch size {model_coarse_shape} and patch prediction is not configured. "
-            "Generation for larger domains requires patch prediction configured with "
+            "Models using upsampling with align_corners=True require "
+            "patch prediction for larger domains, configured with "
             "composite_prediction=True and divide_generation=True."
         )
 
@@ -215,9 +239,10 @@ def get_generation_model(
 ) -> DiffusionModel | DenoisingMoEPredictor | PatchPredictor:
     """
     Validate that the model supports generating on inputs of ``input_shape``
-    and return the model to generate with: the model itself, or a
-    PatchPredictor wrapping it when patch prediction is configured and the
-    input extent differs from the model's training patch size.
+    and return the model to generate with: a PatchPredictor wrapping the model
+    when patch prediction is configured and the input extent differs from the
+    model's training patch size, otherwise the model itself, which generates
+    on the full input extent at once.
 
     Args:
         model: the model to generate with.
@@ -226,7 +251,13 @@ def get_generation_model(
         name: optional name of the generation target, used in log and
             error messages.
     """
-    check_input_shape_supported(model.coarse_shape, input_shape, patch, name=name)
+    check_input_shape_supported(
+        model.coarse_shape,
+        input_shape,
+        patch,
+        requires_training_patch_shape=model.requires_training_patch_shape,
+        name=name,
+    )
     if patch.needs_patch_predictor and input_shape != model.coarse_shape:
         suffix = f" for {name}" if name else ""
         logging.info(f"Using PatchPredictor{suffix}")
