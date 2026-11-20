@@ -1,0 +1,8 @@
+group|tag|skip_or_trained|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+# --eval-config-dir configs/experiments/SamudrACEv2/eval/ocean
+
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg2-w1|rs0|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.origin_deg_C=-2.0|8h
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg32-w1|rs0|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.origin_deg_C=-32.0|8h
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg273-w1|rs0|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.origin_deg_C=-273.15|8h
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg273-wlearned|rs0|train|urgent|jupiter|4||3|ai2/ace|seed=0 stepper.step.config.corrector.config.ocean_heat_content_correction.origin_deg_C=-273.15 stepper.step.config.corrector.config.ocean_heat_content_correction.learned_level_weights={}|8h
