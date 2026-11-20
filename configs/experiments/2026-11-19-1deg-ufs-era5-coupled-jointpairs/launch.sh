@@ -1,6 +1,7 @@
 #!/bin/bash
 # 1deg UFS + ERA5 coupled fine-tune with the one-stage joint recipe (config from make_config.py). 8 GPUs, one sample per GPU.
 #   ./launch.sh
+#   VARIANT=randco2 ./launch.sh         # uncoupled atmosphere batches = CM4 random-CO2 runs
 #   EXISTING_RESULTS_DS=<results dataset> ./launch.sh   # continue a previous submission (the -resume config)
 set -euo pipefail
 ATMOS_DS="${ATMOS_DS:-01M7N75EC6EW8V3P6QAP0YB9GS}"                 # ACE2.5-CM4-ERA5-6HR, epoch 16 of wandb ace-samudra-coupled-cm4/9l60thd4
@@ -20,10 +21,11 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 cd "$REPO_ROOT"
-JOB="samudra-ufs1deg-era5-ohc-uhm1p7-ace2p5cm4-jointpairs${TAG:+-$TAG}"
-CFG="${SCRIPT_PATH}/ufs1deg-era5-ace2p5cm4-jointpairs${EXISTING_RESULTS_DS:+-resume}.yaml"
+VARIANT="${VARIANT:-}"   # randco2: uncoupled atmosphere batches from the CM4 random-CO2 runs
+JOB="samudra-ufs1deg-era5-ohc-uhm1p7-ace2p5cm4-jointpairs${VARIANT:+-$VARIANT}${TAG:+-$TAG}"
+CFG="${SCRIPT_PATH}/ufs1deg-era5-ace2p5cm4-jointpairs${VARIANT:+-$VARIANT}${EXISTING_RESULTS_DS:+-resume}.yaml"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
-  --description "1deg UFS + ERA5 coupled FT, one-stage joint recipe (ocean / joint pairs / uncoupled ERA5 atmosphere), atmosphere ${ATMOS_DS}:${ATMOS_CKPT}, ocean ${OCEAN_DS}:${OCEAN_CKPT}" \
+  --description "1deg UFS + ERA5 coupled FT, one-stage joint recipe (ocean / joint pairs / uncoupled ${VARIANT:-ERA5} atmosphere), atmosphere ${ATMOS_DS}:${ATMOS_CKPT}, ocean ${OCEAN_DS}:${OCEAN_CKPT}" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
   --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
   $(for C in $CLUSTERS; do printf -- "--cluster %s " "$C"; done) \
