@@ -305,3 +305,53 @@ def test_PatchPredictionConfig_disallowed_configs(
             divide_generation=divide_generation,
             composite_prediction=composite_prediction,
         )
+
+
+class _ShapeRecordingModel(DummyModel):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.input_shapes: list[tuple[int, int]] = []
+
+    def generate_on_batch(self, batch: PairedBatchData, n_samples=1):
+        self.input_shapes.append(tuple(batch.coarse.horizontal_shape))
+        return super().generate_on_batch(batch, n_samples)
+
+
+def test_PatchPredictor_larger_coarse_patch_extent():
+    """Patches larger than the training patch tile the domain and composite."""
+    paired_batch_data = get_paired_test_data(6, 6, downscale_factor=2, batch_size=1)
+    model = _ShapeRecordingModel(
+        coarse_shape=(2, 2), downscale_factor=2, requires_training_patch_shape=False
+    )
+    predictor = PatchPredictionConfig(
+        divide_generation=True,
+        composite_prediction=True,
+        coarse_horizontal_overlap=1,
+        coarse_patch_extent_lat=4,
+        coarse_patch_extent_lon=4,
+    ).build(model)  # type: ignore
+    outputs = predictor.generate_on_batch(paired_batch_data, n_samples=1)
+    # 6 = 4 + 4 - 2 (overlap 1, last patch shifted back): a 2 x 2 grid of 4 x 4.
+    assert model.input_shapes == [(4, 4)] * 4
+    assert torch.equal(outputs.prediction["x"][:, 0], outputs.target["x"][:, 0])
+
+
+def test_PatchPredictor_coarse_patch_extent_smaller_than_model_raises():
+    model = DummyModel(
+        coarse_shape=(4, 4), downscale_factor=2, requires_training_patch_shape=False
+    )
+    with pytest.raises(ValueError, match="smaller than"):
+        PatchPredictor(model, coarse_patch_extent=(2, 4))  # type: ignore
+
+
+def test_PatchPredictor_coarse_patch_extent_requires_training_patch_shape():
+    model = DummyModel(
+        coarse_shape=(2, 2), downscale_factor=2, requires_training_patch_shape=True
+    )
+    with pytest.raises(ValueError, match="align_corners=True"):
+        PatchPredictor(model, coarse_patch_extent=(4, 4))  # type: ignore
+
+
+def test_PatchPredictionConfig_patch_extent_set_together():
+    with pytest.raises(ValueError, match="set together"):
+        PatchPredictionConfig(coarse_patch_extent_lat=4)

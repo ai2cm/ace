@@ -37,13 +37,28 @@ class PatchPredictionConfig:
             supported.
         coarse_horizontal_overlap: number of pixels to overlap in the
             coarse data.
+        coarse_patch_extent_lat: optional coarse lat size of the patches.
+            If set together with coarse_patch_extent_lon, patches of this
+            size are used instead of the model's training patch size. Larger
+            patches are only supported for models that do not require the
+            training patch shape (upsampling with align_corners=False).
+        coarse_patch_extent_lon: See ``coarse_patch_extent_lat``.
     """
 
     divide_generation: bool = False
     composite_prediction: bool = False
     coarse_horizontal_overlap: int = 1
+    coarse_patch_extent_lat: int | None = None
+    coarse_patch_extent_lon: int | None = None
 
     def __post_init__(self):
+        if (self.coarse_patch_extent_lat is None) != (
+            self.coarse_patch_extent_lon is None
+        ):
+            raise ValueError(
+                "coarse_patch_extent_lat and coarse_patch_extent_lon must be set "
+                "together."
+            )
         if self.divide_generation and not self.composite_prediction:
             raise ValueError(
                 "divide_generation=True requires composite_prediction=True."
@@ -63,7 +78,14 @@ class PatchPredictionConfig:
         return PatchPredictor(
             model=model,
             coarse_horizontal_overlap=self.coarse_horizontal_overlap,
+            coarse_patch_extent=self.coarse_patch_extent,
         )
+
+    @property
+    def coarse_patch_extent(self) -> tuple[int, int] | None:
+        if self.coarse_patch_extent_lat is None or self.coarse_patch_extent_lon is None:
+            return None
+        return (self.coarse_patch_extent_lat, self.coarse_patch_extent_lon)
 
 
 class PatchPredictor:
@@ -71,24 +93,46 @@ class PatchPredictor:
     Model prediction wrapper for generating a full-extent prediction
     by dividing the input into a grid of patches.
 
-    Patch size is inferred from the model's coarse_shape used in training.
+    Patch size defaults to the model's coarse_shape used in training.
     """
 
     def __init__(
         self,
         model: DiffusionModel | DenoisingMoEPredictor,
         coarse_horizontal_overlap: int = 1,
+        coarse_patch_extent: tuple[int, int] | None = None,
     ):
         """
         Args:
             model: the model to use for generating predictions.
             coarse_horizontal_overlap: the number of pixels to overlap
                 between patches in the coarse data.
+            coarse_patch_extent: the coarse (lat, lon) size of the patches,
+                defaulting to the model's training patch size. Must be at
+                least the training patch size, and equal to it for models
+                that require the training patch shape.
         """
         self.model = model
         self.modules = self.model.modules
 
-        self.coarse_yx_patch_extent = self.model.coarse_shape
+        if coarse_patch_extent is None:
+            coarse_patch_extent = self.model.coarse_shape
+        coarse_patch_extent = tuple(coarse_patch_extent)  # type: ignore[assignment]
+        if any(p < m for p, m in zip(coarse_patch_extent, self.model.coarse_shape)):
+            raise ValueError(
+                f"coarse_patch_extent {coarse_patch_extent} is smaller than the "
+                f"model's training patch size {self.model.coarse_shape}."
+            )
+        if (
+            coarse_patch_extent != tuple(self.model.coarse_shape)
+            and self.model.requires_training_patch_shape
+        ):
+            raise ValueError(
+                f"coarse_patch_extent {coarse_patch_extent} differs from the "
+                f"training patch size {self.model.coarse_shape}, which models "
+                "using upsampling with align_corners=True require."
+            )
+        self.coarse_yx_patch_extent = coarse_patch_extent
         self.downscale_factor = self.model.downscale_factor
         self.coarse_horizontal_overlap = coarse_horizontal_overlap
 
