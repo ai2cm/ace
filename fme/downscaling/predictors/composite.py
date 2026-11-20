@@ -272,8 +272,6 @@ def get_generation_model(
     suffix = f" for {name}" if name else ""
     if patch.needs_patch_predictor:
         patch_predictor = patch.build(model)
-        # All patches have the same extent (partial patches are shifted to
-        # fit within the domain), which the model must support.
         model.validate_input_shape(patch_predictor.coarse_shape)
         logging.info(f"Using PatchPredictor{suffix}")
         return patch_predictor
