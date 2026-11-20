@@ -80,6 +80,52 @@ def test_diffusion_invalid_shapes():
         unet(latent, input, noise_level)
 
 
+@pytest.mark.parametrize(
+    "fine_shape, valid",
+    [
+        pytest.param((16, 32), True, id="divisible"),
+        pytest.param((24, 40), True, id="divisible_non_power_of_2"),
+        pytest.param((18, 32), False, id="lat_not_divisible"),
+        pytest.param((16, 36), False, id="lon_not_divisible"),
+    ],
+)
+def test_validate_fine_shape_matches_unet_forward(fine_shape, valid):
+    """
+    validate_fine_shape agrees with whether the built U-Net (3 halvings for 4
+    levels) can run forward on fine_shape, so it can be checked before generation.
+    """
+    selector = DiffusionModuleRegistrySelector(
+        "unet_diffusion_song",
+        {"model_channels": 4, "channel_mult": [1, 1, 1, 1], "attn_resolutions": []},
+    )
+    unet = selector.build(
+        n_in_channels=1,
+        n_out_channels=1,
+        coarse_shape=(8, 16),
+        downscale_factor=2,
+        sigma_data=1.0,
+    ).to(get_device())
+    latent = torch.randn(1, 1, *fine_shape)
+    noise_level = torch.randn(1, 1, 1, 1)
+    if valid:
+        selector.validate_fine_shape(fine_shape)
+        unet(latent, latent, noise_level)
+    else:
+        with pytest.raises(NonDivisibleShapeError):
+            selector.validate_fine_shape(fine_shape)
+        with pytest.raises(NonDivisibleShapeError):
+            unet(latent, latent, noise_level)
+
+
+def test_validate_fine_shape_prebuilt_does_not_raise():
+    selector = DiffusionModuleRegistrySelector(
+        "prebuilt",
+        {"module": torch.nn.Identity()},
+        expects_interpolated_input=True,
+    )
+    selector.validate_fine_shape((7, 9))
+
+
 def test_UNetDiffusionModule_forward_pass():
     downscale_factor = 2
     coarse_shape = (8, 16)

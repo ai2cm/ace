@@ -214,13 +214,15 @@ def _get_diffusion_model(
     use_fine_topography=True,
     static_inputs: StaticInputs | None = None,
     upsampling: UpsamplingConfig | None = None,
+    module: DiffusionModuleRegistrySelector | None = None,
 ):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
     )
     return DiffusionModelConfig(
-        module=DiffusionModuleRegistrySelector(
+        module=module
+        or DiffusionModuleRegistrySelector(
             "unet_diffusion_song", {"model_channels": 4}
         ),
         loss=LossConfig(type="MSE"),

@@ -9,7 +9,8 @@ from fme.downscaling.aggregators.shape_helpers import upsample_tensor
 from fme.downscaling.data import BatchData, PairedBatchData
 from fme.downscaling.data.patching import get_patches
 from fme.downscaling.data.utils import BatchedLatLonCoordinates
-from fme.downscaling.models import ModelOutputs
+from fme.downscaling.models import ModelOutputs, UpsamplingConfig
+from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.predictors.composite import (
     PatchPredictionConfig,
     PatchPredictor,
@@ -17,6 +18,7 @@ from fme.downscaling.predictors.composite import (
     composite_patch_predictions,
     get_generation_model,
 )
+from fme.downscaling.test_models import _get_diffusion_model, make_static_inputs
 
 
 def test_composite_predictions():
@@ -126,6 +128,10 @@ class DummyModel:
         self.requires_training_patch_shape = requires_training_patch_shape
         self.modules = []
         self.out_packer = Packer(["x"])
+        self.validated_input_shapes: list[tuple[int, int]] = []
+
+    def validate_input_shape(self, input_shape):
+        self.validated_input_shapes.append(input_shape)
 
     def generate_on_batch(self, batch: PairedBatchData, n_samples=1):
         prediction_data = {
@@ -164,6 +170,8 @@ def test_get_generation_model_wraps_larger_input_with_patch_predictor():
     assert isinstance(generation_model, PatchPredictor)
     assert generation_model.model is model
     assert generation_model.coarse_shape == (16, 16)
+    # the model generates on the patch extent, so that is what gets validated
+    assert model.validated_input_shapes == [(16, 16)]
 
 
 def test_get_generation_model_returns_model_for_larger_input_without_patching():
@@ -180,6 +188,7 @@ def test_get_generation_model_returns_model_for_larger_input_without_patching():
         _NO_PATCH,
     )
     assert generation_model is model
+    assert model.validated_input_shapes == [(32, 32)]
 
 
 def test_get_generation_model_legacy_raises_for_larger_input_without_patching():
@@ -188,6 +197,48 @@ def test_get_generation_model_legacy_raises_for_larger_input_without_patching():
     )
     with pytest.raises(ValueError, match="align_corners=True"):
         get_generation_model(model, (32, 32), _NO_PATCH)  # type: ignore
+
+
+_DOWNSCALE_FACTOR = 2
+
+
+def _get_diffusion_model_for_generation(
+    upsampling: UpsamplingConfig,
+    module: DiffusionModuleRegistrySelector | None = None,
+):
+    """
+    A model trained on (8, 16) coarse patches whose fine domain covers the
+    larger coarse inputs used in the get_generation_model tests.
+    """
+    static_inputs = make_static_inputs((48, 64))
+    return _get_diffusion_model(
+        coarse_shape=(8, 16),
+        downscale_factor=_DOWNSCALE_FACTOR,
+        full_fine_coords=static_inputs.coords,
+        use_fine_topography=True,
+        static_inputs=static_inputs,
+        upsampling=upsampling,
+        module=module,
+    )
+
+
+def test_get_generation_model_raises_for_shape_incompatible_with_unet_depth():
+    """
+    Generating on the full extent raises early when the fine extent can't be
+    halved once per U-Net level, while patching on a compatible patch extent
+    (here, the training patch size) is still supported.
+    """
+    module = DiffusionModuleRegistrySelector(
+        "unet_diffusion_song",
+        {"model_channels": 4, "channel_mult": [1, 1, 1, 1], "attn_resolutions": []},
+    )
+    model = _get_diffusion_model_for_generation(UpsamplingConfig(), module=module)
+    # fine extent (18, 32): 18 is not divisible by 2**3 for a 4-level U-Net
+    input_shape = (9, 16)
+    with pytest.raises(ValueError, match="not compatible with the model architecture"):
+        get_generation_model(model, input_shape, _NO_PATCH)
+    generation_model = get_generation_model(model, input_shape, _COMPOSITE_PATCH)
+    assert isinstance(generation_model, PatchPredictor)
 
 
 def get_paired_test_data(

@@ -248,7 +248,10 @@ def get_generation_model(
     and return the model to generate with either i) PatchPredictor wrapping the
     model when patch prediction is configured and the input extent is larger
     than the model's training patch size, otherwise ii) the model itself,
-    which generates on the full input extent at once.
+    which generates on the full input extent at once. The extent the model
+    generates on (the patch extent or the full input extent) must also be
+    compatible with the model architecture (e.g. divisible by the number of
+    U-Net downsampling levels).
 
     Args:
         model: the model to generate with.
@@ -268,8 +271,13 @@ def get_generation_model(
         return model
     suffix = f" for {name}" if name else ""
     if patch.needs_patch_predictor:
+        patch_predictor = patch.build(model)
+        # All patches have the same extent (partial patches are shifted to
+        # fit within the domain), which the model must support.
+        model.validate_input_shape(patch_predictor.coarse_shape)
         logging.info(f"Using PatchPredictor{suffix}")
-        return patch.build(model)
+        return patch_predictor
+    model.validate_input_shape(input_shape)
     logging.info(
         f"Generating on the full input extent {input_shape}{suffix}, which is "
         f"larger than the model patch size {model.coarse_shape}"

@@ -541,6 +541,23 @@ class DiffusionModel:
         """
         return self.config.upsampling.requires_training_patch_shape
 
+    def validate_input_shape(self, input_shape: tuple[int, int]) -> None:
+        """
+        Raise if the module cannot generate on coarse inputs of ``input_shape``,
+        e.g. when the fine extent cannot be halved once per U-Net level.
+
+        Inputs of the training ``coarse_shape`` are always compatible, but
+        other extents may not be.
+        """
+        fine_shape = self._get_fine_shape(input_shape)
+        try:
+            self.config.module.validate_fine_shape(fine_shape)
+        except ValueError as err:
+            raise ValueError(
+                f"Input shape {input_shape} (fine shape {fine_shape}) is not "
+                f"compatible with the model architecture: {err}"
+            ) from err
+
     def _get_fine_shape(self, coarse_shape: tuple[int, int]) -> tuple[int, int]:
         """
         Calculate the fine shape based on the coarse shape of data used to train

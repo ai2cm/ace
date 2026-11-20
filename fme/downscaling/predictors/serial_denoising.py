@@ -220,6 +220,11 @@ class DenoisingMoEPredictor:
         # Experts are validated to share metadata, including upsampling.
         return self._primary.requires_training_patch_shape
 
+    def validate_input_shape(self, input_shape: tuple[int, int]) -> None:
+        # Experts may differ in architecture, so validate each one.
+        for expert in self._experts:
+            expert.validate_input_shape(input_shape)
+
     @property
     def full_fine_coords(self) -> LatLonCoordinates:
         return self._primary.full_fine_coords
