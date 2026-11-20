@@ -18,7 +18,12 @@ from fme.downscaling.predictors.composite import (
     composite_patch_predictions,
     get_generation_model,
 )
-from fme.downscaling.test_models import _get_diffusion_model, make_static_inputs
+from fme.downscaling.test_models import (
+    _get_diffusion_model,
+    make_batch_data,
+    make_static_inputs,
+)
+from fme.downscaling.test_utils import cell_centered_coordinate
 
 
 def test_composite_predictions():
@@ -220,6 +225,55 @@ def _get_diffusion_model_for_generation(
         upsampling=upsampling,
         module=module,
     )
+
+
+def _make_coarse_batch(input_shape: tuple[int, int], batch_size: int = 2):
+    n_lat, n_lon = input_shape
+    return make_batch_data(
+        (batch_size, n_lat, n_lon),
+        cell_centered_coordinate(0.0, n_lat * _DOWNSCALE_FACTOR, n=n_lat),
+        cell_centered_coordinate(0.0, n_lon * _DOWNSCALE_FACTOR, n=n_lon),
+    )
+
+
+@pytest.mark.parametrize(
+    "upsampling",
+    [
+        UpsamplingConfig(mode="bicubic", align_corners=False),
+        UpsamplingConfig(mode="bilinear", align_corners=False),
+        UpsamplingConfig(mode="nearest"),
+    ],
+)
+def test_get_generation_model_diffusion_model_generates_full_extent(upsampling):
+    """
+    A diffusion model without align_corners=True upsampling generates on an
+    input larger than its training patch in one pass, without patching.
+    """
+    model = _get_diffusion_model_for_generation(upsampling)
+    input_shape = (12, 24)
+    generation_model = get_generation_model(model, input_shape, _NO_PATCH)
+    assert generation_model is model
+    n_samples = 2
+    prediction = generation_model.generate_on_batch_no_target(
+        _make_coarse_batch(input_shape), n_samples=n_samples
+    )
+    assert prediction["x"].shape == (2, n_samples, 24, 48)
+
+
+def test_get_generation_model_diffusion_model_align_corners_requires_patching():
+    model = _get_diffusion_model_for_generation(
+        UpsamplingConfig(mode="bicubic", align_corners=True)
+    )
+    input_shape = (12, 24)
+    with pytest.raises(ValueError, match="align_corners=True"):
+        get_generation_model(model, input_shape, _NO_PATCH)
+    generation_model = get_generation_model(model, input_shape, _COMPOSITE_PATCH)
+    assert isinstance(generation_model, PatchPredictor)
+    n_samples = 2
+    prediction = generation_model.generate_on_batch_no_target(
+        _make_coarse_batch(input_shape), n_samples=n_samples
+    )
+    assert prediction["x"].shape == (2, n_samples, 24, 48)
 
 
 def test_get_generation_model_raises_for_shape_incompatible_with_unet_depth():
