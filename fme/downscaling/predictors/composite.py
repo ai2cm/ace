@@ -37,11 +37,18 @@ class PatchPredictionConfig:
             supported.
         coarse_horizontal_overlap: number of pixels to overlap in the
             coarse data.
+        coarse_yx_patch_extent: the coarse (lat, lon) size of the patches
+            to generate. Must be at least the model's training patch size
+            in each dimension. If None, the model's training patch size is
+            used. Models using upsampling with align_corners=True only
+            support their training patch size. Patches are clipped to the
+            input extent when they are larger than it.
     """
 
     divide_generation: bool = False
     composite_prediction: bool = False
     coarse_horizontal_overlap: int = 1
+    coarse_yx_patch_extent: list[int] | None = None
 
     def __post_init__(self):
         if self.divide_generation and not self.composite_prediction:
@@ -52,6 +59,19 @@ class PatchPredictionConfig:
             raise ValueError(
                 "composite_prediction=True requires divide_generation=True."
             )
+        if self.coarse_yx_patch_extent is not None:
+            if not self.needs_patch_predictor:
+                raise ValueError(
+                    "coarse_yx_patch_extent requires patch prediction, configured "
+                    "with divide_generation=True and composite_prediction=True."
+                )
+            if len(self.coarse_yx_patch_extent) != 2 or any(
+                size <= 0 for size in self.coarse_yx_patch_extent
+            ):
+                raise ValueError(
+                    "coarse_yx_patch_extent must be two positive integers, got "
+                    f"{self.coarse_yx_patch_extent}."
+                )
 
     @property
     def needs_patch_predictor(self):
@@ -59,10 +79,44 @@ class PatchPredictionConfig:
             return True
         return False
 
+    def _get_patch_extent(self, model_coarse_shape: tuple[int, int]) -> tuple[int, int]:
+        if self.coarse_yx_patch_extent is None:
+            return model_coarse_shape
+        return (self.coarse_yx_patch_extent[0], self.coarse_yx_patch_extent[1])
+
+    def validate_patch_extent(
+        self,
+        model_coarse_shape: tuple[int, int],
+        requires_training_patch_shape: bool,
+    ) -> None:
+        """
+        Raise if the configured patch extent is not supported by a model.
+
+        Args:
+            model_coarse_shape: the coarse (lat, lon) training patch size of
+                the model.
+            requires_training_patch_shape: whether the model only supports
+                generating on patches of its training patch size.
+        """
+        patch_extent = self._get_patch_extent(model_coarse_shape)
+        if any(p < m for p, m in zip(patch_extent, model_coarse_shape)):
+            raise ValueError(
+                f"coarse_yx_patch_extent {patch_extent} is smaller than the model "
+                f"patch size {model_coarse_shape} in at least one dimension."
+            )
+        if requires_training_patch_shape and patch_extent != model_coarse_shape:
+            raise ValueError(
+                f"coarse_yx_patch_extent {patch_extent} differs from the model "
+                f"patch size {model_coarse_shape}. Models using upsampling with "
+                "align_corners=True only support patches of their training patch "
+                "size."
+            )
+
     def build(self, model: DiffusionModel | DenoisingMoEPredictor) -> "PatchPredictor":
         return PatchPredictor(
             model=model,
             coarse_horizontal_overlap=self.coarse_horizontal_overlap,
+            coarse_yx_patch_extent=self._get_patch_extent(model.coarse_shape),
         )
 
 
@@ -71,24 +125,32 @@ class PatchPredictor:
     Model prediction wrapper for generating a full-extent prediction
     by dividing the input into a grid of patches.
 
-    Patch size is inferred from the model's coarse_shape used in training.
+    Patch size defaults to the model's coarse_shape used in training.
     """
 
     def __init__(
         self,
         model: DiffusionModel | DenoisingMoEPredictor,
         coarse_horizontal_overlap: int = 1,
+        coarse_yx_patch_extent: tuple[int, int] | None = None,
     ):
         """
         Args:
             model: the model to use for generating predictions.
             coarse_horizontal_overlap: the number of pixels to overlap
                 between patches in the coarse data.
+            coarse_yx_patch_extent: the coarse (lat, lon) size of the patches.
+                Defaults to the model's coarse_shape. Patches are clipped to
+                the input extent when they are larger than it.
         """
         self.model = model
         self.modules = self.model.modules
 
-        self.coarse_yx_patch_extent = self.model.coarse_shape
+        self.coarse_yx_patch_extent = (
+            coarse_yx_patch_extent
+            if coarse_yx_patch_extent is not None
+            else self.model.coarse_shape
+        )
         self.downscale_factor = self.model.downscale_factor
         self.coarse_horizontal_overlap = coarse_horizontal_overlap
 
@@ -110,14 +172,19 @@ class PatchPredictor:
     def _get_patches(
         self, coarse_yx_extent, fine_yx_extent
     ) -> tuple[list[Patch], list[Patch]]:
+        # A patch larger than the input would start at a negative index.
+        coarse_yx_patch_extent = (
+            min(self.coarse_yx_patch_extent[0], coarse_yx_extent[0]),
+            min(self.coarse_yx_patch_extent[1], coarse_yx_extent[1]),
+        )
         coarse_patches = get_patches(
             yx_extent=coarse_yx_extent,
-            yx_patch_extent=self.coarse_yx_patch_extent,
+            yx_patch_extent=coarse_yx_patch_extent,
             overlap=self.coarse_horizontal_overlap,
             drop_partial_patches=False,
         )
         fine_yx_patch_extent = scale_tuple(
-            self.coarse_yx_patch_extent, self.downscale_factor
+            coarse_yx_patch_extent, self.downscale_factor
         )
 
         fine_patches = get_patches(
@@ -211,6 +278,7 @@ def check_input_shape_supported(
         name: optional name of the generation target, used in error messages.
     """
     suffix = f" for {name}" if name else ""
+    patch.validate_patch_extent(model_coarse_shape, requires_training_patch_shape)
     if model_coarse_shape == input_shape:
         return
     if any(

@@ -1,3 +1,4 @@
+import dacite
 import numpy as np
 import pytest
 import torch
@@ -6,7 +7,7 @@ import xarray as xr
 from fme.core.device import get_device
 from fme.core.packer import Packer
 from fme.downscaling.aggregators.shape_helpers import upsample_tensor
-from fme.downscaling.data import BatchData, PairedBatchData
+from fme.downscaling.data import BatchData, PairedBatchData, scale_tuple
 from fme.downscaling.data.patching import get_patches
 from fme.downscaling.data.utils import BatchedLatLonCoordinates
 from fme.downscaling.models import ModelOutputs
@@ -305,3 +306,129 @@ def test_PatchPredictionConfig_disallowed_configs(
             divide_generation=divide_generation,
             composite_prediction=composite_prediction,
         )
+
+
+def _composite_patch_with_extent(extent: list[int]) -> PatchPredictionConfig:
+    return PatchPredictionConfig(
+        divide_generation=True,
+        composite_prediction=True,
+        coarse_yx_patch_extent=extent,
+    )
+
+
+def test_PatchPredictionConfig_patch_extent_loads_from_yaml_list():
+    config = dacite.from_dict(
+        PatchPredictionConfig,
+        {
+            "divide_generation": True,
+            "composite_prediction": True,
+            "coarse_yx_patch_extent": [8, 16],
+        },
+        config=dacite.Config(strict=True),
+    )
+    assert config.coarse_yx_patch_extent == [8, 16]
+
+
+def test_PatchPredictionConfig_patch_extent_requires_patch_prediction():
+    with pytest.raises(ValueError, match="coarse_yx_patch_extent requires patch"):
+        PatchPredictionConfig(coarse_yx_patch_extent=[8, 8])
+
+
+@pytest.mark.parametrize("extent", [[8], [8, 8, 8], [0, 8], [8, -1]])
+def test_PatchPredictionConfig_patch_extent_must_be_two_positive_ints(extent):
+    with pytest.raises(ValueError, match="two positive integers"):
+        _composite_patch_with_extent(extent)
+
+
+@pytest.mark.parametrize("requires_training_patch_shape", [True, False])
+@pytest.mark.parametrize("extent", [[8, 16], [16, 8], [8, 8]])
+def test_check_input_shape_supported_raises_for_patch_extent_smaller_than_model(
+    extent, requires_training_patch_shape
+):
+    with pytest.raises(ValueError, match="smaller than the model patch size"):
+        check_input_shape_supported(
+            (16, 16),
+            (32, 32),
+            _composite_patch_with_extent(extent),
+            requires_training_patch_shape,
+        )
+
+
+def test_check_input_shape_supported_align_corners_raises_for_other_patch_extent():
+    with pytest.raises(ValueError, match="only support patches of their training"):
+        check_input_shape_supported(
+            (16, 16),
+            (64, 64),
+            _composite_patch_with_extent([32, 32]),
+            requires_training_patch_shape=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "extent, requires_training_patch_shape",
+    [([16, 16], True), ([16, 16], False), ([32, 16], False), ([32, 32], False)],
+)
+def test_check_input_shape_supported_allows_patch_extent(
+    extent, requires_training_patch_shape
+):
+    check_input_shape_supported(
+        (16, 16),
+        (64, 64),
+        _composite_patch_with_extent(extent),
+        requires_training_patch_shape,
+    )
+
+
+def test_get_generation_model_uses_configured_patch_extent():
+    model = DummyModel(
+        coarse_shape=(16, 16), downscale_factor=2, requires_training_patch_shape=False
+    )
+    generation_model = get_generation_model(
+        model,  # type: ignore
+        (64, 64),
+        _composite_patch_with_extent([32, 16]),
+    )
+    assert isinstance(generation_model, PatchPredictor)
+    assert generation_model.coarse_yx_patch_extent == (32, 16)
+
+
+@pytest.mark.parametrize(
+    "patch_extent, expected_patch_input_shape, expected_n_patches",
+    [
+        # model patch size, the default: 2-wide patches with overlap 1 step by 1,
+        # giving 5 patches per dim
+        pytest.param(None, (2, 2), 25, id="default_model_shape"),
+        # 4-wide patches with overlap 1 start at 0 and 3: 2 patches per dim
+        pytest.param((4, 4), (4, 4), 4, id="larger_than_model"),
+        # patches larger than the 6x6 input are clipped to a single patch
+        pytest.param((8, 8), (6, 6), 1, id="clipped_to_input"),
+        pytest.param((8, 2), (6, 2), 5, id="clipped_in_one_dim"),
+    ],
+)
+def test_PatchPredictor_patch_extent(
+    patch_extent, expected_patch_input_shape, expected_n_patches
+):
+    batch_size, downscale_factor, coarse_extent = 2, 2, (6, 6)
+    paired_batch_data = get_paired_test_data(
+        *coarse_extent, downscale_factor=downscale_factor, batch_size=batch_size
+    )
+    predictor = PatchPredictor(
+        DummyModel(coarse_shape=(2, 2), downscale_factor=downscale_factor),  # type: ignore
+        coarse_horizontal_overlap=1,
+        coarse_yx_patch_extent=patch_extent,
+    )
+    coarse_patches, _ = predictor._get_patches(
+        coarse_yx_extent=coarse_extent,
+        fine_yx_extent=scale_tuple(coarse_extent, downscale_factor),
+    )
+    assert len(coarse_patches) == expected_n_patches
+    for patch in coarse_patches:
+        y, x = patch.input_slice.y, patch.input_slice.x
+        assert (y.stop - y.start, x.stop - x.start) == expected_patch_input_shape
+        assert y.start >= 0 and x.start >= 0
+
+    outputs = predictor.generate_on_batch(paired_batch_data, n_samples=2)
+    assert outputs.prediction["x"].shape == (batch_size, 2, 12, 12)
+    # dummy model predicts the fine data, so a correct composite matches target
+    for s in range(2):
+        assert torch.equal(outputs.prediction["x"][:, s], outputs.target["x"][:, 0])
