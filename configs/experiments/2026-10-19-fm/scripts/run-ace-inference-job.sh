@@ -9,6 +9,8 @@
 #   evaluator  python -m fme.ace.evaluator
 #   inference  python -m fme.ace.inference
 # CHECKPOINT_PATH inside RESULTS_DATASET is mounted at /ckpt.tar.
+# For a suite checkpoint on Weka, pass - for RESULTS_DATASET and its
+# absolute /climate-default path for CHECKPOINT_PATH.
 # WANDB_NAME (default JOB_NAME) is the wandb run name; JOB_NAME is the Beaker
 # experiment and task name.
 # Set SKIP_VALIDATE=1 when the caller has validated the config already.
@@ -63,6 +65,20 @@ case "$MODE" in
     ;;
 esac
 
+checkpoint_args=()
+launch_args=()
+if [[ "$EXISTING_RESULTS_DATASET" == "-" ]]; then
+  if [[ "$MODE" != suite || "$CHECKPOINT_PATH" != /climate-default/* ]]; then
+    echo "Weka checkpoints require suite mode and a path under /climate-default" >&2
+    exit 2
+  fi
+  COMMAND+=(--checkpoint-path "$CHECKPOINT_PATH")
+  VALIDATE+=(--checkpoint-path "$CHECKPOINT_PATH")
+  launch_args+=(--yes)
+else
+  checkpoint_args+=(--dataset "$EXISTING_RESULTS_DATASET:$CHECKPOINT_PATH:/ckpt.tar")
+fi
+
 cd "$REPO_ROOT"  # so config path is valid no matter where we are running this script
 
 if [[ "${SKIP_VALIDATE:-0}" != "1" ]]; then
@@ -97,7 +113,8 @@ gantry run \
   --env GOOGLE_APPLICATION_CREDENTIALS=/tmp/google_application_credentials.json \
   --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
   --dataset-secret google-credentials:/tmp/google_application_credentials.json \
-  --dataset "$EXISTING_RESULTS_DATASET:$CHECKPOINT_PATH:/ckpt.tar" \
+  "${checkpoint_args[@]}" \
+  "${launch_args[@]}" \
   --gpus 1 \
   --shared-memory 50GiB \
   --weka climate-default:/climate-default \

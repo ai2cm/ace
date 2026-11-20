@@ -54,7 +54,7 @@ class EvalSuiteConfig:
     config_data: dict[str, Any]
 
 
-def load_suite(path: str) -> EvalSuiteConfig:
+def load_suite(path: str, checkpoint_path: str | None = None) -> EvalSuiteConfig:
     """Load and strictly validate a suite: every entry as an
     InferenceEvaluatorConfig, the logging block as a LoggingConfig.
     """
@@ -66,6 +66,8 @@ def load_suite(path: str) -> EvalSuiteConfig:
         if name in names:
             raise ValueError(f"duplicate suite entry name {name!r}")
         names.add(name)
+        if checkpoint_path is not None:
+            entry_data["config"]["checkpoint_path"] = checkpoint_path
         evaluator_config = dacite.from_dict(
             data_class=InferenceEvaluatorConfig,
             data=entry_data["config"],
@@ -89,8 +91,10 @@ def load_suite(path: str) -> EvalSuiteConfig:
     )
 
 
-def run_eval_suite(path: str, validate_only: bool = False) -> None:
-    suite = load_suite(path)
+def run_eval_suite(
+    path: str, validate_only: bool = False, checkpoint_path: str | None = None
+) -> None:
+    suite = load_suite(path, checkpoint_path)
     if validate_only:
         return
 
@@ -121,13 +125,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("yaml_config", type=str, help="Path to eval suite YAML.")
     parser.add_argument(
+        "--checkpoint-path", help="Checkpoint to use for every suite entry."
+    )
+    parser.add_argument(
         "--validate-only",
         action="store_true",
         help="Validate the suite config without running inference.",
     )
     args = parser.parse_args()
     with Distributed.context():
-        run_eval_suite(args.yaml_config, validate_only=args.validate_only)
+        run_eval_suite(args.yaml_config, args.validate_only, args.checkpoint_path)
 
 
 if __name__ == "__main__":

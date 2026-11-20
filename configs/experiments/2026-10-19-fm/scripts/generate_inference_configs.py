@@ -61,6 +61,7 @@ from _inference_common import (
     CM4_XSHIELD_VARIANT,
     INFERENCE_CONFIGS_DIR,
     MOUNTED_CHECKPOINT_PATH,
+    V3_ARCH,
     WANDB_ENTITY,
     WANDB_PROJECT,
     inference_run_names,
@@ -118,6 +119,7 @@ EVAL_SUITE_CONFIGS = {
     "cm4xshield": f"{EVAL_SUITE_PREFIX}cm4-xshield.yaml",
     "cm4-1pct": f"{EVAL_SUITE_PREFIX}cm4-1pct.yaml",
 }
+V3_C3_EVAL_CONFIG = f"{EVAL_SUITE_PREFIX}2026-06-26-windows-v3-c3.yaml"
 CM4_XSHIELD_FAMILIES = ("cm4xshield", "cm4-1pct")
 
 
@@ -132,8 +134,15 @@ def eval_suite_config(family: str, variant: str = "") -> str:
     return filename.removesuffix(".yaml") + f"{suffix}.yaml"
 
 
-def arch_eval_suite_config(family: str, arch: str) -> str:
+def arch_eval_suite_config(family: str, arch: str, run: str | None = None) -> str:
     """Config filename of an eval-suite family for the runs of `arch`."""
+    if (
+        family == "eval"
+        and arch == V3_ARCH
+        and run is not None
+        and "amip" in run_train_labels(run)
+    ):
+        return V3_C3_EVAL_CONFIG
     return eval_suite_config(family, CM4_XSHIELD_VARIANT.get(arch, ""))
 
 
@@ -210,23 +219,23 @@ def _suite(entries: list[dict]) -> dict:
     return {"experiment_dir": "/results", "logging": _logging(), "inferences": entries}
 
 
-def _relabel(dataset: dict) -> dict:
+def _relabel(dataset: dict, label_renames: dict[str, str]) -> dict:
     dataset = copy.deepcopy(dataset)
     if "labels" in dataset:
-        dataset["labels"] = [LABEL_RENAMES[label] for label in dataset["labels"]]
+        dataset["labels"] = [label_renames[label] for label in dataset["labels"]]
     for key in ("concat", "merge"):
         if key in dataset:
-            dataset[key] = [_relabel(d) for d in dataset[key]]
+            dataset[key] = [_relabel(d, label_renames) for d in dataset[key]]
     return dataset
 
 
-def build_eval_suite() -> dict:
+def build_eval_suite(label_renames: dict[str, str] = LABEL_RENAMES) -> dict:
     """The 2026-06-26 eval-suite windows on the 2026-10-19 checkpoints."""
     old_entries = _load_yaml(OLD_INLINE_INFERENCE)["inference"]
     entries = []
     for old in old_entries:
         loader = copy.deepcopy(old["loader"])
-        loader["dataset"] = _relabel(loader["dataset"])
+        loader["dataset"] = _relabel(loader["dataset"], label_renames)
         entries.append(
             _suite_entry(
                 old["name"],
@@ -377,6 +386,8 @@ def cm4_xshield_runs(arch: str) -> list[str]:
     """Runs of `arch` trained on every CM4_XSHIELD_LABELS label, the ones
     that get cm4xshield / cm4-1pct jobs.
     """
+    if arch == V3_ARCH:
+        return []
     return [
         run
         for run in inference_run_names(arch)
@@ -645,7 +656,13 @@ FAMILIES = ("eval", "cm4xshield", "cm4-1pct", "sst", "paper-som", "paper-era5")
 def family_configs(family: str) -> dict[str, dict]:
     """Filename -> config of one family."""
     if family == "eval":
-        return {EVAL_SUITE_CONFIGS[family]: build_eval_suite()}
+        return {
+            EVAL_SUITE_CONFIGS[family]: build_eval_suite(),
+            # C3 retains the original source-specific conditioning labels.
+            V3_C3_EVAL_CONFIG: build_eval_suite(
+                {label: label for label in LABEL_RENAMES}
+            ),
+        }
     if family == "cm4xshield":
         return {
             eval_suite_config(family, variant): build_cm4_xshield_suite(variant)

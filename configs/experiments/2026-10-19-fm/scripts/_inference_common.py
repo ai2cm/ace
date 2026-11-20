@@ -7,13 +7,15 @@ run_configs/ (run_configs/ft/, ft-e32/ and ft-e128/ for the ft archs,
 RUN_CONFIG_SUBDIRS); its job
 name (and wandb name) comes from submit_fm_jobs.config_to_job_name. Which runs
 have finished, and which Beaker result dataset holds their checkpoints, is
-read from Beaker (_beaker_listing), not from wandb.
+read from Beaker (_beaker_listing), not from wandb. The November 18 sfno-v3
+runs store their checkpoints on Weka and record the paths in fm_v3_jobs.json.
 """
 
 import pathlib
 
 import yaml
 from _beaker_listing import OK, NamedExperiment, fetch_experiments_by_name
+from create_fm_v3_jobs import MAX_EPOCHS as V3_MAX_EPOCHS
 from submit_fm_jobs import (
     CONFIG_PREFIX,
     RUN_CONFIGS_DIR,
@@ -25,6 +27,7 @@ HERE = pathlib.Path(__file__).parent
 EXP_DIR = HERE.parent  # experiment root (configs, records); scripts live in scripts/
 INFERENCE_CONFIGS_DIR = EXP_DIR / "inference_configs"
 BEAKER_MAP_PATH = EXP_DIR / "records" / "wandb_to_beaker_map.json"
+V3_ARCH = "sfno-v3"
 
 WANDB_ENTITY = "ai2cm"
 WANDB_PROJECT = "FM"
@@ -48,7 +51,7 @@ CHECKPOINTS = {
 # Last EMA checkpoint epoch of archs whose runs do not train for 150 epochs:
 # the v2 runs (sfno-v2, swin-v2.2-v2; create_fm_v2_jobs.py) train 50 epochs
 # with an EMA checkpoint every epoch, so their last one is ema_ckpt_0050.tar.
-LAST_EMA_EPOCHS = {"sfno-v2": 50, "swin-v2.2-v2": 50}
+LAST_EMA_EPOCHS = {"sfno-v2": 50, "swin-v2.2-v2": 50, V3_ARCH: V3_MAX_EPOCHS}
 # Per-epoch EMA checkpoints, further --ckpt choices of the archs in
 # EPOCH_CHECKPOINT_ARCHS (the ft archs, _add_ft_archs) for the families in
 # EPOCH_CHECKPOINT_FAMILIES only: name -> (file, job-name suffix), e.g.
@@ -75,6 +78,7 @@ ARCHS = {
     "swin-v2.2": "nc-swin-v2.2",
     "sfno-v2": "nc-sfno-v2",
     "swin-v2.2-v2": "nc-swin-v2.2-v2",
+    V3_ARCH: "nc-sfno-v3",
 }
 DEFAULT_ARCH = "sfno"
 # Subdirectory of run_configs/ holding the run configs of an arch whose
@@ -85,12 +89,17 @@ EXCLUDED_TOKENS = ("-e3sm", "-diag", "-smoke")
 EXCLUDED_TOKENS_BY_ARCH = {
     "sfno-v2": ("-diag", "-smoke"),
     "swin-v2.2-v2": ("-diag", "-smoke"),
+    V3_ARCH: ("-diag", "-smoke"),
 }
 # Date of the training wandb group of each arch whose runs are not the
 # 2026-10-19 ones; it replaces "2026-10-19" in the inference wandb group names
 # (submit_inference_jobs.wandb_groups). For the follow-up archs below it also
 # carries the phase tag, e.g. ace2-fm-eval-ext80-2026-11-11.
-GROUP_DATES = {"sfno-v2": "2026-11-09", "swin-v2.2-v2": "2026-11-09"}
+GROUP_DATES = {
+    "sfno-v2": "2026-11-09",
+    "swin-v2.2-v2": "2026-11-09",
+    V3_ARCH: "2026-11-18",
+}
 DEFAULT_GROUP_DATE = "2026-10-19"
 # Config variant of the CM4/X-SHiELD suites (cm4xshield, cm4-1pct) per arch
 # (generate_inference_configs.CM4_XSHIELD_VARIANTS). The v2 runs train with

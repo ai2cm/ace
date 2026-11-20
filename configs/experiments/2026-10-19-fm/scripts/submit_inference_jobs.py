@@ -1,4 +1,4 @@
-"""Submit inference jobs on a checkpoint of the 2026-10-19 and 2026-11-09 runs.
+"""Submit inference jobs on checkpoints of finished FM training runs.
 
 Runs: the training runs of one architecture (--arch, default sfno: nc-sfno
 and swin-v2.2: nc-swin-v2.2, their four-source runs, no e3sm; sfno-v2:
@@ -10,7 +10,7 @@ fine-tuning sweep of the ext80 fm-spencer-balanced runs, 48 runs each, read
 from run_configs/ft/, create_fm_v2_finetune_jobs.py; sfno-v2-ft-e32,
 sfno-v2-ft-e128, swin-v2.2-v2-ft-e32 and swin-v2.2-v2-ft-e128: its 32- and
 128-epoch long fine-tunes, 9 runs each, read from run_configs/ft-e32/ and
-run_configs/ft-e128/;
+run_configs/ft-e128/; sfno-v3: the 18 November 18 per-cell normalization runs;
 _inference_common.ARCHS and inference_run_names; no diagnostics) whose Beaker
 experiment succeeded. The cm4xshield and cm4-1pct families skip runs not
 trained on CM4 and X-SHiELD (the v2 fm-era5 arms), and use the arch's
@@ -22,6 +22,12 @@ once they finish to submit only what is missing. Each job mounts the run's
 training_checkpoints/best_inference_ckpt.tar at /ckpt.tar and runs a
 run-agnostic config from inference_configs/ (generate_inference_configs.py)
 through run-ace-inference-job.sh.
+
+The sfno-v3 runs use the eval family with the checkpoint paths recorded in
+fm_v3_jobs.json on Weka. Evaluate both EMA checkpoints with:
+
+    python submit_inference_jobs.py --arch sfno-v3 --family eval \
+        --ckpt bestinf lastema --skip-if-in-beaker
 
 Families (--family, default all):
 
@@ -39,7 +45,7 @@ _inference_common.CHECKPOINTS and EPOCH_CHECKPOINTS):
   lastema     training_checkpoints/ema_ckpt_0150.tar        (EMA, last epoch;
               ema_ckpt_0050.tar for sfno-v2 and swin-v2.2-v2,
               ema_ckpt_0080.tar for the ext80 forks, ema_ckpt_0120.tar
-              for the e120 runs, ema_ckpt_0008.tar for the ft runs,
+              for sfno-v3 and the e120 runs, ema_ckpt_0008.tar for the ft runs,
               ema_ckpt_0032.tar and ema_ckpt_0128.tar for the ft-e32 and
               ft-e128 runs; LAST_EMA_EPOCHS)
   emaN        training_checkpoints/ema_ckpt_{N:04d}.tar     (EMA, epoch N;
@@ -106,7 +112,7 @@ first (--dry-run validates too, so a dry run proves the configs load).
 
 Usage:
     python submit_inference_jobs.py [--arch {sfno,swin-v2.2,sfno-v2,swin-v2.2-v2,
-                                            sfno-v2-ext80,swin-v2.2-v2-ext80,
+                                            sfno-v3,sfno-v2-ext80,swin-v2.2-v2-ext80,
                                             sfno-v2-ft,swin-v2.2-v2-ft,
                                             sfno-v2-ft-e32,sfno-v2-ft-e128,
                                             swin-v2.2-v2-ft-e32,
@@ -131,7 +137,13 @@ import sys
 from collections.abc import Iterable
 from typing import NamedTuple
 
-from _beaker_listing import DEFAULT_TEXT, fetch_experiments_by_name
+from _beaker_listing import (
+    DEFAULT_TEXT,
+    OK,
+    experiment_status,
+    fetch_experiments_by_name,
+    list_experiments,
+)
 from _inference_common import (
     ARCHS,
     BEAKER_MAP_PATH,
@@ -143,6 +155,7 @@ from _inference_common import (
     GROUP_DATES,
     INFERENCE_CONFIGS_DIR,
     OLD_RUNS,
+    V3_ARCH,
     WANDB_PROJECT,
     arch_checkpoints,
     checkpoint_path,
@@ -151,6 +164,7 @@ from _inference_common import (
     inference_run_names,
 )
 from _submit_common import check_configs_at_head, drop_jobs_in_beaker, submit_job
+from create_fm_v3_jobs import MAX_EPOCHS as V3_MAX_EPOCHS
 from generate_inference_configs import (
     CM4_XSHIELD_FAMILIES,
     EVAL_SUITE_CONFIGS,
@@ -164,6 +178,7 @@ from generate_inference_configs import (
     sst_config_filename,
 )
 from submit_fm_jobs import WANDB_PREFIX, add_default_beaker_args
+from submit_fm_v3_jobs import RECORD_PATH as V3_RECORD_PATH
 
 HERE = pathlib.Path(__file__).parent
 EXP_DIR = HERE.parent  # experiment root (configs, records); scripts live in scripts/
@@ -251,7 +266,17 @@ class Job(NamedTuple):
     dataset_id: str
     wandb_group: str
     wandb_name: str
-    checkpoint: str  # file in the training result dataset
+    checkpoint: str  # path on Weka or inside the training result dataset
+
+
+class TrainingOutput(NamedTuple):
+    dataset_id: str
+    weka_checkpoints: dict[str, str] | None = None
+
+    def checkpoint(self, ckpt: str, arch: str) -> str:
+        if self.weka_checkpoints is not None:
+            return self.weka_checkpoints[ckpt]
+        return checkpoint_path(ckpt, arch)
 
 
 def beaker_job_name(name: str) -> str:
@@ -288,7 +313,7 @@ def family_jobs(
         suffix = EVAL_SUITE_NAME_SUFFIXES[family].replace(
             "-bestinf", checkpoint_suffix(ckpt)
         )
-        return [(f"{run}{suffix}", arch_eval_suite_config(family, arch))]
+        return [(f"{run}{suffix}", arch_eval_suite_config(family, arch, run))]
     suffix = "" if ckpt == "bestinf" else checkpoint_suffix(ckpt)
     if family == "sst":
         return [
@@ -361,16 +386,18 @@ def checkpoint_families(
 
 def resolve_runs(
     args: argparse.Namespace,
-) -> tuple[dict[str, str], dict[str, str]]:
+) -> tuple[dict[str, TrainingOutput], dict[str, str]]:
     runs = inference_run_names(args.arch)
     if args.run is not None:
         unknown = sorted(set(args.run) - set(runs))
         if unknown:
             raise SystemExit(f"unknown run(s) {unknown}; available: {runs}")
         runs = [r for r in runs if r in args.run]
+    if args.arch == V3_ARCH:
+        return _resolve_v3_runs(runs, args.beaker_workspace)
     if args.use_map:
         mapping = json.loads(BEAKER_MAP_PATH.read_text())
-        ready = {r: mapping[r] for r in runs if r in mapping}
+        ready = {r: TrainingOutput(mapping[r]) for r in runs if r in mapping}
         skipped = {
             r: f"not in {BEAKER_MAP_PATH.name}" for r in runs if r not in mapping
         }
@@ -378,7 +405,40 @@ def resolve_runs(
     text = listing_text(args.arch)
     print(f"Listing experiments in {args.beaker_workspace} matching {text}...")
     experiments = fetch_experiments_by_name(args.beaker_workspace, text)
-    return finished_runs(runs, experiments)
+    datasets, skipped = finished_runs(runs, experiments)
+    return {run: TrainingOutput(dataset) for run, dataset in datasets.items()}, skipped
+
+
+def _resolve_v3_runs(
+    runs: list[str], workspace: str
+) -> tuple[dict[str, TrainingOutput], dict[str, str]]:
+    records = json.loads(V3_RECORD_PATH.read_text())
+    text = listing_text(V3_ARCH)
+    print(f"Listing experiments in {workspace} matching {text}...")
+    by_id = {exp["id"]: exp for exp in list_experiments(workspace, text)}
+    ready = {}
+    skipped = {}
+    for run in runs:
+        record = records.get(run)
+        if record is None:
+            skipped[run] = f"not in {V3_RECORD_PATH.name}"
+            continue
+        exp_id = record["id"]
+        if exp_id not in by_id:
+            skipped[run] = f"recorded Beaker experiment {exp_id} not found"
+            continue
+        status = experiment_status(by_id[exp_id])
+        if status != OK:
+            skipped[run] = f"Beaker status {status} ({exp_id})"
+            continue
+        ready[run] = TrainingOutput(
+            "-",
+            {
+                "bestinf": record["best_inference_ckpt"],
+                "lastema": record["ema_ckpt_pattern"].format(epoch=V3_MAX_EPOCHS),
+            },
+        )
+    return ready, skipped
 
 
 def validate_configs(families_configs: list[tuple[str, str]]) -> None:
@@ -420,8 +480,7 @@ def main() -> None:
         "--family",
         nargs="+",
         choices=FAMILIES,
-        default=list(FAMILIES),
-        help="Job families to submit (default: all).",
+        help="Job families to submit (default: all, or eval for sfno-v3).",
     )
     parser.add_argument(
         "--run",
@@ -489,15 +548,22 @@ def main() -> None:
     # Same Beaker defaults as the training submitter (submit_fm_jobs.py).
     add_default_beaker_args(parser)
     args = parser.parse_args()
+    if args.family is None:
+        args.family = ["eval"] if args.arch == V3_ARCH else list(FAMILIES)
+    if args.arch == V3_ARCH and (args.family != ["eval"] or args.use_map):
+        parser.error("sfno-v3 supports only --family eval and uses its own job record")
     if args.old_runs and (args.ckpt != ["lastema"] or args.family != ["eval"]):
         raise SystemExit("--old-runs needs --ckpt lastema and --family eval")
+    if args.old_runs and args.arch not in OLD_RUNS:
+        parser.error(f"--old-runs is unavailable for {args.arch}")
     ckpt_families = checkpoint_families(args.arch, args.ckpt, args.family)
     cm4_xshield_ok = set(cm4_xshield_runs(args.arch))
 
     ready, skipped = resolve_runs(args)
     print(f"\n{len(ready)} run(s) with a succeeded training job:")
-    for run, dataset in sorted(ready.items()):
-        print(f"  {run}  {dataset}")
+    for run, output in sorted(ready.items()):
+        source = "Weka" if output.weka_checkpoints is not None else output.dataset_id
+        print(f"  {run}  {source}")
     if skipped:
         print(f"{len(skipped)} run(s) skipped:")
         for run, reason in sorted(skipped.items()):
@@ -515,10 +581,10 @@ def main() -> None:
             beaker_job_name(name),
             family,
             config,
-            ready[run],
+            ready[run].dataset_id,
             wandb_groups(ckpt, args.arch)[family],
             name,
-            checkpoint_path(ckpt, args.arch),
+            ready[run].checkpoint(ckpt, args.arch),
         )
         for ckpt, families in ckpt_families.items()
         for family, run, name, config in select_jobs(
