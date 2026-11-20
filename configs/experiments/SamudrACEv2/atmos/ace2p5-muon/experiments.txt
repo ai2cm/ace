@@ -1,2 +1,4 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
 
+
+SamudrACEv2-ace2p5-muon|rs0|01M7VJ55EFCP928M5FN3CQ1C1Y|training|best_inference_ckpt|normal|--min-runtime 8h
