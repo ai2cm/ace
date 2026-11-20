@@ -1,10 +1,11 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
 
 # --config-dir configs/experiments/SamudrACEv2/eval/ocean
-SamudrACEv2-hybridSSTdiag-fiz|rs0|01M7TQVV2XEHKDBC46QVHYN0PF|training|best_inference_ckpt|normal|--min-runtime 8h
-SamudrACEv2-hybridSSTdiag-fiz|rs0|01M7TQVV2XEHKDBC46QVHYN0PF|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
-SamudrACEv2-hybridSSTdiag-fiz|rs0|01M7TQVV2XEHKDBC46QVHYN0PF|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
+SamudrACEv2-hybridSSTdiag-fiz|rs0|01M7TQVV2XEHKDBC46QVHYN0PF|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-fiz|rs0|01M7TQVV2XEHKDBC46QVHYN0PF|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
-SamudrACEv2-hybridSSTdiag-fiz|rs1|01M7VMAN6R2GD6ES4VSY68ZSY8|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-fiz|rs1|01M7VMAN6R2GD6ES4VSY68ZSY8|wait_piC-ic0151-200yr|best_inference_ckpt|normal|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-fiz|rs1|01M7VMAN6R2GD6ES4VSY68ZSY8|wait_1pct-ic0001-130yrbest_inference_ckpt|normal|--min-runtime 1h
 
-SamudrACEv2-hybridSSTdiag-fiz|rs2|01M7VMB0K4TCMYPR04KDA03H27|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-hybridSSTdiag-fiz|rs2|01M7VMB0K4TCMYPR04KDA03H27|wait_piC-ic0151-200yr|best_inference_ckpt|normal|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-fiz|rs2|01M7VMB0K4TCMYPR04KDA03H27|wait_1pct-ic0001-130yrbest_inference_ckpt|normal|--min-runtime 1h
