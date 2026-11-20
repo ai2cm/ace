@@ -31,7 +31,10 @@ from fme.downscaling.metrics_and_maths import (
     filter_tensor_mapping,
     interpolate,
 )
-from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
+from fme.downscaling.modules.diffusion_registry import (
+    DiffusionModuleRegistrySelector,
+    FineShapeValidator,
+)
 from fme.downscaling.noise import (
     LogNormalNoiseDistribution,
     LogUniformNoiseDistribution,
@@ -134,6 +137,16 @@ class UpsamplingConfig:
         return interpolate(
             tensor, scale_factor, mode=self.mode, align_corners=self.align_corners
         )
+
+    @property
+    def requires_training_patch_shape(self) -> bool:
+        """
+        Bicubic or bilinear interpolation with align_corners=True has offset
+        errors in the upsampled domain that grow when the generated domain size
+        differs from the training patch size, so domains larger than the
+        training patch must be generated in training-sized patches.
+        """
+        return self.align_corners
 
     @classmethod
     def legacy(cls) -> "UpsamplingConfig":
@@ -368,6 +381,7 @@ class DiffusionModelConfig:
             full_fine_coords=full_fine_coords,
             in_names=in_names,
             out_names=out_names,
+            validate_fine_shape=self.module.get_fine_shape_validator(),
             static_inputs=static_inputs,
         )
 
@@ -427,6 +441,7 @@ class DiffusionModel:
         full_fine_coords: LatLonCoordinates,
         in_names: list[str],
         out_names: list[str],
+        validate_fine_shape: FineShapeValidator,
         static_inputs: StaticInputs | None = None,
     ) -> None:
         """
@@ -454,6 +469,8 @@ class DiffusionModel:
                 applied to ``config.in_names``).
             out_names: Runtime output variable names (i.e. ``rename`` already
                 applied to ``config.out_names``).
+            validate_fine_shape: Raises if the module cannot operate on inputs
+                of a given fine shape.
             static_inputs: Static inputs to the model. May be None when
                 no static data is needed. If present, coordinates
                 must match full_fine_coords.
@@ -468,6 +485,7 @@ class DiffusionModel:
         self.config = config
         self.in_names = in_names
         self.out_names = out_names
+        self._validate_fine_shape = validate_fine_shape
         self.in_packer = Packer(self.in_names)
         self.out_packer = Packer(self.out_names)
         self._channel_axis = -3
@@ -522,6 +540,31 @@ class DiffusionModel:
     @property
     def fine_shape(self) -> tuple[int, int]:
         return self._get_fine_shape(self.coarse_shape)
+
+    @property
+    def requires_training_patch_shape(self) -> bool:
+        """
+        Whether inputs larger than coarse_shape must be generated in patches
+        of coarse_shape, as determined by the upsampling configuration.
+        """
+        return self.config.upsampling.requires_training_patch_shape
+
+    def validate_input_shape(self, input_shape: tuple[int, int]) -> None:
+        """
+        Raise if the module cannot generate on coarse inputs of ``input_shape``,
+        e.g. when the fine extent cannot be halved once per U-Net level.
+
+        Inputs of the training ``coarse_shape`` are always compatible, but
+        other extents may not be.
+        """
+        fine_shape = self._get_fine_shape(input_shape)
+        try:
+            self._validate_fine_shape(fine_shape)
+        except ValueError as err:
+            raise ValueError(
+                f"Input shape {input_shape} (fine shape {fine_shape}) is not "
+                f"compatible with the model architecture: {err}"
+            ) from err
 
     def _get_fine_shape(self, coarse_shape: tuple[int, int]) -> tuple[int, int]:
         """
@@ -899,6 +942,7 @@ class DiffusionModel:
             ),
             in_names=self.in_names,
             out_names=self.out_names,
+            validate_fine_shape=self._validate_fine_shape,
             static_inputs=(
                 self.static_inputs.roll(roll_amount, lon_start)
                 if self.static_inputs is not None
