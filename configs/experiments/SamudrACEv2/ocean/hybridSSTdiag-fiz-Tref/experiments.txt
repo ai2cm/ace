@@ -9,3 +9,11 @@ SamudrACEv2-hybridSSTdiag-fiz-Tref-neg2-w1|rs0|01M7VNVHM680KXCKF7W3C51SM1|wait_1
 SamudrACEv2-hybridSSTdiag-fiz-Tref-neg2-w1|rs0|01M7VNVHM680KXCKF7W3C51SM1|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
 SamudrACEv2-hybridSSTdiag-fiz-Tref-neg2-w1|rs0|01M7VNVHM680KXCKF7W3C51SM1|wait_piC-ic0226-20yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
 SamudrACEv2-hybridSSTdiag-fiz-Tref-neg2-w1|rs0|01M7VNVHM680KXCKF7W3C51SM1|wait_piC-ic0231-20yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
+
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg32-w1|rs0|01M7VNVW7MZFVB4SW82K913QZN|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg32-w1|rs0|01M7VNVW7MZFVB4SW82K913QZN|wait_1pct-ic0031-20yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg32-w1|rs0|01M7VNVW7MZFVB4SW82K913QZN|wait_1pct-ic0036-20yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg32-w1|rs0|01M7VNVW7MZFVB4SW82K913QZN|wait_1pct-ic0127-4yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg32-w1|rs0|01M7VNVW7MZFVB4SW82K913QZN|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg32-w1|rs0|01M7VNVW7MZFVB4SW82K913QZN|wait_piC-ic0226-20yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg32-w1|rs0|01M7VNVW7MZFVB4SW82K913QZN|wait_piC-ic0231-20yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
