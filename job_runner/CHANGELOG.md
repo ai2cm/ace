@@ -27,8 +27,15 @@ https://github.com/ai2cm/full-model/compare/job_runner
   `inference.sh` rejects > 1 for `fme.coupled.inference`
 - [FEAT] `evaluate.sh --lift-coupled-atmosphere`: score a coupled checkpoint's
   atmosphere with `fme.ace.evaluator`; the job first runs
-  `bin/extract_atmosphere_from_coupled_ckpt.py` (copy of troya's tool from
-  `troya/2026-10-29-1deg-hybrid-sstdiag-coupled-ft`)
+  `bin/extract_component_from_coupled_ckpt.py --component atmosphere`
+- [FEAT] `bin/extract_component_from_coupled_ckpt.py` (from troya's
+  `extract_{atmosphere,ocean}_from_coupled_ckpt.py`): lifts the atmosphere or
+  ocean of a coupled checkpoint; keeps that component's EMA weights,
+  re-indexed, so the evaluator applies them (`ckpt.tar` was scored with raw
+  weights); never strips config keys, and exits naming the training git sha
+  when the running fme cannot load the component; checks the result loads as
+  `fme.ace.evaluator` loads it
+- [FEAT] `evaluate.sh --dry-run` prints each job's command
 
 ### Changed
 
