@@ -31,7 +31,10 @@ from fme.downscaling.metrics_and_maths import (
     filter_tensor_mapping,
     interpolate,
 )
-from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
+from fme.downscaling.modules.diffusion_registry import (
+    DiffusionModuleRegistrySelector,
+    FineShapeValidator,
+)
 from fme.downscaling.noise import (
     LogNormalNoiseDistribution,
     LogUniformNoiseDistribution,
@@ -378,6 +381,7 @@ class DiffusionModelConfig:
             full_fine_coords=full_fine_coords,
             in_names=in_names,
             out_names=out_names,
+            validate_fine_shape=self.module.get_fine_shape_validator(),
             static_inputs=static_inputs,
         )
 
@@ -437,6 +441,7 @@ class DiffusionModel:
         full_fine_coords: LatLonCoordinates,
         in_names: list[str],
         out_names: list[str],
+        validate_fine_shape: FineShapeValidator,
         static_inputs: StaticInputs | None = None,
     ) -> None:
         """
@@ -464,6 +469,8 @@ class DiffusionModel:
                 applied to ``config.in_names``).
             out_names: Runtime output variable names (i.e. ``rename`` already
                 applied to ``config.out_names``).
+            validate_fine_shape: Raises if the module cannot operate on inputs
+                of a given fine shape.
             static_inputs: Static inputs to the model. May be None when
                 no static data is needed. If present, coordinates
                 must match full_fine_coords.
@@ -478,6 +485,7 @@ class DiffusionModel:
         self.config = config
         self.in_names = in_names
         self.out_names = out_names
+        self._validate_fine_shape = validate_fine_shape
         self.in_packer = Packer(self.in_names)
         self.out_packer = Packer(self.out_names)
         self._channel_axis = -3
@@ -551,7 +559,7 @@ class DiffusionModel:
         """
         fine_shape = self._get_fine_shape(input_shape)
         try:
-            self.config.module.validate_fine_shape(fine_shape)
+            self._validate_fine_shape(fine_shape)
         except ValueError as err:
             raise ValueError(
                 f"Input shape {input_shape} (fine shape {fine_shape}) is not "
@@ -934,6 +942,7 @@ class DiffusionModel:
             ),
             in_names=self.in_names,
             out_names=self.out_names,
+            validate_fine_shape=self._validate_fine_shape,
             static_inputs=(
                 self.static_inputs.roll(roll_amount, lon_start)
                 if self.static_inputs is not None

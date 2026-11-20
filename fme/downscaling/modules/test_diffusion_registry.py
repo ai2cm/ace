@@ -91,7 +91,7 @@ def test_diffusion_invalid_shapes():
 )
 def test_validate_fine_shape_matches_unet_forward(fine_shape, valid):
     """
-    validate_fine_shape agrees with whether the built U-Net (3 halvings for 4
+    The fine shape validator agrees with whether the built U-Net (3 halvings for 4
     levels) can run forward on fine_shape, so it can be checked before generation.
     """
     selector = DiffusionModuleRegistrySelector(
@@ -105,14 +105,15 @@ def test_validate_fine_shape_matches_unet_forward(fine_shape, valid):
         downscale_factor=2,
         sigma_data=1.0,
     ).to(get_device())
+    validate_fine_shape = selector.get_fine_shape_validator()
     latent = torch.randn(1, 1, *fine_shape)
     noise_level = torch.randn(1, 1, 1, 1)
     if valid:
-        selector.validate_fine_shape(fine_shape)
+        validate_fine_shape(fine_shape)
         unet(latent, latent, noise_level)
     else:
         with pytest.raises(NonDivisibleShapeError):
-            selector.validate_fine_shape(fine_shape)
+            validate_fine_shape(fine_shape)
         with pytest.raises(NonDivisibleShapeError):
             unet(latent, latent, noise_level)
 
@@ -123,7 +124,7 @@ def test_validate_fine_shape_prebuilt_does_not_raise():
         {"module": torch.nn.Identity()},
         expects_interpolated_input=True,
     )
-    selector.validate_fine_shape((7, 9))
+    selector.get_fine_shape_validator()((7, 9))
 
 
 def test_UNetDiffusionModule_forward_pass():

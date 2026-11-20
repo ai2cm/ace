@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Literal, Protocol
 
 import dacite
@@ -10,6 +10,9 @@ from fme.downscaling.modules.physicsnemo_unets_v2 import SongUNetv2, apex_availa
 from fme.downscaling.modules.preconditioners import EDMPrecond
 from fme.downscaling.modules.unet_diffusion import UNetDiffusionModule
 from fme.downscaling.modules.utils import validate_shape
+
+FineShapeValidator = Callable[[tuple[int, int]], None]
+"""Raises if a module cannot operate on inputs of the given fine (lat, lon) shape."""
 
 
 # TODO: Look into why we need to take in coarse and not target shape
@@ -231,9 +234,12 @@ class DiffusionModuleRegistrySelector:
             use_amp_bf16=use_amp_bf16,
         )
 
-    def validate_fine_shape(self, fine_shape: tuple[int, int]) -> None:
-        """Raise if the module cannot operate on inputs of ``fine_shape``."""
-        self._get_module_config().validate_fine_shape(fine_shape)
+    def get_fine_shape_validator(self) -> FineShapeValidator:
+        """
+        Return a validator that raises if the module built by this selector
+        cannot operate on inputs of a given fine shape.
+        """
+        return self._get_module_config().validate_fine_shape
 
     def _get_module_config(self) -> ModuleConfig:
         return dacite.from_dict(
