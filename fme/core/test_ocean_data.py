@@ -493,7 +493,7 @@ def test_mld_wright97_missing_depth_coordinate_raises_value_error():
 def test_mld_wright97_depth_coordinate_without_idepth_raises_value_error():
     _, _, _, _, data = _mld_case()
     with pytest.raises(ValueError, match="idepth"):
-        _ = OceanData(data, _IntegralOnly()).mld_wright97
+        _ = OceanData(data, _IntegralOnly()).mld_wright97  # type: ignore[arg-type]
 
 
 def test_mld_wright97_missing_salinity_raises_key_error():
@@ -697,6 +697,17 @@ def test_steric_sea_level_wright97_values_and_mask():
     torch.testing.assert_close(eta_steric[:, :, 1], single[:, :, 1])
 
 
+def test_steric_sea_level_wright97_nan_wet_level_counts_as_zero():
+    data = _wright97_data()
+    data["thetao_1"][0, 0, 3, 2] = torch.nan
+    eta_steric = _wright97_ocean_data(data).steric_sea_level_wright97
+    assert eta_steric[0, 0, 3, 2].isfinite()
+    expected = -_expected_column_density(data, dtype=torch.float64) / RHO_0
+    torch.testing.assert_close(
+        eta_steric[0, 0, 3, 2].double(), expected[0, 0, 3, 2], atol=1e-5, rtol=0
+    )
+
+
 @pytest.mark.parametrize("perturbation", ["warm", "fresh"])
 def test_steric_sea_level_wright97_sign(perturbation):
     data = _wright97_data()
@@ -780,12 +791,18 @@ def test_wright97_extra_levels_raise_value_error(name):
 
 
 @pytest.mark.parametrize(
-    "name", ["rho_wright97", "mld_wright97", "manometric_sea_level_wright97"]
+    "name",
+    [
+        "rho_wright97",
+        "mld_wright97",
+        "manometric_sea_level_wright97",
+        "steric_sea_level_wright97",
+    ],
 )
 def test_wright97_missing_profiles_raise_key_error_before_geometry(name):
     data = {"zos": torch.zeros(1, 1, N_LAT, N_LON)}
     for coord in (None, _IntegralOnly()):
-        ocean_data = OceanData(data, coord, cell_area_provider=_cell_area())
+        ocean_data = OceanData(data, coord, cell_area_provider=_cell_area())  # type: ignore[arg-type]
         with pytest.raises(KeyError):
             _ = getattr(ocean_data, name)
 
@@ -801,6 +818,6 @@ def test_wright97_missing_profiles_raise_key_error_before_geometry(name):
 def test_wright97_without_layer_geometry_raises_value_error(name):
     data = _wright97_data()
     for coord in (None, _IntegralOnly()):
-        ocean_data = OceanData(data, coord, cell_area_provider=_cell_area())
+        ocean_data = OceanData(data, coord, cell_area_provider=_cell_area())  # type: ignore[arg-type]
         with pytest.raises(ValueError, match="depth coordinate"):
             _ = getattr(ocean_data, name)

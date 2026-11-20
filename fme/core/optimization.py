@@ -13,6 +13,7 @@ from torch import nn
 from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC, OptimizationModules
 from fme.core.muon import _MUON_FLAG as MUON_FLAG
+from fme.core.muon import _SPECTRAL_FLAG as SPECTRAL_FLAG
 from fme.core.muon import ADJUST_LR_FNS as MUON_ADJUST_LR_FNS
 from fme.core.muon import Muon, check_muon_state_dict_compatible
 from fme.core.scheduler import LRScheduler, SchedulerConfig, SequentialSchedulerConfig
@@ -190,6 +191,7 @@ def _muon_adamw_group_hparams(kwargs: Mapping[str, Any]) -> dict[str, Any]:
         "eps": get("adamw_eps"),
         "weight_decay": get("adamw_weight_decay"),
         MUON_FLAG: False,
+        SPECTRAL_FLAG: False,
     }
 
 

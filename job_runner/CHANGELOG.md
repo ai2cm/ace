@@ -19,10 +19,6 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - [FEAT] Training scripts create `experiments.txt` with its header if missing
 - [FEAT] `{evaluate,inference}.sh --dry-run` validates each unique config and
   override set once, skipping repeats
-- [FEAT] `evaluate.sh --lift-coupled-atmosphere`: score a coupled checkpoint's
-  atmosphere with `fme.ace.evaluator`; the job first runs
-  `bin/extract_atmosphere_from_coupled_ckpt.py` (copy of troya's tool from
-  `troya/2026-10-29-1deg-hybrid-sstdiag-coupled-ft`)
 - [FEAT] `pretraining.txt` columns `results_dataset_ocean` and
   `results_dataset_atmos` override the wandb-resolved results datasets in
   `coupled_train.sh`

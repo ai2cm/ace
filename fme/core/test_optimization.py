@@ -1448,6 +1448,7 @@ def test_optimization_config_build_param_group_override_muon_without_adamw_group
         "eps": 1e-8,
         "weight_decay": 0.0,
         "use_muon": False,
+        "spectral": False,
     }
 
 
