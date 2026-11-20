@@ -4,3 +4,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 SamudrACEv2-ace2p5-muon|rs0|01M7VJ55EFCP928M5FN3CQ1C1Y|training|best_inference_ckpt|normal|--min-runtime 8h
 
 SamudrACEv2-ace2p5-muon|rs1|01M7VJ5HDJWB1JRXTYXMX9TYS9|training|best_inference_ckpt|normal|--min-runtime 8h
+
+SamudrACEv2-ace2p5-muon|rs2|01M7VJ5WDN3C0QXGG322JERVPJ|training|best_inference_ckpt|normal|--min-runtime 8h
