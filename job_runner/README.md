@@ -141,7 +141,7 @@ can evaluate against one maintained set of `evaluator-config-*.yaml` /
 
 `evaluate.sh --lift-coupled-atmosphere` runs an atmosphere-only evaluator
 config on rows whose checkpoint is a coupled one. Each job first runs
-`bin/extract_atmosphere_from_coupled_ckpt.py /ckpt.tar /tmp/lifted_atmosphere_ckpt.tar`,
+`bin/extract_component_from_coupled_ckpt.py /ckpt.tar /tmp/lifted_atmosphere_ckpt.tar --component atmosphere`,
 then `fme.ace.evaluator` with `checkpoint_path=/tmp/lifted_atmosphere_ckpt.tar`
 appended to the overrides. No beaker dataset is created for the lifted file.
 
@@ -150,12 +150,29 @@ appended to the overrides. No beaker dataset is created for the lifted file.
     --config-dir configs/experiments/cm4_eval/atmos --lift-coupled-atmosphere --dry-run
 ```
 
-- Atmosphere-only `<experiment_dir>` only (no `coupled` in the path); the
-  script exits non-zero otherwise.
+- Atmosphere-only `<experiment_dir>` only (no path component starting with
+  `coupled`); the script exits non-zero otherwise.
 - Applies to every row of the file, so keep coupled-checkpoint rows in their
   own `experiments.txt`.
-- No `--ema`: `best_*_ckpt.tar` and `ema_ckpt_*.tar` already hold EMA weights.
-  A raw `ckpt.tar` would need the tool's `--ema`, which this flag does not pass.
+- Any checkpoint file works. `ckpt.tar` holds raw weights plus EMA weights;
+  the lifted file keeps the atmosphere's EMA weights and the evaluator uses
+  them (`use_ema_if_available`, default true). `ema_ckpt_*.tar` and
+  `best_*ckpt.tar` already hold EMA weights.
+- The job runs the launching branch's fme. A checkpoint whose config that fme
+  cannot load (written by a newer fme) fails the job before the evaluator
+  starts; the log names the git sha it was trained at. Launch such evals from
+  a branch with that fme that has merged `job_runner`.
+
+### Lifting by hand
+
+`bin/extract_component_from_coupled_ckpt.py` lifts either component:
+
+```bash
+python job_runner/bin/extract_component_from_coupled_ckpt.py \
+    <coupled ckpt.tar> <out.tar> --component {atmosphere,ocean}
+```
+
+The output loads with `fme.ace.evaluator` (`checkpoint_path: <out.tar>`).
 
 ## Dry-Run Mode
 

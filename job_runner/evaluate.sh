@@ -5,7 +5,7 @@
 set -e
 
 # In-job coupled-to-atmosphere checkpoint lift (--lift-coupled-atmosphere)
-LIFT_TOOL="job_runner/bin/extract_atmosphere_from_coupled_ckpt.py"
+LIFT_TOOL="job_runner/bin/extract_component_from_coupled_ckpt.py"
 LIFTED_ATMOSPHERE_CKPT="/tmp/lifted_atmosphere_ckpt.tar"
 
 # Get the directory where this script is located
@@ -23,7 +23,7 @@ if [[ "$#" -lt 2 ]]; then
   echo "      <experiment_dir>/<config_subdirectory>/. Absolute, or relative to the repo root,"
   echo "      and must resolve inside it. experiments.txt is read from <experiment_dir>/<config_subdirectory>/ either way."
   echo "  - --lift-coupled-atmosphere: Each row's checkpoint is a coupled checkpoint; the job first lifts its"
-  echo "      atmosphere with $LIFT_TOOL, then runs fme.ace.evaluator on the lifted file."
+  echo "      atmosphere (and its EMA weights, if any) with $LIFT_TOOL, then runs fme.ace.evaluator on the lifted file."
   echo "      Atmosphere-only (non-coupled <experiment_dir>) only."
   echo "Reads <experiment_dir>/<config_subdirectory>/experiments.txt, header:"
   echo "  $(input_header EXPERIMENTS_COLUMNS)"
@@ -223,7 +223,12 @@ while read TRAIN_EXPER; do
 
     JOB_COMMAND=("${FME_LAUNCH[@]}" "$FME_MODULE_EVALUATOR" "$CONFIG_PATH_REL" --override "${OVERRIDE_ARGV[@]}" "${LIFT_OVERRIDE[@]}")
     if [[ "$LIFT_COUPLED_ATMOSPHERE" == "true" ]]; then
-        JOB_COMMAND=(bash -c "python -I $LIFT_TOOL /ckpt.tar $LIFTED_ATMOSPHERE_CKPT && exec \"\$@\"" lift-coupled-atmosphere "${JOB_COMMAND[@]}")
+        JOB_COMMAND=(bash -c "python -I $LIFT_TOOL /ckpt.tar $LIFTED_ATMOSPHERE_CKPT --component atmosphere && exec \"\$@\"" lift-coupled-atmosphere "${JOB_COMMAND[@]}")
+    fi
+    if [[ "$DRY_RUN" == "true" ]]; then
+        printf '    Job command:'
+        printf ' %q' "${JOB_COMMAND[@]}"
+        echo
     fi
 
     # Run gantry command unless in dry-run mode
