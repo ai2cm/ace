@@ -1,6 +1,6 @@
 #!/bin/bash
 # Wrapper script for uncoupled training jobs
-# Usage: uncoupled_train.sh <experiment_dir> <config_subdirectory> [--atmos_stats <path>] [--ocean_stats <path>] [--coupled_stats <path>]
+# Usage: uncoupled_train.sh <experiment_dir> <config_subdirectory> [--atmos_stats <path>] [--ocean_stats <path>] [--coupled_stats <path>] [--dry-run] [--eval-config-dir <path>]
 
 set -e
 
@@ -11,13 +11,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 if [[ "$#" -lt 2 ]]; then
-  echo "Usage: $0 <experiment_dir> <config_subdirectory> [--atmos_stats <path>] [--ocean_stats <path>] [--coupled_stats <path>] [--dry-run]"
+  echo "Usage: $0 <experiment_dir> <config_subdirectory> [--atmos_stats <path>] [--ocean_stats <path>] [--coupled_stats <path>] [--dry-run] [--eval-config-dir <path>]"
   echo "  - <experiment_dir>: Path to experiment directory (e.g., experiments/2025-08-08-jamesd/uncoupled)"
   echo "  - <config_subdirectory>: Subdirectory containing the 'train-config.yaml' to use."
   echo "  - --atmos_stats: Override atmosphere stats data path (optional)"
   echo "  - --ocean_stats: Override ocean stats data path (optional)"
   echo "  - --coupled_stats: Override with coupled stats dataset containing coupled_atmosphere and uncoupled_ocean subdirs (optional, mutually exclusive with --atmos_stats/--ocean_stats)"
   echo "  - --dry-run: Preview actions without launching jobs or committing changes"
+  echo "  - --eval-config-dir <path>: Directory of evaluator-config-<tag>.yaml files (optional). Absolute, or"
+  echo "      relative to the repo root, and must resolve inside it. Each submitted run gets one wait_<tag>"
+  echo "      row per file in experiments.txt, carrying the training's experiment ID, and no training row."
   echo "Reads <experiment_dir>/<config_subdirectory>/training.txt, header:"
   echo "  $(input_header TRAINING_COLUMNS)"
   exit 1
@@ -35,8 +38,14 @@ parse_dry_run_flag "$@"
 parse_stats_args "$@"
 validate_stats_args
 
+# Parse --eval-config-dir flag
+parse_eval_config_dir_arg "$@"
+
 # Initialize script environment
 init_script_environment
+
+# Evaluator config tags for the wait_<tag> rows (none without --eval-config-dir)
+resolve_eval_config_dir "$EXPERIMENT_DIR" "$CONFIG_SUBDIR"
 
 # Mode-specific configuration
 FME_MODULE="fme.ace.train"
@@ -138,9 +147,9 @@ while read TRAINING; do
     # Stop the loop if beaker did not return an experiment ID
     require_experiment_id "$EXPERIMENT_ID" "$JOB_NAME"
 
-    # Append to experiments.txt
-    append_to_experiments_file_with_dry_run "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$JOB_GROUP" "$TAG" \
-        "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime $DEFAULT_MIN_RUNTIME" "$GIT_BRANCH"
+    # Append the training row, or its wait_<tag> rows, to experiments.txt
+    record_training_with_dry_run "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$JOB_GROUP" "$TAG" \
+        "$EXPERIMENT_ID" "$GIT_BRANCH"
 
 done <"$INPUT_PATH"
 

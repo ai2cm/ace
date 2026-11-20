@@ -400,6 +400,19 @@ append_to_experiments_file() {
     local PREEMPTIBLE_FLAG="$9"
     local GIT_BRANCH="${10}"
 
+    append_rows_to_experiments_file "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$GIT_BRANCH" \
+        "${JOB_GROUP}|${TAG}|${EXPERIMENT_ID}|${STATUS}|${CHECKPOINT}|${PRIORITY}|${PREEMPTIBLE_FLAG}"
+}
+
+# Append rows to experiments.txt as one blank-line-separated block, creating the
+# file with its header if missing, and commit
+# Args: EXPERIMENT_DIR CONFIG_SUBDIR GIT_BRANCH ROW [ROW ...]
+append_rows_to_experiments_file() {
+    local EXPERIMENT_DIR="$1"
+    local CONFIG_SUBDIR="$2"
+    local GIT_BRANCH="$3"
+    shift 3
+
     local REPO_ROOT=$(git rev-parse --show-toplevel)
     local EXPERIMENTS_FILE="$REPO_ROOT/$EXPERIMENT_DIR/$CONFIG_SUBDIR/experiments.txt"
 
@@ -408,12 +421,70 @@ append_to_experiments_file() {
     fi
 
     { echo;
-      echo "${JOB_GROUP}|${TAG}|${EXPERIMENT_ID}|${STATUS}|${CHECKPOINT}|${PRIORITY}|${PREEMPTIBLE_FLAG}";
+      printf '%s\n' "$@";
     } >> "$EXPERIMENTS_FILE"
 
     git_commit_and_push "$EXPERIMENTS_FILE" \
         "Update ${EXPERIMENT_DIR}/${CONFIG_SUBDIR}/experiments.txt" \
         "$GIT_BRANCH"
+}
+
+# Print one experiments.txt row from <header name>=<value> pairs; columns not
+# named are blank
+# Usage: experiments_row group=G tag=T status=wait_x n_gpus=1
+experiments_row() {
+    local COLUMN NAME PAIR VALUE FIELDS=()
+    for COLUMN in "${EXPERIMENTS_COLUMNS[@]}"; do
+        NAME="${COLUMN%%:*}"
+        VALUE=""
+        for PAIR in "$@"; do
+            if [[ "${PAIR%%=*}" == "$NAME" ]]; then
+                VALUE="${PAIR#*=}"
+            fi
+        done
+        FIELDS+=("$VALUE")
+    done
+    local IFS='|'
+    echo "${FIELDS[*]}"
+}
+
+# Print the wait_<tag> rows of one submitted training, one per EVAL_CONFIG_TAGS
+# entry, each carrying the training's experiment ID
+# Args: JOB_GROUP TAG EXPERIMENT_ID
+eval_wait_rows() {
+    local JOB_GROUP="$1" TAG="$2" EXPERIMENT_ID="$3" CONFIG_TAG
+    for CONFIG_TAG in "${EVAL_CONFIG_TAGS[@]}"; do
+        experiments_row group="$JOB_GROUP" tag="$TAG" experiment_id="$EXPERIMENT_ID" \
+            status="wait_${CONFIG_TAG}" checkpoint="$EVAL_WAIT_CHECKPOINT" \
+            priority="$EVAL_WAIT_PRIORITY" min_runtime="$EVAL_WAIT_MIN_RUNTIME" \
+            n_gpus="$EVAL_WAIT_N_GPUS"
+    done
+}
+
+# Record a submitted training in experiments.txt: with --eval-config-dir, its
+# wait_<tag> rows and no training row; otherwise one training row. Dry runs
+# print the wait_<tag> rows instead of appending them.
+# Args: EXPERIMENT_DIR CONFIG_SUBDIR JOB_GROUP TAG EXPERIMENT_ID GIT_BRANCH
+record_training_with_dry_run() {
+    local EXPERIMENT_DIR="$1" CONFIG_SUBDIR="$2" JOB_GROUP="$3" TAG="$4"
+    local EXPERIMENT_ID="$5" GIT_BRANCH="$6"
+
+    if [[ -z "${EVAL_CONFIG_DIR:-}" ]]; then
+        append_to_experiments_file_with_dry_run "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$JOB_GROUP" "$TAG" \
+            "$EXPERIMENT_ID" "training" "best_inference_ckpt" "normal" "--min-runtime $DEFAULT_MIN_RUNTIME" "$GIT_BRANCH"
+        return
+    fi
+
+    local ROW ROWS=()
+    while IFS= read -r ROW; do
+        ROWS+=("$ROW")
+    done < <(eval_wait_rows "$JOB_GROUP" "$TAG" "$EXPERIMENT_ID")
+    if [[ "$DRY_RUN" == "true" ]]; then
+        echo "    experiments.txt rows:"
+        printf '      %s\n' "${ROWS[@]}"
+    else
+        append_rows_to_experiments_file "$EXPERIMENT_DIR" "$CONFIG_SUBDIR" "$GIT_BRANCH" "${ROWS[@]}"
+    fi
 }
 
 # Initialize script environment variables
@@ -491,7 +562,8 @@ parse_config_dir_arg() {
 }
 
 # Resolve the repo-root-relative directory the config yaml is read from
-# Args: $1 = EXPERIMENT_DIR, $2 = CONFIG_SUBDIR, $3 = CONFIG_DIR_OVERRIDE (may be empty)
+# Args: $1 = EXPERIMENT_DIR, $2 = CONFIG_SUBDIR, $3 = CONFIG_DIR_OVERRIDE (may be empty),
+#       $4 = flag named in error messages (default --config-dir)
 # Requires REPO_ROOT, so call after init_script_environment
 # Outputs: repo-root-relative directory to stdout
 #
@@ -504,6 +576,7 @@ resolve_config_dir() {
     local EXPERIMENT_DIR="$1"
     local CONFIG_SUBDIR="$2"
     local OVERRIDE="${3:-}"
+    local FLAG="${4:---config-dir}"
 
     if [[ -z "$OVERRIDE" ]]; then
         echo "${EXPERIMENT_DIR}/${CONFIG_SUBDIR}"
@@ -516,7 +589,7 @@ resolve_config_dir() {
     fi
 
     if [[ ! -d "$CANDIDATE" ]]; then
-        echo "Error: --config-dir is not a directory: $OVERRIDE" >&2
+        echo "Error: ${FLAG} is not a directory: $OVERRIDE" >&2
         exit 1
     fi
 
@@ -528,15 +601,73 @@ resolve_config_dir() {
     ROOT_RESOLVED=$(cd "$REPO_ROOT" && pwd -P)
 
     if [[ "$RESOLVED" != "$ROOT_RESOLVED"/* ]]; then
-        echo "Error: --config-dir must be inside the repository root ${ROOT_RESOLVED}; ${OVERRIDE} resolves to ${RESOLVED}" >&2
+        echo "Error: ${FLAG} must be inside the repository root ${ROOT_RESOLVED}; ${OVERRIDE} resolves to ${RESOLVED}" >&2
         exit 1
     fi
 
     echo "${RESOLVED#"${ROOT_RESOLVED}"/}"
 }
 
+# Parse --eval-config-dir argument from arguments
+# Sets global EVAL_CONFIG_DIR_OVERRIDE (empty when the flag is absent)
+# Usage: parse_eval_config_dir_arg "$@"
+parse_eval_config_dir_arg() {
+    EVAL_CONFIG_DIR_OVERRIDE=""
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --eval-config-dir)
+                if [[ $# -lt 2 ]]; then
+                    echo "Error: --eval-config-dir requires a path argument" >&2
+                    exit 1
+                fi
+                EVAL_CONFIG_DIR_OVERRIDE="$2"
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+}
+
+# Resolve --eval-config-dir and the evaluator config tags it holds:
+# evaluator-config-<tag>.yaml -> <tag>, the inverse of evaluate.sh's
+# run_<tag> -> evaluator-config-<tag>.yaml
+# Requires REPO_ROOT, so call after init_script_environment
+# Sets EVAL_CONFIG_DIR (repo-root-relative; empty without the flag) and the
+# EVAL_CONFIG_TAGS array; exits when the directory holds no evaluator config
+# Usage: resolve_eval_config_dir "$EXPERIMENT_DIR" "$CONFIG_SUBDIR"
+resolve_eval_config_dir() {
+    EVAL_CONFIG_DIR=""
+    EVAL_CONFIG_TAGS=()
+    if [[ -z "$EVAL_CONFIG_DIR_OVERRIDE" ]]; then
+        return
+    fi
+
+    EVAL_CONFIG_DIR=$(resolve_config_dir "$1" "$2" "$EVAL_CONFIG_DIR_OVERRIDE" --eval-config-dir) || exit 1
+
+    local FILE NAME
+    for FILE in "$REPO_ROOT/$EVAL_CONFIG_DIR"/evaluator-config-*.yaml; do
+        [[ -f "$FILE" ]] || continue
+        NAME="${FILE##*/evaluator-config-}"
+        EVAL_CONFIG_TAGS+=("${NAME%.yaml}")
+    done
+
+    if [[ ${#EVAL_CONFIG_TAGS[@]} -eq 0 ]]; then
+        echo "Error: --eval-config-dir holds no evaluator-config-<tag>.yaml: $EVAL_CONFIG_DIR_OVERRIDE" >&2
+        exit 1
+    fi
+}
+
 # gantry --min-runtime when a row leaves min_runtime blank. 0 is backfill-only.
 DEFAULT_MIN_RUNTIME=8h
+
+# Settings of the wait_<tag> rows written for --eval-config-dir; evaluate.sh
+# reads them once the row is flipped to run_<tag>
+EVAL_WAIT_CHECKPOINT=best_inference_ckpt
+EVAL_WAIT_PRIORITY=high
+EVAL_WAIT_MIN_RUNTIME="--min-runtime $DEFAULT_MIN_RUNTIME"
+EVAL_WAIT_N_GPUS=1
 
 # Input-file columns, in file order, as <header name>:<variable parse_row sets>.
 # The single source for each file's header and for how its rows are parsed.
@@ -625,6 +756,10 @@ print_dry_run_header() {
         echo "  Repository Root: $REPO_ROOT"
         echo "  Git Branch: $GIT_BRANCH"
         echo "  Beaker Username: $BEAKER_USERNAME"
+        if [[ -n "${EVAL_CONFIG_DIR:-}" ]]; then
+            echo "  Eval Config Directory: $EVAL_CONFIG_DIR"
+            echo "  Eval Config Tags: ${EVAL_CONFIG_TAGS[*]}"
+        fi
         print_stats_config
         echo
     fi
@@ -771,7 +906,11 @@ print_dry_run_summary() {
         echo "Actions that WOULD be taken:"
         echo "  - Launch $2 gantry jobs"
         echo "  - Commit $2 config files to git"
-        echo "  - Append $2 entries to experiments.txt"
+        if [[ -n "${EVAL_CONFIG_DIR:-}" ]]; then
+            echo "  - Append $(( $2 * ${#EVAL_CONFIG_TAGS[@]} )) wait_<tag> entries to experiments.txt (${#EVAL_CONFIG_TAGS[@]} per job; no training entries)"
+        else
+            echo "  - Append $2 entries to experiments.txt"
+        fi
         echo "  - Push git commits to branch: $GIT_BRANCH"
         echo
         echo "========================================"

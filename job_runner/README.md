@@ -137,6 +137,36 @@ can evaluate against one maintained set of `evaluator-config-*.yaml` /
   to the job. The script exits non-zero naming the offending path.
 - `--config-dir` is hyphenated, unlike the underscored `--atmos_stats` family.
 
+## Queued Evaluations (`--eval-config-dir`)
+
+`uncoupled_train.sh`, `coupled_train.sh`, `uncoupled_finetune.sh` and
+`coupled_finetune.sh` accept an optional `--eval-config-dir <path>`. For each
+submitted run, they append one `wait_<tag>` row per
+`evaluator-config-<tag>.yaml` in that directory to `experiments.txt`, and no
+`training` row. Without the flag, they append one `training` row as before.
+
+```bash
+./job_runner/uncoupled_train.sh configs/experiments/my-exper/ocean config-v1 \
+    --ocean_stats path/to/stats --eval-config-dir configs/experiments/cm4_eval/ocean --dry-run
+```
+
+```
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|...|n_gpus
+G|rs0|<training experiment ID>|wait_<tag>|best_inference_ckpt|high|--min-runtime 8h|...|1
+```
+
+- `<tag>` is the config filename minus `evaluator-config-` and `.yaml`, so
+  flipping `wait_<tag>` to `run_<tag>` makes `evaluate.sh --config-dir <path>`
+  launch that config against the training's checkpoint.
+- `experiment_id` is the training's beaker experiment ID; `evaluate.sh`
+  resolves its results dataset from it.
+- Row settings are the `EVAL_WAIT_*` variables in `lib.sh`.
+- The directory resolves as `--config-dir` does (absolute, or relative to the
+  repository root, and inside it). A directory with no
+  `evaluator-config-*.yaml` stops the script before any submission.
+- `--dry-run` prints the rows each run would get.
+- Nothing flips `wait_` rows; that is the caller's job (by hand or a watcher).
+
 ## Atmosphere of a Coupled Checkpoint (`--lift-coupled-atmosphere`)
 
 `evaluate.sh --lift-coupled-atmosphere` runs an atmosphere-only evaluator
@@ -234,6 +264,10 @@ This is useful for:
 - `git_commit_and_push_with_dry_run()`: Wrapper for git operations that respects dry-run mode
 - `append_to_experiments_file()`: Append experiment result to experiments.txt and commit
 - `append_to_experiments_file_with_dry_run()`: Wrapper for appending to experiments.txt that respects dry-run mode
+- `append_rows_to_experiments_file()`: Append a block of rows to experiments.txt and commit
+- `experiments_row()`: Print an experiments.txt row from `<header name>=<value>` pairs
+- `eval_wait_rows()`: Print a training's `wait_<tag>` rows, one per `EVAL_CONFIG_TAGS` entry
+- `record_training_with_dry_run()`: Append a submitted training's `training` row, or its `wait_<tag>` rows under `--eval-config-dir`
 
 **Script Initialization:**
 - `init_script_environment()`: Initialize REPO_ROOT, GIT_BRANCH, and BEAKER_USERNAME variables
@@ -244,6 +278,8 @@ This is useful for:
 - `validate_config_once()`: Validate a config; under `--dry-run`, once per unique config and overrides
 - `parse_config_dir_arg()`: Parse `--config-dir` argument into `CONFIG_DIR_OVERRIDE`
 - `resolve_config_dir()`: Resolve `--config-dir` to a repo-root-relative path, rejecting one outside the repository root
+- `parse_eval_config_dir_arg()`: Parse `--eval-config-dir` argument into `EVAL_CONFIG_DIR_OVERRIDE`
+- `resolve_eval_config_dir()`: Resolve `--eval-config-dir` into `EVAL_CONFIG_DIR` and its `EVAL_CONFIG_TAGS`
 
 **Output and Logging:**
 - `print_dry_run_header()`: Print dry-run mode header

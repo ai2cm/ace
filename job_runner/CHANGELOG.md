@@ -36,6 +36,10 @@ https://github.com/ai2cm/full-model/compare/job_runner
   when the running fme cannot load the component; checks the result loads as
   `fme.ace.evaluator` loads it
 - [FEAT] `evaluate.sh --dry-run` prints each job's command
+- [FEAT] `{uncoupled,coupled}_{train,finetune}.sh --eval-config-dir <path>`:
+  each submitted run gets one `wait_<tag>` row per `evaluator-config-<tag>.yaml`
+  in `<path>` (training's experiment ID, `high` priority, `--min-runtime 8h`, 1
+  GPU) and no `training` row; `tests/test_train_eval_config_dir.sh`
 
 ### Changed
 
