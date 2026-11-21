@@ -38,6 +38,7 @@ from fme.coupled.typing_ import CoupledOptionalInt
 from .train_config import (
     _get_inference_callback,
     _get_validation_callback,
+    _validate_joint_pairs,
     _validate_n_steps,
 )
 
@@ -56,6 +57,7 @@ def _make_stepper_training_mock():
     stepper_training.component_n_steps_max = CoupledOptionalInt(
         ocean=None, atmosphere=None
     )
+    stepper_training.uncoupled_atmosphere = None
     return stepper_training
 
 
@@ -338,6 +340,26 @@ def test_validate_n_steps_passes_at_limit():
         n_inner_steps=2,
         component_n_steps_max=CoupledOptionalInt(ocean=4, atmosphere=8),
     )
+
+
+@pytest.mark.parametrize("n", [1, 3])
+def test_validate_joint_pairs(n):
+    n_coupled_steps = 2
+    accepted = [[1, 1], [1, n], [1, n + 1], [1, 2 * n]]
+    _validate_joint_pairs(accepted, n_inner_steps=n, n_coupled_steps=n_coupled_steps)
+    _validate_joint_pairs(None, n_inner_steps=n, n_coupled_steps=n_coupled_steps)
+    rejected = {
+        # [2, n] equals [2, 1] at n = 1
+        "no direct edge": [[1, 2 * n + 1], [2, 1]] + ([[2, n]] if n > 1 else []),
+        "beyond n_coupled_steps": [[3, 2 * n + 1], [2, 2 * n + 1]],
+    }
+    for match, pairs in rejected.items():
+        with pytest.raises(ValueError, match=match) as exc_info:
+            _validate_joint_pairs(
+                accepted + pairs, n_inner_steps=n, n_coupled_steps=n_coupled_steps
+            )
+        for pair in pairs:
+            assert str(pair) in str(exc_info.value)
 
 
 def test_validate_n_steps_rejects_ocean_overshoot():
@@ -779,4 +801,30 @@ def test_train_config_rejects_wrong_optimization_components(tmp_path):
     with pytest.raises(ValueError, match="missing"):
         _make_train_config_with_optimization(
             tmp_path, {"atmosphere": OptimizationConfig()}
+        )
+
+
+@pytest.mark.parametrize(
+    "loader_set, stepper_set",
+    [(True, False), (False, True)],
+    ids=["loader_only", "stepper_training_only"],
+)
+def test_train_config_uncoupled_atmosphere_loader_and_stepper_set_together(
+    tmp_path, loader_set: bool, stepper_set: bool
+):
+    stepper_training = _make_stepper_training_mock()
+    if stepper_set:
+        stepper_training.uncoupled_atmosphere = MagicMock()
+    with pytest.raises(ValueError, match="must be set together"):
+        TrainConfig(
+            train_loader=MagicMock(),
+            validation=_make_validation_config(),
+            stepper=_make_stepper_mock(),
+            stepper_training=stepper_training,
+            optimization=MagicMock(has_lr_schedule=False),
+            logging=MagicMock(),
+            max_epochs=1,
+            save_checkpoint=False,
+            experiment_dir=str(tmp_path),
+            train_loader_uncoupled_atmosphere=MagicMock() if loader_set else None,
         )
