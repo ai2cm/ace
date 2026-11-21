@@ -23,11 +23,14 @@ training_checkpoints/best_inference_ckpt.tar at /ckpt.tar and runs a
 run-agnostic config from inference_configs/ (generate_inference_configs.py)
 through run-ace-inference-job.sh.
 
-The sfno-v3 runs use the eval family with the checkpoint paths recorded in
-fm_v3_jobs.json on Weka. Evaluate both EMA checkpoints with:
+The sfno-v3 runs use the checkpoint paths recorded in fm_v3_jobs.json on
+Weka. Evaluate both EMA checkpoints with:
 
     python submit_inference_jobs.py --arch sfno-v3 --family eval \
         --ckpt bestinf lastema --skip-if-in-beaker
+
+The remaining families use the same checkpoints and flags, with
+--family cm4xshield cm4-1pct sst paper-som paper-era5.
 
 Families (--family, default all):
 
@@ -174,6 +177,7 @@ from generate_inference_configs import (
     SST_PERTURBATIONS,
     arch_eval_suite_config,
     cm4_xshield_runs,
+    is_v3_c3,
     paper_config_filename,
     sst_config_filename,
 )
@@ -315,9 +319,13 @@ def family_jobs(
         )
         return [(f"{run}{suffix}", arch_eval_suite_config(family, arch, run))]
     suffix = "" if ckpt == "bestinf" else checkpoint_suffix(ckpt)
+    c3 = is_v3_c3(arch, run)
     if family == "sst":
         return [
-            (f"{run}-sst-{grid}-{level}{suffix}", sst_config_filename(grid, level))
+            (
+                f"{run}-sst-{grid}-{level}{suffix}",
+                sst_config_filename(grid, level, c3=c3),
+            )
             for grid in SST_GRIDS
             if sst_grids is None or grid in sst_grids
             for level in SST_PERTURBATIONS
@@ -325,7 +333,7 @@ def family_jobs(
         ]
     if family in ("paper-som", "paper-era5"):
         return [
-            (f"{run}-{kind}{suffix}", paper_config_filename(kind))
+            (f"{run}-{kind}{suffix}", paper_config_filename(kind, c3=c3))
             for kind, (kind_family, _) in PAPER_KINDS.items()
             if kind_family == family and (kinds is None or kind in kinds)
         ]
@@ -480,7 +488,8 @@ def main() -> None:
         "--family",
         nargs="+",
         choices=FAMILIES,
-        help="Job families to submit (default: all, or eval for sfno-v3).",
+        default=list(FAMILIES),
+        help="Job families to submit (default: all).",
     )
     parser.add_argument(
         "--run",
@@ -548,10 +557,8 @@ def main() -> None:
     # Same Beaker defaults as the training submitter (submit_fm_jobs.py).
     add_default_beaker_args(parser)
     args = parser.parse_args()
-    if args.family is None:
-        args.family = ["eval"] if args.arch == V3_ARCH else list(FAMILIES)
-    if args.arch == V3_ARCH and (args.family != ["eval"] or args.use_map):
-        parser.error("sfno-v3 supports only --family eval and uses its own job record")
+    if args.arch == V3_ARCH and args.use_map:
+        parser.error("sfno-v3 uses fm_v3_jobs.json instead of --use-map")
     if args.old_runs and (args.ckpt != ["lastema"] or args.family != ["eval"]):
         raise SystemExit("--old-runs needs --ckpt lastema and --family eval")
     if args.old_runs and args.arch not in OLD_RUNS:

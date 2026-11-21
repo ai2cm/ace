@@ -9,7 +9,7 @@
 #   evaluator  python -m fme.ace.evaluator
 #   inference  python -m fme.ace.inference
 # CHECKPOINT_PATH inside RESULTS_DATASET is mounted at /ckpt.tar.
-# For a suite checkpoint on Weka, pass - for RESULTS_DATASET and its
+# For a checkpoint on Weka, pass - for RESULTS_DATASET and its
 # absolute /climate-default path for CHECKPOINT_PATH.
 # WANDB_NAME (default JOB_NAME) is the wandb run name; JOB_NAME is the Beaker
 # experiment and task name.
@@ -67,14 +67,21 @@ esac
 
 checkpoint_args=()
 launch_args=()
+description="Run ACE FM $MODE on a 2026-10-19 checkpoint"
 if [[ "$EXISTING_RESULTS_DATASET" == "-" ]]; then
-  if [[ "$MODE" != suite || "$CHECKPOINT_PATH" != /climate-default/* ]]; then
-    echo "Weka checkpoints require suite mode and a path under /climate-default" >&2
+  if [[ "$CHECKPOINT_PATH" != /climate-default/* ]]; then
+    echo "Weka checkpoints require a path under /climate-default" >&2
     exit 2
   fi
-  COMMAND+=(--checkpoint-path "$CHECKPOINT_PATH")
-  VALIDATE+=(--checkpoint-path "$CHECKPOINT_PATH")
+  if [[ "$MODE" == suite ]]; then
+    override=(--checkpoint-path "$CHECKPOINT_PATH")
+  else
+    override=(--override "checkpoint_path=$CHECKPOINT_PATH")
+  fi
+  COMMAND+=("${override[@]}")
+  VALIDATE+=("${override[@]}")
   launch_args+=(--yes)
+  description="Run ACE FM $MODE on a v3 checkpoint"
 else
   checkpoint_args+=(--dataset "$EXISTING_RESULTS_DATASET:$CHECKPOINT_PATH:/ckpt.tar")
 fi
@@ -99,7 +106,7 @@ done
 gantry run \
   --name "$JOB_NAME" \
   --task-name "$JOB_NAME" \
-  --description "Run ACE FM $MODE on a 2026-10-19 checkpoint" \
+  --description "$description" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
   --workspace "$BEAKER_WORKSPACE" \
   --priority "$BEAKER_PRIORITY" \

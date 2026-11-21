@@ -104,6 +104,15 @@ V2_TEN_YEAR_AGGREGATOR_ENTRY = "10year_oosample_varying_co2_era5"
 CM4_XSHIELD_VARIANTS = {
     "": (SOURCE_RUN_CONFIG, TEN_YEAR_AGGREGATOR_ENTRY, ""),
     "v2": (V2_SOURCE_RUN_CONFIG, V2_TEN_YEAR_AGGREGATOR_ENTRY, "-v2"),
+    "v3-c3": (
+        RUN_CONFIGS_DIR
+        / (
+            "ace-train-config-4deg-nc-sfno-v3-fm-e3sm-balanced"
+            "-c3-cellloss-s0-maskoff.yaml"
+        ),
+        V2_TEN_YEAR_AGGREGATOR_ENTRY,
+        "-v3-c3",
+    ),
 }
 
 # 2026-06-26 label -> 2026-10-19 label. Every 2026-06-26 SHiELD label (amip,
@@ -123,6 +132,16 @@ V3_C3_EVAL_CONFIG = f"{EVAL_SUITE_PREFIX}2026-06-26-windows-v3-c3.yaml"
 CM4_XSHIELD_FAMILIES = ("cm4xshield", "cm4-1pct")
 
 
+def is_v3_c3(arch: str, run: str | None) -> bool:
+    return arch == V3_ARCH and run is not None and "-c3-" in run
+
+
+def _cm4_xshield_variant(arch: str, run: str | None) -> str:
+    if arch == V3_ARCH:
+        return "v3-c3" if is_v3_c3(arch, run) else "v2"
+    return CM4_XSHIELD_VARIANT.get(arch, "")
+
+
 def eval_suite_config(family: str, variant: str = "") -> str:
     """Config filename of an eval-suite family; the CM4/X-SHiELD families
     get the variant's suffix (CM4_XSHIELD_VARIANTS).
@@ -136,14 +155,9 @@ def eval_suite_config(family: str, variant: str = "") -> str:
 
 def arch_eval_suite_config(family: str, arch: str, run: str | None = None) -> str:
     """Config filename of an eval-suite family for the runs of `arch`."""
-    if (
-        family == "eval"
-        and arch == V3_ARCH
-        and run is not None
-        and "amip" in run_train_labels(run)
-    ):
+    if family == "eval" and is_v3_c3(arch, run):
         return V3_C3_EVAL_CONFIG
-    return eval_suite_config(family, CM4_XSHIELD_VARIANT.get(arch, ""))
+    return eval_suite_config(family, _cm4_xshield_variant(arch, run))
 
 
 def _logging() -> dict:
@@ -387,7 +401,8 @@ def cm4_xshield_runs(arch: str) -> list[str]:
     that get cm4xshield / cm4-1pct jobs.
     """
     if arch == V3_ARCH:
-        return []
+        # All v3 runs train on these datasets, with source-specific C3 labels.
+        return inference_run_names(arch)
     return [
         run
         for run in inference_run_names(arch)
@@ -419,13 +434,15 @@ SST_GRIDS = {
 }
 
 
-def sst_config_filename(grid: str, level: str) -> str:
-    label = SST_GRIDS[grid][3]
+def sst_config_filename(grid: str, level: str, *, c3: bool = False) -> str:
+    label = "amip" if c3 and grid == "c96" else SST_GRIDS[grid][3]
     return f"{SST_CONFIG_PREFIX}{grid}-{label}-{level}.yaml"
 
 
-def build_sst_config(grid: str, level: str) -> dict:
+def build_sst_config(grid: str, level: str, *, c3: bool = False) -> dict:
     data_path, file_pattern, n_steps, label = SST_GRIDS[grid]
+    if c3 and grid == "c96":
+        label = "amip"
     return {
         "checkpoint_path": MOUNTED_CHECKPOINT_PATH,
         "allow_incompatible_dataset": True,
@@ -644,8 +661,9 @@ PAPER_KINDS: dict[str, tuple[str, Callable[[], dict]]] = {
 }
 
 
-def paper_config_filename(kind: str) -> str:
-    return f"{PAPER_CONFIG_PREFIX}{kind}-config-4deg.yaml"
+def paper_config_filename(kind: str, *, c3: bool = False) -> str:
+    suffix = "-v3-c3" if c3 and PAPER_KINDS[kind][0] == "paper-som" else ""
+    return f"{PAPER_CONFIG_PREFIX}{kind}-config-4deg{suffix}.yaml"
 
 
 # --- families -------------------------------------------------------------------------
@@ -675,16 +693,31 @@ def family_configs(family: str) -> dict[str, dict]:
         }
     if family == "sst":
         return {
-            sst_config_filename(grid, level): build_sst_config(grid, level)
+            sst_config_filename(grid, level, c3=c3): build_sst_config(
+                grid, level, c3=c3
+            )
             for grid in SST_GRIDS
+            for c3 in ((False, True) if grid == "c96" else (False,))
             for level in SST_PERTURBATIONS
         }
     if family in ("paper-som", "paper-era5"):
-        return {
+        configs = {
             paper_config_filename(kind): builder()
             for kind, (kind_family, builder) in PAPER_KINDS.items()
             if kind_family == family
         }
+        if family == "paper-som":
+            configs.update(
+                {
+                    paper_config_filename(kind, c3=True): configs[
+                        paper_config_filename(kind)
+                    ]
+                    | {"labels": ["som"]}
+                    for kind, (kind_family, _) in PAPER_KINDS.items()
+                    if kind_family == family
+                }
+            )
+        return configs
     raise ValueError(f"unknown family {family!r}")
 
 
@@ -704,11 +737,13 @@ def main() -> None:
         help="Directory to write to (default: inference_configs/).",
     )
     args = parser.parse_args()
+    paths_by_variant: dict[str, list[pathlib.Path]] = {}
     for arch in ARCHS:
-        check_shared_sources(
-            [run_config_path(run) for run in cm4_xshield_runs(arch)],
-            CM4_XSHIELD_VARIANT.get(arch, ""),
-        )
+        for run in cm4_xshield_runs(arch):
+            variant = _cm4_xshield_variant(arch, run)
+            paths_by_variant.setdefault(variant, []).append(run_config_path(run))
+    for variant, paths in paths_by_variant.items():
+        check_shared_sources(paths, variant)
     header = "# Generated by generate_inference_configs.py; do not edit by hand.\n"
     for family in args.family:
         for filename, cfg in family_configs(family).items():

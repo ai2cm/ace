@@ -1,4 +1,5 @@
 import json
+from collections import Counter
 
 import submit_inference_jobs as submit
 from _inference_common import (
@@ -7,7 +8,12 @@ from _inference_common import (
     inference_run_names,
     run_train_labels,
 )
-from generate_inference_configs import EVAL_SUITE_CONFIGS, V3_C3_EVAL_CONFIG
+from generate_inference_configs import (
+    EVAL_SUITE_CONFIGS,
+    FAMILIES,
+    V3_C3_EVAL_CONFIG,
+    family_configs,
+)
 from run_eval_suite import load_suite
 from submit_fm_v3_jobs import RECORD_PATH as V3_RECORD_PATH
 
@@ -45,6 +51,40 @@ def test_v3_eval_suite_checkpoint_and_labels():
         for run in inference_run_names(V3_ARCH):
             if f"-{variant}-" in run:
                 assert labels <= run_train_labels(run)
+
+
+def test_v3_remaining_families_use_training_labels():
+    runs = inference_run_names(V3_ARCH)
+    families = [family for family in FAMILIES if family != "eval"]
+    configs = {
+        name: cfg for family in families for name, cfg in family_configs(family).items()
+    }
+    train_labels = {run: run_train_labels(run) for run in runs}
+    jobs = [
+        job
+        for ckpt in ("bestinf", "lastema")
+        for job in submit.select_jobs(families, runs, ckpt, V3_ARCH)
+    ]
+    assert len({name for _, _, name, _ in jobs}) == 504
+    assert Counter(family for family, _, _, _ in jobs) == {
+        "cm4xshield": 36,
+        "cm4-1pct": 36,
+        "sst": 216,
+        "paper-som": 72,
+        "paper-era5": 144,
+    }
+    for family, run, _, filename in jobs:
+        config = configs[filename]
+        labels = (
+            {
+                label
+                for entry in config["inferences"]
+                for label in entry["config"]["loader"]["dataset"]["labels"]
+            }
+            if family in ("cm4xshield", "cm4-1pct")
+            else set(config["labels"])
+        )
+        assert labels and labels <= train_labels[run]
 
 
 def test_v3_resolve_runs_uses_succeeded_recorded_experiment(monkeypatch):

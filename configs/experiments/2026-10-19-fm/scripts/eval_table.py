@@ -2,14 +2,15 @@
 
 The expected jobs are those submit_inference_jobs.py submits for every
 inference run of the architecture (_inference_common.inference_run_names),
-finished or not, with every family (--family, default all; select_jobs;
+finished or not, with every supported family (--family; select_jobs;
 Beaker names from beaker_job_name), at each checkpoint the architecture has
 for the family (--ckpt, default all of them:
 _inference_common.arch_checkpoints, i.e. bestinf and lastema and, for the eval
 family of the ft archs, their per-epoch ones: ema1 .. ema7 for sfno-v2-ft and
 swin-v2.2-v2-ft, ema2, ema4, ema8, ema16 for their -e32 long fine-tunes and
 ema8, ema16, ema32, ema64 for the -e128 ones), one row per family and
-checkpoint. Their Beaker
+checkpoint. For sfno-v3, all families track the 18 production runs at bestinf
+and the epoch-120 lastema checkpoint. Their Beaker
 state comes from one workspace listing (submit_inference_jobs.listing_text);
 no logs are read. As in fm_table.py, the newest experiment of each job name
 counts, and preemption retries resolve to that experiment's latest status
@@ -21,7 +22,7 @@ counts experiments that exist and failed, were canceled, or have no job.
 Each of those is listed below the table with its experiment id.
 
 Usage:
-    python eval_table.py [--arch {sfno,swin-v2.2,sfno-v2,swin-v2.2-v2,
+    python eval_table.py [--arch {sfno,swin-v2.2,sfno-v2,swin-v2.2-v2,sfno-v3,
                                   sfno-v2-ext80,swin-v2.2-v2-ext80,
                                   sfno-v2-ft,swin-v2.2-v2-ft,
                                   sfno-v2-ft-e32,sfno-v2-ft-e128,
@@ -128,9 +129,8 @@ def main() -> None:
     )
     args = parser.parse_args()
     ckpts = arch_checkpoints(args.arch) if args.ckpt is None else args.ckpt
-
     jobs = expected_jobs(args.arch, ckpts, args.family)
-    by_name = newest_by_name(listing_text(args.arch))
+    by_name = newest_by_name(listing_text(args.arch), {name for _, _, name in jobs})
     status = {
         name: (
             (by_name[name].status, _queued(by_name[name]))
