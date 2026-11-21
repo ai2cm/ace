@@ -1,0 +1,599 @@
+# Learning-rate schedules of the CM4 X6 run (ace 898b63372, configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_randco2ft_x6/train-config.yaml),
+# over its 11680 batches. make_config.py rescales the segment lengths to this experiment's run length.
+total_batches: 11680
+atmosphere:
+  lr: 7.0e-07
+  scheduler:
+    schedulers:
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 1.0e-06
+        end_factor: 0.02003365517012773
+        total_iters: 264
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.02003365517012773
+        end_factor: 0.08203726029068154
+        total_iters: 276
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.08203726029068154
+        end_factor: 0.21532092692754462
+        total_iters: 357
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.21532092692754462
+        end_factor: 0.9128739167633224
+        total_iters: 1466
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.9128739167633224
+        end_factor: 0.9694351323779314
+        total_iters: 741
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.9694351323779314
+        end_factor: 0.542857011399225
+        total_iters: 1031
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.542857011399225
+        end_factor: 0.17631941591891384
+        total_iters: 779
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.17631941591891384
+        end_factor: 0.07075730431160672
+        total_iters: 339
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.07075730431160672
+        end_factor: 0.015730791112205423
+        total_iters: 307
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.015730791112205423
+        end_factor: 0.00020888344876655884
+        total_iters: 313
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.00020888344876655884
+        end_factor: 0.025427940661114985
+        total_iters: 345
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.025427940661114985
+        end_factor: 0.10467675118658443
+        total_iters: 443
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.10467675118658443
+        end_factor: 0.3237596402686483
+        total_iters: 1052
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.3237596402686483
+        end_factor: 0.3579427413011852
+        total_iters: 750
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.3579427413011852
+        end_factor: 0.23951200526766542
+        total_iters: 890
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.23951200526766542
+        end_factor: 0.07601178998367263
+        total_iters: 918
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.07601178998367263
+        end_factor: 0.02047690642215727
+        total_iters: 535
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.02047690642215727
+        end_factor: 0.000437381734453542
+        total_iters: 637
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.000437381734453542
+        end_factor: 1.0e-06
+        total_iters: 236
+    milestones:
+    - 264
+    - 540
+    - 897
+    - 2363
+    - 3104
+    - 4135
+    - 4914
+    - 5253
+    - 5560
+    - 5873
+    - 6218
+    - 6661
+    - 7713
+    - 8463
+    - 9353
+    - 10271
+    - 10806
+    - 11443
+ocean:
+  lr: 7.0e-05
+  scheduler:
+    schedulers:
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.01
+        end_factor: 0.9897602514092761
+        total_iters: 1521
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.9897602514092761
+        end_factor: 0.6820441014199534
+        total_iters: 459
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.6820441014199534
+        end_factor: 0.1790424852854223
+        total_iters: 511
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.1790424852854223
+        end_factor: 0.07067222364606765
+        total_iters: 164
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.07067222364606765
+        end_factor: 0.02907602316945602
+        total_iters: 97
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.02907602316945602
+        end_factor: 0.012303596494642062
+        total_iters: 61
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.012303596494642062
+        end_factor: 0.005339378479869106
+        total_iters: 40
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.005339378479869106
+        end_factor: 0.0025340418264607066
+        total_iters: 26
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0025340418264607066
+        end_factor: 0.0013849972029956986
+        total_iters: 18
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0013849972029956986
+        end_factor: 0.0009383890758142098
+        total_iters: 14
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0009383890758142098
+        end_factor: 0.0008814187499345448
+        total_iters: 14
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0008814187499345448
+        end_factor: 0.0012122740964153297
+        total_iters: 14
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0012122740964153297
+        end_factor: 0.002204003695171276
+        total_iters: 18
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.002204003695171276
+        end_factor: 0.004628599878353528
+        total_iters: 25
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.004628599878353528
+        end_factor: 0.010608265161304151
+        total_iters: 38
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.010608265161304151
+        end_factor: 0.02550716234442875
+        total_iters: 60
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.02550716234442875
+        end_factor: 0.06323787831434073
+        total_iters: 98
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.06323787831434073
+        end_factor: 0.16916502355623766
+        total_iters: 181
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.16916502355623766
+        end_factor: 0.6478809568546089
+        total_iters: 672
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.6478809568546089
+        end_factor: 0.7040624900223984
+        total_iters: 416
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.7040624900223984
+        end_factor: 0.46456063932280744
+        total_iters: 470
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.46456063932280744
+        end_factor: 0.12932207776326124
+        total_iters: 481
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.12932207776326124
+        end_factor: 0.051414373738215786
+        total_iters: 167
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.051414373738215786
+        end_factor: 0.02118642813622809
+        total_iters: 100
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.02118642813622809
+        end_factor: 0.008989455905160773
+        total_iters: 63
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.008989455905160773
+        end_factor: 0.003943347350768744
+        total_iters: 41
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.003943347350768744
+        end_factor: 0.0018636933693011288
+        total_iters: 27
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0018636933693011288
+        end_factor: 0.0009885345561990889
+        total_iters: 19
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0009885345561990889
+        end_factor: 0.0006145586037565125
+        total_iters: 17
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0006145586037565125
+        end_factor: 0.0006239875357592266
+        total_iters: 17
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0006239875357592266
+        end_factor: 0.0010134718659563485
+        total_iters: 17
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0010134718659563485
+        end_factor: 0.0019530072238295095
+        total_iters: 20
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0019530072238295095
+        end_factor: 0.004322640466618216
+        total_iters: 30
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.004322640466618216
+        end_factor: 0.010134008681656016
+        total_iters: 46
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.010134008681656016
+        end_factor: 0.02472359633792582
+        total_iters: 74
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.02472359633792582
+        end_factor: 0.06344691011680947
+        total_iters: 128
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.06344691011680947
+        end_factor: 0.3941770573790011
+        total_iters: 763
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.3941770573790011
+        end_factor: 0.42414420051199564
+        total_iters: 411
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.42414420051199564
+        end_factor: 0.272717038034092
+        total_iters: 479
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.272717038034092
+        end_factor: 0.0807031103391785
+        total_iters: 465
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0807031103391785
+        end_factor: 0.03241125802737385
+        total_iters: 176
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.03241125802737385
+        end_factor: 0.01351150546004517
+        total_iters: 107
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.01351150546004517
+        end_factor: 0.005736273990436926
+        total_iters: 69
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.005736273990436926
+        end_factor: 0.0025158492216118956
+        total_iters: 45
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0025158492216118956
+        end_factor: 0.0011641900909747634
+        total_iters: 30
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0011641900909747634
+        end_factor: 0.0005313717551788611
+        total_iters: 24
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0005313717551788611
+        end_factor: 0.00028898441390383666
+        total_iters: 24
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.00028898441390383666
+        end_factor: 0.0004282905414752207
+        total_iters: 24
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0004282905414752207
+        end_factor: 0.0009687509080576476
+        total_iters: 25
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0009687509080576476
+        end_factor: 0.002132822603584683
+        total_iters: 30
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.002132822603584683
+        end_factor: 0.005033763658928253
+        total_iters: 47
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.005033763658928253
+        end_factor: 0.012502889288586254
+        total_iters: 78
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.012502889288586254
+        end_factor: 0.033707900042994225
+        total_iters: 146
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.033707900042994225
+        end_factor: 0.1387502291200367
+        total_iters: 589
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.1387502291200367
+        end_factor: 0.1534290813279864
+        total_iters: 375
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.1534290813279864
+        end_factor: 0.10273974439461007
+        total_iters: 445
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.10273974439461007
+        end_factor: 0.03267300133542346
+        total_iters: 459
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.03267300133542346
+        end_factor: 0.014062923641776982
+        total_iters: 189
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.014062923641776982
+        end_factor: 0.006318513340348771
+        total_iters: 127
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.006318513340348771
+        end_factor: 0.0028938067597748425
+        total_iters: 92
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0028938067597748425
+        end_factor: 0.0013367004530212866
+        total_iters: 69
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0013367004530212866
+        end_factor: 0.0005960440782789146
+        total_iters: 55
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.0005960440782789146
+        end_factor: 0.000152461661410415
+        total_iters: 65
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 0.000152461661410415
+        end_factor: 1.0e-06
+        total_iters: 100
+    - type: LinearLR
+      step_each_iteration: true
+      kwargs:
+        start_factor: 1.0e-06
+        end_factor: 1.0e-06
+        total_iters: 7
+    milestones:
+    - 1521
+    - 1980
+    - 2491
+    - 2655
+    - 2752
+    - 2813
+    - 2853
+    - 2879
+    - 2897
+    - 2911
+    - 2925
+    - 2939
+    - 2957
+    - 2982
+    - 3020
+    - 3080
+    - 3178
+    - 3359
+    - 4031
+    - 4447
+    - 4917
+    - 5398
+    - 5565
+    - 5665
+    - 5728
+    - 5769
+    - 5796
+    - 5815
+    - 5832
+    - 5849
+    - 5866
+    - 5886
+    - 5916
+    - 5962
+    - 6036
+    - 6164
+    - 6927
+    - 7338
+    - 7817
+    - 8282
+    - 8458
+    - 8565
+    - 8634
+    - 8679
+    - 8709
+    - 8733
+    - 8757
+    - 8781
+    - 8806
+    - 8836
+    - 8883
+    - 8961
+    - 9107
+    - 9696
+    - 10071
+    - 10516
+    - 10975
+    - 11164
+    - 11291
+    - 11383
+    - 11452
+    - 11507
+    - 11572
+    - 11672

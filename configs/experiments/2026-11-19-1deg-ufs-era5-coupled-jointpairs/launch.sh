@@ -2,6 +2,7 @@
 # 1deg UFS + ERA5 coupled fine-tune with the one-stage joint recipe (config from make_config.py). 8 GPUs, one sample per GPU.
 #   ./launch.sh
 #   VARIANT=randco2 ./launch.sh         # uncoupled atmosphere batches = CM4 random-CO2 runs
+#   VARIANT=x6-randco2 ./launch.sh      # the same with the CM4 X6 learning-rate schedules (VARIANT=x6: ERA5 uncoupled batches)
 #   EXISTING_RESULTS_DS=<results dataset> ./launch.sh   # continue a previous submission (the -resume config)
 set -euo pipefail
 ATMOS_DS="${ATMOS_DS:-01M7N75EC6EW8V3P6QAP0YB9GS}"                 # ACE2.5-CM4-ERA5-6HR, epoch 16 of wandb ace-samudra-coupled-cm4/9l60thd4
