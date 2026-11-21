@@ -79,9 +79,10 @@ from fme.core.generics.lr_tuning import (
     run_lr_tuning_trial,
 )
 from fme.core.generics.metrics_aggregator import MetricsAggregator
+from fme.core.generics.optimization import OptimizationABC, OptimizationModules
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.generics.validation import run_validation
-from fme.core.optimization import NullOptimization, Optimization
+from fme.core.optimization import NullOptimization
 from fme.core.timing import GlobalTimer
 from fme.core.training_history import TrainingJob
 from fme.core.typing_ import Slice
@@ -221,7 +222,7 @@ class Trainer:
         self,
         train_data: GriddedDataABC[BD],
         stepper: TrainStepperABC[PS, BD, FD, SD, TO],
-        build_optimization: Callable[[torch.nn.ModuleList], Optimization],
+        build_optimization: Callable[[OptimizationModules], OptimizationABC],
         build_ema: Callable[[torch.nn.ModuleList], EMATracker],
         params: TrainerParams,
         aggregator_builder: AggregatorBuilderABC[TO],
@@ -237,7 +238,7 @@ class Trainer:
             train_data: Training data loader.
             stepper: Training stepper.
             build_optimization: Factory that builds the Optimization from the
-                stepper's modules.
+                stepper's ``optimization_modules``.
             build_ema: Factory that builds the EMATracker from the stepper's
                 modules.
             params: Plain leaf training parameters read by the Trainer.
@@ -294,7 +295,7 @@ class Trainer:
 
         self._build_optimization = build_optimization
         self._build_ema = build_ema
-        self.optimization = build_optimization(stepper.modules)
+        self.optimization = build_optimization(stepper.optimization_modules)
         self._end_of_batch_callback = end_of_batch_callback
         self._end_of_epoch_callback = end_of_epoch_callback
         self._no_optimization = NullOptimization()
@@ -477,6 +478,7 @@ class Trainer:
             train_loss = train_summary.loss
             # need to get the learning rate before stepping the scheduler
             lr = self.optimization.learning_rate
+            component_lrs = _component_lr_logs(self.optimization)
             self.optimization.step_scheduler(valid_loss=valid_loss, is_iteration=False)
 
             time_elapsed = time.time() - start_time
@@ -505,6 +507,7 @@ class Trainer:
                 **valid_logs,
                 **inference_logs,
                 **additional_logs,
+                **component_lrs,
                 **{
                     "lr": lr,
                     "epoch": self._epochs_trained,
@@ -606,6 +609,7 @@ class Trainer:
                 samples_per_second = n_samples_seen_since_logging / duration
                 metrics["training_samples_per_second_on_rank_0"] = samples_per_second
                 metrics["lr"] = self.optimization.learning_rate
+                metrics.update(_component_lr_logs(self.optimization))
                 wandb.log(metrics, step=self.num_batches_seen)
                 metrics_to_log = {k: metrics[k] for k in names_to_log if k in metrics}
                 logging.info(f"Step {self.num_batches_seen}: {metrics_to_log}")
@@ -1011,3 +1015,7 @@ def epoch_checkpoint_enabled(
     if save_epochs is None:
         return False
     return epoch in range(max_epochs + 1)[save_epochs.slice]
+
+
+def _component_lr_logs(optimization: OptimizationABC) -> dict[str, float]:
+    return {f"lr/{key}": lr for key, lr in optimization.learning_rates.items()}
