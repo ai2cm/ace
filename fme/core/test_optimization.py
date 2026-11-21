@@ -21,6 +21,7 @@ from fme.core.optimization import (
     validate_optimization_config_dict,
 )
 from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
+from fme.core.spectral_filter_parameter import SpectralFilterParameter
 
 
 @pytest.mark.parametrize("scheduler", [None, "CosineAnnealingLR"])
@@ -1141,6 +1142,53 @@ def test_optimization_dict_load_state_rejects_other_components():
     state["components"]["c"] = state["components"].pop("b")
     with pytest.raises(ValueError, match="differ from configured components"):
         dict_form.load_state(state)
+
+
+@pytest.mark.parametrize("optimizer_type", ["Adam", "AdamW"])
+def test_optimization_dict_resume_keeps_fresh_foreach(optimizer_type):
+    """Per-component counterpart of Optimization.load_state keeping the
+    freshly-built foreach over a checkpoint's (e.g. one saved before spectral
+    weights were tagged)."""
+    modules = {
+        key: nn.ModuleList(
+            [
+                nn.ParameterList(
+                    [
+                        SpectralFilterParameter(
+                            torch.randn(1, 4, 3, 3, 2, device=fme.get_device()),
+                            in_dim=3,
+                            out_dim=2,
+                        )
+                    ]
+                )
+            ]
+        )
+        for key in ("atmosphere", "ocean")
+    }
+
+    def build(kwargs):
+        configs = {
+            key: OptimizationConfig(optimizer_type=optimizer_type, kwargs=kwargs)
+            for key in modules
+        }
+        return build_optimization_dict(configs, modules, max_epochs=1)
+
+    saved = build({"foreach": None})
+    saved.accumulate_loss(
+        sum((p**2).sum() for m in modules.values() for p in m.parameters())
+    )
+    saved.step_weights()
+    state = copy.deepcopy(saved.get_state())
+    for key in modules:
+        group = state["components"][key]["optimizer_state_dict"]["param_groups"][0]
+        assert group["foreach"] is None
+
+    resumed = build({})
+    expected = fme.get_device().type == "cuda"
+    resumed.load_state(state)
+    for key, entry in resumed._entries.items():
+        assert entry.optimizer.param_groups[0]["foreach"] is expected
+        assert len(entry.optimizer.state) > 0
 
 
 def _cpu_grad_scaler() -> torch.amp.GradScaler:
