@@ -2,3 +2,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 # X9 01M7YKMZDJYENG0BPCAAK4AEH6: canceled by the maintainer 2026-11-21 (launched before the ace#1631 foreach-on-resume fix); relaunched as tag retry1 (PRD U67 r2).
 1deg-hybridsstdiag-randco2ft-x9-pclr-replay-jointpairs-tb6xf0ju||01M7YKMZDJYENG0BPCAAK4AEH6|canceled|best_inference_ckpt|normal|--min-runtime 8h
+
+1deg-hybridsstdiag-randco2ft-x9-pclr-replay-jointpairs-tb6xf0ju|retry1|01M7YM6348HDS196W1G159SW86|training|best_inference_ckpt|normal|--min-runtime 8h
