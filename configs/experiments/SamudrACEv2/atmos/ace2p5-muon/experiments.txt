@@ -10,3 +10,5 @@ SamudrACEv2-ace2p5-muon|rs2|01M7VJ5WDN3C0QXGG322JERVPJ|training|best_inference_c
 SamudrACEv2-ace2p5-muon-ft|rs0|01M7ZY2VNAD633DDN6CMFFT46D|training|best_inference_ckpt|normal|--min-runtime 8h
 
 SamudrACEv2-ace2p5-muon-ft|rs1|01M7ZY3H5SGXBRXQYZYDVE1JQJ|training|best_inference_ckpt|normal|--min-runtime 8h
+
+SamudrACEv2-ace2p5-muon-ft|rs2|01M7ZY44ZPBJRR35PSVBFBJCVT|training|best_inference_ckpt|normal|--min-runtime 8h
