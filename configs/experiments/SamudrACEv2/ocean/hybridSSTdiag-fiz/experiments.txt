@@ -4,8 +4,8 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 SamudrACEv2-hybridSSTdiag-fiz|rs0|01M7TQVV2XEHKDBC46QVHYN0PF|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h
 SamudrACEv2-hybridSSTdiag-fiz|rs0|01M7TQVV2XEHKDBC46QVHYN0PF|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h
 
-SamudrACEv2-hybridSSTdiag-fiz|rs1|01M7VMAN6R2GD6ES4VSY68ZSY8|run_piC-ic0151-200yr|best_inference_ckpt|normal|--min-runtime 2h
-SamudrACEv2-hybridSSTdiag-fiz|rs1|01M7VMAN6R2GD6ES4VSY68ZSY8|run_1pct-ic0001-130yrbest_inference_ckpt|normal|--min-runtime 1h
+SamudrACEv2-hybridSSTdiag-fiz|rs1|01M7VMAN6R2GD6ES4VSY68ZSY8|running_piC-ic0151-200yr|best_inference_ckpt|normal|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-fiz|rs1|01M7VMAN6R2GD6ES4VSY68ZSY8|run_1pct-ic0001-130yr|best_inference_ckpt|normal|--min-runtime 1h
 
-SamudrACEv2-hybridSSTdiag-fiz|rs2|01M7VMB0K4TCMYPR04KDA03H27|run_piC-ic0151-200yr|best_inference_ckpt|normal|--min-runtime 2h
-SamudrACEv2-hybridSSTdiag-fiz|rs2|01M7VMB0K4TCMYPR04KDA03H27|run_1pct-ic0001-130yrbest_inference_ckpt|normal|--min-runtime 1h
+SamudrACEv2-hybridSSTdiag-fiz|rs2|01M7VMB0K4TCMYPR04KDA03H27|running_piC-ic0151-200yr|best_inference_ckpt|normal|--min-runtime 2h
+SamudrACEv2-hybridSSTdiag-fiz|rs2|01M7VMB0K4TCMYPR04KDA03H27|run_1pct-ic0001-130yr|best_inference_ckpt|normal|--min-runtime 1h
