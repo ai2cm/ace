@@ -1,0 +1,8 @@
+group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime|results_dataset_ocean|results_dataset_atmos
+
+# X9 = X6 (coupled_randco2ft_x6 row) with ocean init bcugx12o (SamudrACEv2-hybridSSTdiag-fiz-rs0), ocean Muon, sst_name SST_degK, 2026-11-13 coupled ocean + atmosphere stores, random-CO2 -sea_ice stores (U63, D23).
+# results_dataset_ocean = bcugx12o's results dataset (beaker exp 01M7TQVV2XEHKDBC46QVHYN0PF); results_dataset_atmos = X6's (X1c0's pinned).
+# Stats: --coupled_stats 01M7S9ERYK0YD7YG5SXKWKAESD (andrep/2026-11-13-om4-1pctco2-1deg-coupled-stats; maintainer 2026-11-21).
+# Row set to 'train' on the maintainer's launch go (2026-11-21, U67).
+
+1deg-hybridsstdiag-randco2ft-x9-pclr-replay-jointpairs-tb6xf0ju||ace-samudra-cm4|bcugx12o|best_inference_ckpt|ace2-cm4-atmos-noLSM|tb6xf0ju|best_inference_ckpt|train|urgent|titan|8||3|ai2/ace|seed=0|8h|01M7TQVV38FRTK4JMMNDCKEFV6|01M5JJTWWGYYSACGH3VY6GN6RF
