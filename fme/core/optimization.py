@@ -278,6 +278,21 @@ def _step_scheduler(
             scheduler.step()
 
 
+def _load_optimizer_state(
+    optimizer: torch.optim.Optimizer, optimizer_state_dict: dict[str, Any]
+) -> None:
+    """Load a resumed optimizer's state, keeping each group's fresh foreach."""
+    check_muon_state_dict_compatible(optimizer, optimizer_state_dict)
+    # load_state_dict restores each group's saved hyperparameters, but
+    # foreach is an implementation choice of this run, not training state:
+    # keep the freshly-built value (see _default_foreach).
+    fresh_foreach = [g.get("foreach") for g in optimizer.param_groups]
+    optimizer.load_state_dict(optimizer_state_dict)
+    for group, foreach in zip(optimizer.param_groups, fresh_foreach):
+        if "foreach" in group:
+            group["foreach"] = foreach
+
+
 def _load_optimizer_state_for_finetuning(
     optimizer: torch.optim.Optimizer, optimizer_state_dict: dict[str, Any]
 ) -> None:
@@ -489,15 +504,7 @@ class Optimization(OptimizationABC):
                 f"({sorted(state['components'])}); it cannot load into a single "
                 "optimizer. Use the per-component optimization config."
             )
-        check_muon_state_dict_compatible(self.optimizer, state["optimizer_state_dict"])
-        # load_state_dict restores each group's saved hyperparameters, but
-        # foreach is an implementation choice of this run, not training state:
-        # keep the freshly-built value (see _default_foreach).
-        fresh_foreach = [g.get("foreach") for g in self.optimizer.param_groups]
-        self.optimizer.load_state_dict(state["optimizer_state_dict"])
-        for group, foreach in zip(self.optimizer.param_groups, fresh_foreach):
-            if "foreach" in group:
-                group["foreach"] = foreach
+        _load_optimizer_state(self.optimizer, state["optimizer_state_dict"])
         self.scheduler.load_state_dict(state["scheduler_state_dict"])
         if self.gscaler is not None:
             self.gscaler.load_state_dict(state["gscaler_state_dict"])
@@ -704,10 +711,9 @@ class OptimizationDict(OptimizationABC):
             )
         for key, entry in self._entries.items():
             component_state = state["components"][key]
-            check_muon_state_dict_compatible(
+            _load_optimizer_state(
                 entry.optimizer, component_state["optimizer_state_dict"]
             )
-            entry.optimizer.load_state_dict(component_state["optimizer_state_dict"])
             entry.scheduler.load_state_dict(component_state["scheduler_state_dict"])
         if self.gscaler is not None:
             self.gscaler.load_state_dict(state["gscaler_state_dict"])
