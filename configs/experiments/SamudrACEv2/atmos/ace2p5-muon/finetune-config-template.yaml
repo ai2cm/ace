@@ -4,7 +4,10 @@ experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
 evaluate_before_training: true
-max_epochs: 1 # Just 1 fine-tuning epoch.
+max_epochs: 2
+ema_checkpoint_save_epochs:
+  start: 1
+  step: 1
 ema:
   decay: 0.999
 inference:
