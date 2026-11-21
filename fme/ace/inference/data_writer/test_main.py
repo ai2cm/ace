@@ -33,6 +33,7 @@ _WRITER_ENABLING_FIELDS = {
 }
 
 
+@pytest.mark.filterwarnings("ignore:.*enabled in DataWriterConfig:FutureWarning")
 @pytest.mark.parametrize("field", sorted(_WRITER_ENABLING_FIELDS))
 def test_has_subwriters_enabled_covers_field(field: str):
     """Turning on one writer-enabling field makes has_subwriters_enabled True."""
@@ -70,8 +71,8 @@ def test_has_subwriters_enabled_field_set_is_current():
     )
 
 
-@pytest.mark.parametrize("build_method", ["build_paired", "build"])
-def test_spatial_parallelism_raises_with_gathered_writers(build_method: str):
+@pytest.mark.filterwarnings("ignore:.*enabled in DataWriterConfig:FutureWarning")
+def test_spatial_parallelism_raises_with_gathered_writers():
     """Gathered writers must raise under spatial parallelism."""
     from unittest.mock import patch
 
@@ -91,11 +92,10 @@ def test_spatial_parallelism_raises_with_gathered_writers(build_method: str):
                     coords={"lat": np.arange(4), "lon": np.arange(5)},
                     dataset_metadata=DatasetMetadata(),
                 )
-                getattr(config, build_method)(**build_args)
+                config.build_paired(**build_args)
 
 
-@pytest.mark.parametrize("build_method", ["build_paired", "build"])
-def test_spatial_parallelism_allows_zarr_only(build_method: str):
+def test_spatial_parallelism_allows_zarr_only():
     """Zarr-only config (no gathered writers) should not raise under
     spatial parallelism."""
     from unittest.mock import patch
@@ -120,7 +120,7 @@ def test_spatial_parallelism_allows_zarr_only(build_method: str):
                 coords={"lat": np.arange(4), "lon": np.arange(5)},
                 dataset_metadata=DatasetMetadata(),
             )
-            getattr(config, build_method)(**build_args)
+            config.build_paired(**build_args)
 
 
 def test_write_single_timestep():
@@ -263,18 +263,15 @@ def _get_step_diagnostics_setup(n_samples=2, n_times=4, n_lat=4, n_lon=5):
     return config, build_kwargs, batch, delta
 
 
-@pytest.mark.parametrize("builder", ["build_paired", "build"])
 @pytest.mark.parametrize("save_names", [None, ["a"]])
 @pytest.mark.parametrize("coarsen_factor", [1, 2])
-def test_step_diagnostics_writer_writes_delta_series(
-    builder, save_names, coarsen_factor
-):
+def test_step_diagnostics_writer_writes_delta_series(save_names, coarsen_factor):
     config, build_kwargs, batch, delta = _get_step_diagnostics_setup()
     config.names = save_names
     if coarsen_factor > 1:
         config.time_coarsen = TimeCoarsenConfig(coarsen_factor=coarsen_factor)
     with tempfile.TemporaryDirectory() as tmpdir:
-        writer = getattr(config, builder)(experiment_dir=tmpdir, **build_kwargs)
+        writer = config.build_paired(experiment_dir=tmpdir, **build_kwargs)
         writer.append_batch(batch)
         writer.finalize()
         filename = os.path.join(tmpdir, "step_diagnostics", "correction_deltas.nc")
@@ -398,6 +395,7 @@ def test_gather_time_single_rank():
     xr.testing.assert_equal(result, time)
 
 
+@pytest.mark.filterwarnings("ignore:.*enabled in DataWriterConfig:FutureWarning")
 def test_netcdf_build_paired_under_multi_gpu_builds_writers_on_root():
     """build_paired with netCDF-only config succeeds and creates subwriters
     under simulated single-rank (root). This verifies the zarr guard is not

@@ -26,6 +26,7 @@ from fme.ace.models.makani_fcn3.models.common.factorizations import get_contract
 
 # import convenience functions for factorized tensors
 from fme.ace.models.makani_fcn3.utils import comm
+from fme.core.spectral_filter_parameter import SpectralFilterParameter
 
 
 class SpectralConv(nn.Module):
@@ -108,7 +109,12 @@ class SpectralConv(nn.Module):
         # seemingly the first weight is not really complex, so we need to account for that
         scale[0] *= math.sqrt(2.0)
         init = scale * torch.randn(*weight_shape, dtype=torch.complex64)
-        self.weight = nn.Parameter(init)
+        if self.separable:
+            # a per-channel scale per mode, not a channel matrix
+            self.weight = nn.Parameter(init)
+        else:
+            # (groups, C_in, C_out, modes...), contracted as "bgixy,gioxy->bgoxy"
+            self.weight = SpectralFilterParameter(init, in_dim=1, out_dim=2)
 
         if self.operator_type == "dhconv":
             self.weight.is_shared_mp = ["matmul", "w"]

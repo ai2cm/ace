@@ -1232,8 +1232,7 @@ def get_stepper_config(
     # CoupledStepper requires that both component datasets include prognostic
     # surface temperature variables and that the atmosphere data includes an
     # ocean fraction forcing variable
-    assert sst_name_in_ocean_data in ocean_in_names
-    assert sst_name_in_ocean_data in ocean_out_names
+    assert sst_name_in_ocean_data in ocean_out_names  # may be output-only (diagnostic)
     assert sfc_temp_name_in_atmosphere_data in atmosphere_in_names
     assert sfc_temp_name_in_atmosphere_data in atmosphere_out_names
     assert ocean_fraction_name in atmosphere_in_names
@@ -2513,6 +2512,103 @@ def test_train_on_batch_evaluate_all_steps_with_stochastic_n_steps(
         assert {len(keys) for keys in atmos_key_sets} == {1, 4}
         for keys in atmos_key_sets:
             assert keys == {f"loss/atmosphere_step_{step}" for step in range(len(keys))}
+
+
+def test_output_only_sst_is_carried_in_the_ocean_state():
+    """sst as an ocean diagnostic (output-only, like the hybrid ocean with SST
+    diagnosed from the top layer) still forces the atmosphere: the coupled
+    state carries it at the initial condition, through training, and in the
+    state returned after a prediction window."""
+    train_stepper, coupled_data, config, dataset_info = get_train_stepper_and_batch(
+        ocean_in_names=["thetao_0", "mask_0"],
+        ocean_out_names=["thetao_0", "sst"],
+        atmosphere_in_names=["surface_temperature", "ocean_fraction"],
+        atmosphere_out_names=["surface_temperature"],
+        n_forward_times_ocean=2,
+        n_forward_times_atmosphere=4,
+        n_samples=2,
+    )
+    assert "sst" not in config.ocean.stepper.prognostic_names
+    assert config.ocean_state_names == ["sst", "thetao_0"]
+    output = train_stepper.train_on_batch(
+        data=coupled_data.data, optimization=NullOptimization()
+    )
+    assert "sst" in output.ocean.gen_data
+    coupler = config.get_stepper(dataset_info)
+    ic = coupled_data.data.get_start(config.get_prognostic_state_data_requirements())
+    assert "sst" in ic.ocean_data.as_batch_data().data
+    _, state = coupler.predict_paired(initial_condition=ic, forcing=coupled_data.data)
+    assert set(state.ocean_data.as_batch_data().data) == {"sst", "thetao_0"}
+
+
+def test_hfds_correction_reads_generated_sst_after_initial_condition():
+    """After the initial condition, the surface energy flux correction reads
+    the ocean's generated (output-only) sst, never the reference sst.
+    """
+    fluxes = [
+        "DLWRFsfc",
+        "ULWRFsfc",
+        "DSWRFsfc",
+        "USWRFsfc",
+        "LHTFLsfc",
+        "SHTFLsfc",
+        "PRATEsfc",
+        "total_frozen_precipitation_rate",
+    ]
+    ocean_in = ["thetao_0", "mask_0", "land_fraction", "sea_ice_fraction", *fluxes]
+    ocean_out = ["thetao_0", "sst", "hfds"]
+    atmos_in = ["surface_temperature", "ocean_fraction"]
+    atmos_out = ["surface_temperature", *fluxes]
+    config = get_stepper_config(
+        ocean_in_names=ocean_in,
+        ocean_out_names=ocean_out,
+        atmosphere_in_names=atmos_in,
+        atmosphere_out_names=atmos_out,
+        ocean_builder=ModuleSelector(
+            type="prebuilt",
+            config={"module": torch.nn.Conv2d(len(ocean_in), len(ocean_out), 1)},
+        ),
+        atmosphere_builder=ModuleSelector(
+            type="prebuilt",
+            config={"module": torch.nn.Conv2d(len(atmos_in), len(atmos_out), 1)},
+        ),
+    )
+    step = config.ocean.stepper.step
+    step_config = copy.deepcopy(step.config)
+    step_config["corrector"]["config"] = {
+        "surface_energy_flux_correction": {"method": "prescribed"}
+    }
+    config = dataclasses.replace(
+        config,
+        ocean=dataclasses.replace(
+            config.ocean,
+            stepper=StepperConfig(
+                step=StepSelector(type=step.type, config=step_config)
+            ),
+        ),
+    )
+    assert "sst" in config.ocean_state_names
+    coupled_data = get_coupled_data(
+        list(set(ocean_in + ocean_out) - set(atmos_out)),
+        list(set(atmos_in + atmos_out) - set(ocean_out)),
+        n_forward_times_ocean=3,
+        n_forward_times_atmosphere=6,
+        n_samples=2,
+    )
+    dataset_info = CoupledDatasetInfoBuilder(
+        vcoord=coupled_data.vertical_coord
+    ).dataset_info
+    coupler = config.get_stepper(dataset_info)
+    data = coupled_data.data
+    ic = data.get_start(config.get_prognostic_state_data_requirements())
+    reference, _ = coupler.predict_paired(initial_condition=ic, forcing=data)
+    sst = data.ocean_data.data["sst"]
+    sst[:, 1:] = float("nan")  # the IC (time 0) keeps its reference sst
+    sentinel, _ = coupler.predict_paired(initial_condition=ic, forcing=data)
+    hfds = sentinel.ocean_data.prediction["hfds"]
+    assert hfds.shape[1] == 3
+    assert torch.isfinite(hfds).all()
+    torch.testing.assert_close(hfds, reference.ocean_data.prediction["hfds"])
 
 
 class _SteppedOffsetCorrection:
