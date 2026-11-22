@@ -438,6 +438,12 @@ e3smv3_piControl_100yr_coupled:
 cm4_like_am4_random_co2_ensemble_atmosphere:
 	./compute_dataset.sh --dataset --stats $(if $(filter 4deg,$(RESOLUTION)),--time-coarsen) --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-$(RESOLUTION)-8layer.yaml
 
+# Time-coarsens the nine 1deg 6-hourly random-CO2 members to daily with
+# per-member daily stats. Never --dataset, which would rewrite the 6-hourly members.
+.PHONY: cm4_like_am4_random_co2_ensemble_atmosphere_1deg_daily
+cm4_like_am4_random_co2_ensemble_atmosphere_1deg_daily:
+	./compute_dataset.sh --time-coarsen --stats --config configs/CM4-like-AM4-random-CO2-ensemble-atmosphere-1deg-8layer.yaml
+
 .PHONY: cm4_abrupt_4xCO2_ensemble_atmosphere
 cm4_abrupt_4xCO2_ensemble_atmosphere:
 	./compute_dataset.sh --dataset --stats $(if $(filter 4deg,$(RESOLUTION)),--time-coarsen) --config configs/CM4-abrupt-4xCO2-ensemble-atmosphere-$(RESOLUTION)-8layer.yaml
