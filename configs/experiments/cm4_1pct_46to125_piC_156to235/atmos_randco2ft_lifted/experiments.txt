@@ -4,11 +4,12 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # launch: ./job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/atmos_randco2ft_lifted . --config-dir configs/experiments/cm4_eval/atmos --lift-coupled-atmosphere
 # Random-CO2 sstblend evals of X1/X2/X3/X1c0/X4/X5d/X5r/X6 EMA checkpoints (X4 epoch 1 from the recovered dataset, epochs 2+ from the resumed job;
 # eval-baseline rule: replay store -atmosphere.zarr -> sstblend);
+# X9/X10: non-sstblend (-sea_ice store) random-CO2 configs, matching their training data (D23, U65; PRD U68);
 # rows written by analysis/2026-11-15-2110-coupled-ft-enso-randco2-training/scripts/U10_eval_rows.py.
 # Coupled checkpoints: the job lifts the atmosphere (job_runner/bin/extract_atmosphere_from_coupled_ckpt.py, no --ema).
 # deferred_upload_* rows wait for the results dataset to be committed with their EMA file (rerun the script);
 # running_/ran_/failed_* rows are already launched (queue_evals.py mark prefixes);
-# deferred_<tag> rows (X6) are held for a maintainer go: drop RUNS[...]['hold'] and rerun the script;
+# deferred_<tag> rows (X9, X10) are held until the lead launches: drop RUNS[...]['hold'] and rerun the script;
 # rows with row tag retry1 (X5d) relaunch the row above them, which they supersede (PRD U52; YAML retry_reason).
 1deg-hybridsstdiag-randco2ft-x1-pclr-replayonly-tb6xf0ju||01M7HN1PK8CQZV6ADZ413SN0X6|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M7HN1PKG1QF9GF4K63GW8VDP
 1deg-hybridsstdiag-randco2ft-x1-pclr-replayonly-tb6xf0ju||01M7HN1PK8CQZV6ADZ413SN0X6|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M7HN1PKG1QF9GF4K63GW8VDP
@@ -103,15 +104,39 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 1deg-hybridsstdiag-randco2ft-x5r-pclr-replayonly-tb6xf0ju||01M7PTP6MFEFGFVTPZNMGKFW7Q|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M7PTP6MN6N5Z2M7W8C58J89R
 1deg-hybridsstdiag-randco2ft-x5r-pclr-replayonly-tb6xf0ju||01M7PTP6MFEFGFVTPZNMGKFW7Q|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M7PTP6MN6N5Z2M7W8C58J89R
 1deg-hybridsstdiag-randco2ft-x5r-pclr-replayonly-tb6xf0ju||01M7PTP6MFEFGFVTPZNMGKFW7Q|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M7PTP6MN6N5Z2M7W8C58J89R
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M7RXG2MMXQZF5ZWNR1Z9G29Q
+1deg-hybridsstdiag-randco2ft-x9-pclr-replay-jointpairs-tb6xf0ju|retry1|01M7YM6348HDS196W1G159SW86|run_randco2-1xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M7YM634EY52CTS169GVXSA80
+1deg-hybridsstdiag-randco2ft-x9-pclr-replay-jointpairs-tb6xf0ju|retry1|01M7YM6348HDS196W1G159SW86|run_randco2-2xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M7YM634EY52CTS169GVXSA80
+1deg-hybridsstdiag-randco2ft-x9-pclr-replay-jointpairs-tb6xf0ju|retry1|01M7YM6348HDS196W1G159SW86|run_randco2-4xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M7YM634EY52CTS169GVXSA80
+1deg-hybridsstdiag-randco2ft-x9-pclr-replay-jointpairs-tb6xf0ju|retry1|01M7YM6348HDS196W1G159SW86|run_randco2-1xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M7YM634EY52CTS169GVXSA80
+1deg-hybridsstdiag-randco2ft-x9-pclr-replay-jointpairs-tb6xf0ju|retry1|01M7YM6348HDS196W1G159SW86|run_randco2-2xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M7YM634EY52CTS169GVXSA80
+1deg-hybridsstdiag-randco2ft-x9-pclr-replay-jointpairs-tb6xf0ju|retry1|01M7YM6348HDS196W1G159SW86|run_randco2-4xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M7YM634EY52CTS169GVXSA80
+1deg-hybridsstdiag-randco2ft-x9-pclr-replay-jointpairs-tb6xf0ju|retry1|01M7YM6348HDS196W1G159SW86|run_randco2-1xCO2-ic3|ema_ckpt_0003|high|--min-runtime 8h||01M7YM634EY52CTS169GVXSA80
+1deg-hybridsstdiag-randco2ft-x9-pclr-replay-jointpairs-tb6xf0ju|retry1|01M7YM6348HDS196W1G159SW86|run_randco2-2xCO2-ic3|ema_ckpt_0003|high|--min-runtime 8h||01M7YM634EY52CTS169GVXSA80
+1deg-hybridsstdiag-randco2ft-x9-pclr-replay-jointpairs-tb6xf0ju|retry1|01M7YM6348HDS196W1G159SW86|run_randco2-4xCO2-ic3|ema_ckpt_0003|high|--min-runtime 8h||01M7YM634EY52CTS169GVXSA80
+1deg-hybridsstdiag-randco2ft-x9-pclr-replay-jointpairs-tb6xf0ju|retry1|01M7YM6348HDS196W1G159SW86|run_randco2-1xCO2-ic3|ema_ckpt_0004|high|--min-runtime 8h||01M7YM634EY52CTS169GVXSA80
+1deg-hybridsstdiag-randco2ft-x9-pclr-replay-jointpairs-tb6xf0ju|retry1|01M7YM6348HDS196W1G159SW86|run_randco2-2xCO2-ic3|ema_ckpt_0004|high|--min-runtime 8h||01M7YM634EY52CTS169GVXSA80
+1deg-hybridsstdiag-randco2ft-x9-pclr-replay-jointpairs-tb6xf0ju|retry1|01M7YM6348HDS196W1G159SW86|run_randco2-4xCO2-ic3|ema_ckpt_0004|high|--min-runtime 8h||01M7YM634EY52CTS169GVXSA80
+1deg-hybridsstdiag-randco2ft-x10-pclr-replay-jointpairs-tb6xf0ju||01M7YM7SE7XQTWVB9HCKEDBHMZ|run_randco2-1xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M7YM7SEG7YTR73TG7Y6E39PS
+1deg-hybridsstdiag-randco2ft-x10-pclr-replay-jointpairs-tb6xf0ju||01M7YM7SE7XQTWVB9HCKEDBHMZ|run_randco2-2xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M7YM7SEG7YTR73TG7Y6E39PS
+1deg-hybridsstdiag-randco2ft-x10-pclr-replay-jointpairs-tb6xf0ju||01M7YM7SE7XQTWVB9HCKEDBHMZ|run_randco2-4xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M7YM7SEG7YTR73TG7Y6E39PS
+1deg-hybridsstdiag-randco2ft-x10-pclr-replay-jointpairs-tb6xf0ju||01M7YM7SE7XQTWVB9HCKEDBHMZ|run_randco2-1xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M7YM7SEG7YTR73TG7Y6E39PS
+1deg-hybridsstdiag-randco2ft-x10-pclr-replay-jointpairs-tb6xf0ju||01M7YM7SE7XQTWVB9HCKEDBHMZ|run_randco2-2xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M7YM7SEG7YTR73TG7Y6E39PS
+1deg-hybridsstdiag-randco2ft-x10-pclr-replay-jointpairs-tb6xf0ju||01M7YM7SE7XQTWVB9HCKEDBHMZ|run_randco2-4xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M7YM7SEG7YTR73TG7Y6E39PS
+1deg-hybridsstdiag-randco2ft-x10-pclr-replay-jointpairs-tb6xf0ju||01M7YM7SE7XQTWVB9HCKEDBHMZ|run_randco2-1xCO2-ic3|ema_ckpt_0003|high|--min-runtime 8h||01M7YM7SEG7YTR73TG7Y6E39PS
+1deg-hybridsstdiag-randco2ft-x10-pclr-replay-jointpairs-tb6xf0ju||01M7YM7SE7XQTWVB9HCKEDBHMZ|run_randco2-2xCO2-ic3|ema_ckpt_0003|high|--min-runtime 8h||01M7YM7SEG7YTR73TG7Y6E39PS
+1deg-hybridsstdiag-randco2ft-x10-pclr-replay-jointpairs-tb6xf0ju||01M7YM7SE7XQTWVB9HCKEDBHMZ|run_randco2-4xCO2-ic3|ema_ckpt_0003|high|--min-runtime 8h||01M7YM7SEG7YTR73TG7Y6E39PS
+1deg-hybridsstdiag-randco2ft-x10-pclr-replay-jointpairs-tb6xf0ju||01M7YM7SE7XQTWVB9HCKEDBHMZ|run_randco2-1xCO2-ic3|ema_ckpt_0004|high|--min-runtime 8h||01M7YM7SEG7YTR73TG7Y6E39PS
+1deg-hybridsstdiag-randco2ft-x10-pclr-replay-jointpairs-tb6xf0ju||01M7YM7SE7XQTWVB9HCKEDBHMZ|run_randco2-2xCO2-ic3|ema_ckpt_0004|high|--min-runtime 8h||01M7YM7SEG7YTR73TG7Y6E39PS
+1deg-hybridsstdiag-randco2ft-x10-pclr-replay-jointpairs-tb6xf0ju||01M7YM7SE7XQTWVB9HCKEDBHMZ|run_randco2-4xCO2-ic3|ema_ckpt_0004|high|--min-runtime 8h||01M7YM7SEG7YTR73TG7Y6E39PS
