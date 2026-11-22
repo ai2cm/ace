@@ -157,7 +157,7 @@ ATMOS = {
     "ace2p5cm4": "ACE2.5-CM4-ERA5-6HR, the CM4-pretrained ACE2.5 fine-tuned on ERA5 (wandb ace-samudra-coupled-cm4/9l60thd4, epoch 16; CM4 normalization, CO2 input, CM4-named and CM4-sign stress so no rename or scale)",
 }
 # the CM4-line arm runs only the current candidate's recipe (MSE FTO, then the ensemble-loss alternating stage)
-ARM_STAGES = {"ace2p5cm4": ("fto-mse", "fto-mse-then-alt")}
+ARM_STAGES = {"ace2p5cm4": ("fto-mse", "fto-mse-then-alt", "fto-mse-then-alt-long120")}
 
 
 def base(arm, ocean_name):
@@ -311,7 +311,36 @@ for (oc, odesc), (arm, desc) in itertools.product(OCEAN_DESC.items(), ATMOS.item
     alt_mse4 = copy.deepcopy(alt_mseocean)
     alt_mse4["stepper_training"]["ocean"]["n_steps"] = 4
     alt_mse4["stepper_training"]["ocean"]["optimize_last_step_only"] = False
+    # Long-rollout variant of the alternating stage (Troy 2026-11-22): ocean windows of 1-24 coupled steps (5-120 days),
+    # 75% of the draws at 1-8 steps centred on 4 and 8, 25% at 12-24 steps; loss on the last step only, as in the template.
+    alt_long = copy.deepcopy(alt)
+    alt_long["stepper_training"]["n_coupled_steps"] = 24
+    alt_long["stepper_training"]["ocean"]["n_steps"] = {
+        "outcomes": [
+            {"steps": n, "probability": pr}
+            for n, pr in [
+                (1, 0.05),
+                (2, 0.10),
+                (4, 0.25),
+                (6, 0.10),
+                (8, 0.25),
+                (12, 0.07),
+                (16, 0.06),
+                (20, 0.06),
+                (24, 0.06),
+            ]
+        ]
+    }
     stages = {
+        "fto-mse-then-alt-long120": (
+            alt_long,
+            [
+                f"ufs1deg-{oc}-{arm}-fto-mse-then-alt-long120: ufs1deg-{oc}-{arm}-fto-mse-then-alt with ocean rollout windows of 1-24",
+                "coupled steps (5-120 days) instead of 1-8: 75% of the ocean batches at 1-8 steps (mostly 4 and 8), 25% at 12-24;",
+                "last-step-only ensemble loss, global. Tests whether long coupled windows raise lead 9-12 month ENSO skill.",
+                f"Launch: OCEAN={oc} ARM={arm} STAGE=fto-mse-then-alt-long120 OCEAN_DS=<lifted fto-mse ocean dataset> ./launch-1deg-ufs-era5-coupled-ft.sh",
+            ],
+        ),
         "jfto": (
             jfto,
             [
@@ -390,6 +419,8 @@ for (oc, odesc), (arm, desc) in itertools.product(OCEAN_DESC.items(), ATMOS.item
     }
     for stage, (c, header) in stages.items():
         if stage not in ARM_STAGES.get(arm, stages):
+            continue
+        if stage == "fto-mse-then-alt-long120" and arm != "ace2p5cm4":
             continue
         hdr = "".join(f"# {line}\n" for line in header)
         out = HERE / "coupled" / f"ufs1deg-{oc}-{arm}-{stage}.yaml"

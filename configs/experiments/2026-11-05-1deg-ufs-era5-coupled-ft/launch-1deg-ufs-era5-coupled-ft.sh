@@ -47,6 +47,7 @@ case "$STAGE" in
   fto-then-alt) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-fto-then-ftalt" ;;
   fto-mse) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-fto-mse" ;;
   fto-mse-then-alt) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-fto-mse-then-ftalt" ;;   # CRPS alternating stage from the MSE-loss FTO ocean
+  fto-mse-then-alt-long120) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-fto-mse-then-ftalt-long120" ;;   # ... with 1-24-step (5-120 day) ocean windows
   fto-mse-then-alt-mseocean) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-fto-mse-then-ftalt-mseocean" ;;   # ... with the ocean loss kept on MSE
   fto-mse-then-alt-mse4) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-fto-mse-then-ftalt-mse4" ;;           # ... ocean MSE on every step of 4-step windows
   jfto) JOB="samudra-ufs1deg-era5-${OTAG}${ARM}-jfto" ;;                        # CM4 1deg two-stage template (James's recipe), stage 1
