@@ -57,7 +57,7 @@ and the stats script.
 | CM4 | `gs://vcm-ml-intermediate/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily/2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-land-snow-masked.zarr` | `2025-03-21-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-land-snow-masked-stats` |
 | CM4 1pctCO2 | `gs://vcm-ml-intermediate/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily/2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily-land-snow-masked.zarr` | pooled, see below |
 | CM4 piControl (2026-06-19) | `gs://vcm-ml-intermediate/2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily/2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily-land-snow-masked.zarr` | pooled, see below |
-| CM4 random-CO2 members | `gs://vcm-ml-intermediate/2026-06-19-CM4-like-AM4-random-CO2-1deg-daily/random-CO2-<level>-ic_<n>-land-snow-masked.zarr` | pooled, see below |
+| CM4 random-CO2 members | `gs://vcm-ml-intermediate/2026-10-11-CM4-like-AM4-random-CO2-1deg-daily/random-CO2-<level>-ic_<n>-land-snow-masked.zarr` | pooled, see below |
 
 ### Scenario-training stats
 

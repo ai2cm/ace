@@ -14,6 +14,9 @@
 #   bash run_scenario_pipeline.sh stores   # stores and their uploads only
 #   bash run_scenario_pipeline.sh stats    # pooled stats and Beaker datasets only
 #
+# SETS limits the stats stage to some source sets, e.g. after the random-CO2 members
+# change:  DATE=<today> SETS=pic-1pct-randco2 bash run_scenario_pipeline.sh
+#
 # A store that is already complete is skipped by the builder and re-synced as a
 # no-op. Designed to run detached so it survives the interactive session:
 #   nohup caffeinate -i bash run_scenario_pipeline.sh > ~/.cache/<log> 2>&1 &
@@ -26,13 +29,14 @@ cd "$(dirname "$0")"
 PY=${PY:-python}
 STAGE=${1:-all}
 WORK=${SNOW_MASKED_WORK_DIR:-$HOME/.cache/snow-masked-channels}
-# The training configs mount these stats datasets by name, so the date is fixed.
+# The training configs mount these stats datasets by name, so set DATE to the name
+# they mount (2026-10-07 for the 2026-10-06 round).
 DATE=${DATE:-2026-10-07}
 SUFFIX=land-snow-masked
 BUCKET=gs://vcm-ml-intermediate
 PIC=2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr-daily
 PCT=2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr-daily
-RANDCO2_DIR=${BUCKET}/2026-06-19-CM4-like-AM4-random-CO2-1deg-daily
+RANDCO2_DIR=${BUCKET}/2026-10-11-CM4-like-AM4-random-CO2-1deg-daily
 # Per-scenario daily time means over each parent's training window, added to
 # every stats dataset as the inline-inference references (the pooled
 # time-mean.nc mixes the scenarios' climates).
@@ -74,7 +78,7 @@ dataset_exists() {
 if [[ "$STAGE" != stores ]]; then
   BEAKER_USER=$(beaker account whoami --format json | python3 -c \
     "import json, sys; d = json.load(sys.stdin); print((d[0] if isinstance(d, list) else d)['name'])")
-  for set in pic-1pct pic-1pct-randco2; do
+  for set in ${SETS:-pic-1pct pic-1pct-randco2}; do
     if dataset_exists "${DATE}-cm4-${set}-daily-stats" && \
        dataset_exists "${DATE}-cm4-${set}-daily-${SUFFIX}-stats"; then
       echo "=== $(date) stats datasets for $set already on Beaker; skipping ==="

@@ -149,10 +149,10 @@ PARENTS = {
 
 RANDCO2_LEVELS = ("1xCO2", "2xCO2", "4xCO2")
 RANDCO2_DIRECTORY = (
-    "gs://vcm-ml-intermediate/2026-06-19-CM4-like-AM4-random-CO2-1deg-daily"
+    "gs://vcm-ml-intermediate/2026-10-11-CM4-like-AM4-random-CO2-1deg-daily"
 )
 RANDCO2_STATS = (
-    "gs://vcm-ml-intermediate/2026-06-19-CM4-like-AM4-random-CO2-1deg-daily-stats"
+    "gs://vcm-ml-intermediate/2026-10-11-CM4-like-AM4-random-CO2-1deg-daily-stats"
 )
 for _level in RANDCO2_LEVELS:
     for _ic in (1, 2, 3):
