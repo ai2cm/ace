@@ -14,7 +14,7 @@ from torch import nn
 
 import fme
 from fme.ace.data_loading.batch_data import BatchData, PrognosticState
-from fme.ace.requirements import DataRequirements
+from fme.ace.requirements import DataRequirements, PrognosticStateDataRequirements
 from fme.ace.stepper import (
     Stepper,
     TrainOutput,
@@ -36,6 +36,7 @@ from fme.ace.stepper.single_module import (
     load_weights_and_history as load_uncoupled_weights_and_history,
 )
 from fme.ace.stepper.time_length_probabilities import TimeLengthProbabilities
+from fme.core.corrector.output import CorrectorDiagnostics
 from fme.core.dataset_info import DatasetInfo
 from fme.core.distributed import Distributed
 from fme.core.ema import load_ema_params_if_available
@@ -643,10 +644,23 @@ class CoupledStepperConfig:
         self,
     ) -> CoupledPrognosticStateDataRequirements:
         """Get the PrognosticStateDataRequirements for the ocean and atmosphere."""
+        ocean = self.ocean.stepper.get_prognostic_state_data_requirements()
         return CoupledPrognosticStateDataRequirements(
-            ocean=self.ocean.stepper.get_prognostic_state_data_requirements(),
+            ocean=PrognosticStateDataRequirements(
+                names=self.ocean_state_names, n_timesteps=ocean.n_timesteps
+            ),
             atmosphere=self.atmosphere.stepper.get_prognostic_state_data_requirements(),
         )
+
+    @property
+    def ocean_state_names(self) -> list[str]:
+        """Ocean variables carried in the coupled state between coupled steps:
+        the ocean's prognostic names plus the SST, which the atmosphere reads
+        from the ocean state at every coupled step and which may be an
+        output-only diagnostic of the ocean (then it is taken from the ocean's
+        previous output, or from the data at the initial condition).
+        """
+        return sorted(set(self.ocean.stepper.prognostic_names) | {self.sst_name})
 
     def get_forcing_window_data_requirements(
         self, n_coupled_steps: int
@@ -849,11 +863,14 @@ class ComponentStepPrediction:
         data: TensorDict,
         step: int,
         stepper_state: StepperState | None,
+        corrector_diagnostics: CorrectorDiagnostics,
     ):
+        # required so no construction site silently drops the step's diagnostics
         self._realm: Literal["ocean", "atmosphere"] = realm
         self._data = data
         self._step = step
         self._stepper_state = stepper_state
+        self._corrector_diagnostics = corrector_diagnostics
 
     @property
     def realm(self) -> Literal["ocean", "atmosphere"]:
@@ -870,6 +887,25 @@ class ComponentStepPrediction:
     @property
     def stepper_state(self) -> StepperState | None:
         return self._stepper_state
+
+    @property
+    def corrector_diagnostics(self) -> CorrectorDiagnostics:
+        return self._corrector_diagnostics
+
+
+def _realm_step_outputs(
+    output_list: list[ComponentStepPrediction],
+    realm: Literal["ocean", "atmosphere"],
+) -> list[StepOutput]:
+    return [
+        StepOutput(
+            output=x.data,
+            stepper_state=x.stepper_state,
+            corrector_diagnostics=x.corrector_diagnostics,
+        )
+        for x in output_list
+        if x.realm == realm
+    ]
 
 
 class CoupledStepper:
@@ -1223,6 +1259,7 @@ class CoupledStepper:
                     data=atmos_step,
                     step=atmos_step_num,
                     stepper_state=atmos_stepper_state,
+                    corrector_diagnostics=atmos_result.corrector_diagnostics,
                 )
                 atmos_step = optimizer.detach_if_using_gradient_accumulation(atmos_step)
                 atmos_steps.append(atmos_step)
@@ -1265,6 +1302,7 @@ class CoupledStepper:
                 data=ocean_step,
                 step=i_outer,
                 stepper_state=ocean_result.stepper_state,
+                corrector_diagnostics=ocean_result.corrector_diagnostics,
             )
 
             # prepare ic states for next coupled step
@@ -1300,22 +1338,14 @@ class CoupledStepper:
         forcing_data: CoupledBatchData,
     ) -> CoupledBatchData:
         atmos_data = process_prediction_generator_list(
-            [
-                StepOutput(output=x.data, stepper_state=x.stepper_state)
-                for x in output_list
-                if x.realm == "atmosphere"
-            ],
+            _realm_step_outputs(output_list, "atmosphere"),
             time=forcing_data.atmosphere_data.time[:, self.atmosphere.n_ic_timesteps :],
             horizontal_dims=forcing_data.atmosphere_data.horizontal_dims,
             labels=forcing_data.atmosphere_data.labels,
             n_ensemble=forcing_data.atmosphere_data.n_ensemble,
         )
         ocean_data = process_prediction_generator_list(
-            [
-                StepOutput(output=x.data, stepper_state=x.stepper_state)
-                for x in output_list
-                if x.realm == "ocean"
-            ],
+            _realm_step_outputs(output_list, "ocean"),
             time=forcing_data.ocean_data.time[:, self.ocean.n_ic_timesteps :],
             horizontal_dims=forcing_data.ocean_data.horizontal_dims,
             labels=forcing_data.ocean_data.labels,
@@ -1328,7 +1358,7 @@ class CoupledStepper:
         initial_condition: CoupledPrognosticState,
         forcing: CoupledBatchData,
         compute_derived_variables: bool = False,
-    ):
+    ) -> tuple[CoupledBatchData, CoupledPrognosticState]:
         timer = GlobalTimer.get_instance()
         output_list = list(
             self.get_prediction_generator(
@@ -1350,7 +1380,29 @@ class CoupledStepper:
                         n_ic_timesteps_atmosphere=self.atmosphere.n_ic_timesteps,
                     )
                 )
-        return gen_data
+        prognostic_state = CoupledPrognosticState(
+            ocean_data=gen_data.ocean_data.get_end(
+                self._config.ocean_state_names,
+                self.ocean.n_ic_timesteps,
+            ),
+            atmosphere_data=gen_data.atmosphere_data.get_end(
+                self.atmosphere.prognostic_names,
+                self.atmosphere.n_ic_timesteps,
+            ),
+        )
+        # Attach the stacked per-step diagnostics last: every time-touching
+        # BatchData method (including get_end above) raises on a
+        # diagnostics-bearing batch, and here each realm's series is aligned
+        # with that realm's prediction time axis.
+        gen_data = gen_data.with_step_diagnostics(
+            ocean=StepOutput.stack_diagnostics(
+                _realm_step_outputs(output_list, "ocean")
+            ),
+            atmosphere=StepOutput.stack_diagnostics(
+                _realm_step_outputs(output_list, "atmosphere")
+            ),
+        )
+        return gen_data, prognostic_state
 
     def predict_paired(
         self,
@@ -1361,7 +1413,9 @@ class CoupledStepper:
         """
         Predict multiple steps forward given initial condition and reference data.
         """
-        gen_data = self._predict(initial_condition, forcing, compute_derived_variables)
+        gen_data, prognostic_state = self._predict(
+            initial_condition, forcing, compute_derived_variables
+        )
         atmos_forward_data = self.atmosphere.get_forward_data(
             forcing.atmosphere_data, compute_derived_variables=compute_derived_variables
         )
@@ -1376,16 +1430,7 @@ class CoupledStepper:
                     atmosphere_data=atmos_forward_data,
                 ),
             ),
-            CoupledPrognosticState(
-                ocean_data=gen_data.ocean_data.get_end(
-                    self.ocean.prognostic_names,
-                    self.n_ic_timesteps,
-                ),
-                atmosphere_data=gen_data.atmosphere_data.get_end(
-                    self.atmosphere.prognostic_names,
-                    self.atmosphere.n_ic_timesteps,
-                ),
-            ),
+            prognostic_state,
         )
 
     def predict(
@@ -1394,22 +1439,7 @@ class CoupledStepper:
         forcing: CoupledBatchData,
         compute_derived_variables: bool = False,
     ) -> tuple[CoupledBatchData, CoupledPrognosticState]:
-        gen_data = self._predict(initial_condition, forcing, compute_derived_variables)
-        return (
-            CoupledBatchData(
-                ocean_data=gen_data.ocean_data, atmosphere_data=gen_data.atmosphere_data
-            ),
-            CoupledPrognosticState(
-                ocean_data=gen_data.ocean_data.get_end(
-                    self.ocean.prognostic_names,
-                    self.n_ic_timesteps,
-                ),
-                atmosphere_data=gen_data.atmosphere_data.get_end(
-                    self.atmosphere.prognostic_names,
-                    self.atmosphere.n_ic_timesteps,
-                ),
-            ),
-        )
+        return self._predict(initial_condition, forcing, compute_derived_variables)
 
     def update_training_history(self, training_job: TrainingJob) -> None:
         """
@@ -2123,7 +2153,7 @@ class CoupledTrainStepper(
                 self.atmosphere.prognostic_names, self.n_ic_timesteps
             ),
             ocean_data=data_ensemble.ocean_data.get_start(
-                self.ocean.prognostic_names, self.n_ic_timesteps
+                self._stepper.config.ocean_state_names, self.n_ic_timesteps
             ),
         )
         output_generator = self._stepper.get_prediction_generator(

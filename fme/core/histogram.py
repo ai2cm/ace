@@ -1,7 +1,7 @@
 import collections
-import logging
+import math
 from collections import namedtuple
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Literal
 
 import matplotlib.figure
@@ -14,6 +14,7 @@ from fme.core.metrics import quantile
 from fme.core.typing_ import TensorMapping
 
 EPSILON = 1.0e-6
+_OVERFLOW_SCALE = 2.0**-4
 
 _Histogram = namedtuple("_Histogram", ["counts", "bin_edges"])
 
@@ -75,102 +76,132 @@ def histogram(
     arr: torch.Tensor, vmin: float, bin_size: float, n_bins: int
 ) -> torch.Tensor:
     """
-    Compute histogram of a tensor.
+    Compute histogram of a tensor. Values outside of the range of the bins
+    are counted in the first or last bin.
 
     Args:
-        arr: 1D tensor of values
+        arr: 1D tensor of finite values
         vmin: minimum value of the histogram
         bin_size: size of each bin
         n_bins: number of bins
 
     Returns:
-        counts, bin_edges: arrays of counts and bin edges
+        counts: tensor of counts for each bin
     """
-    # use np.bincount for speed
-    counts = torch.bincount(((arr - vmin) / bin_size).int(), minlength=n_bins)
-    return_counts = counts[:n_bins]
-    return_counts[-1] += torch.sum(counts[n_bins:])
-    return return_counts
+    if arr.dtype != torch.float64:
+        # float64 is not available on all devices
+        arr = arr.to(torch.float32)
+    # the range of the bins can be larger than the largest value which can be
+    # represented in the dtype of arr, scaling by a power of two avoids
+    # overflow without changing the result
+    scale = _OVERFLOW_SCALE
+    # in-place operations on the new tensor avoid further allocations
+    i_bin = arr * scale
+    i_bin -= vmin * scale
+    i_bin /= bin_size * scale
+    i_bin.clamp_(0, n_bins - 1)
+    # use bincount for speed
+    return torch.bincount(i_bin.int(), minlength=n_bins)
 
 
-def _rebin_counts(counts, bin_edges, new_edges):
+def _finite_values(value: torch.Tensor) -> tuple[torch.Tensor, float, float] | None:
     """
-    Rebin histogram counts into new_edges, preserves total counts.
+    Get the finite values of a tensor and their range.
+
+    Args:
+        value: 1D tensor of values
+
+    Returns:
+        The finite values with their minimum and maximum, or None if there
+        are no finite values.
     """
-    if len(bin_edges) != len(counts) + 1:
-        raise ValueError("bin_edges must have length len(counts) + 1")
-    new_counts = np.zeros(len(new_edges) - 1, dtype=float)
+    if value.numel() == 0:
+        return None
+    vmin, vmax = _min_max(value)
+    if not (math.isfinite(vmin) and math.isfinite(vmax)):
+        value = value[torch.isfinite(value)]
+        if value.numel() == 0:
+            return None
+        vmin, vmax = _min_max(value)
+    return value, vmin, vmax
 
-    i, j = 0, 0
-    while i < len(counts) and j < len(new_counts):
-        left = max(bin_edges[i], new_edges[j])
-        right = min(bin_edges[i + 1], new_edges[j + 1])
 
-        if right > left:
-            frac = (right - left) / (bin_edges[i + 1] - bin_edges[i])
-            new_counts[j] += counts[i] * frac
-
-        if bin_edges[i + 1] <= new_edges[j + 1]:
-            i += 1
-        else:
-            j += 1
-
-    return new_counts
+def _min_max(value: torch.Tensor) -> tuple[float, float]:
+    # the result is non-finite if any value is non-finite
+    vmin, vmax = torch.aminmax(value)
+    return float(vmin), float(vmax)
 
 
 class DynamicHistogram:
     """
-    A histogram that dynamically bins values into a fixed number of bins
-    of constant width. A separate histogram is defined for each time,
-    and the same bins are used for all times.
+    Histograms of one or more series of values, which dynamically bin values
+    into a fixed number of bins of constant width. A separate histogram is
+    kept for each series, and the same bins are used for all series, so
+    that the histograms can be compared bin by bin.
 
-    When a new value is added that goes out of range of the current bins,
-    bins are doubled in size until that value is within the range of the bins.
+    When a new value is added to any series that goes out of range of the
+    current bins, bins are doubled in size until that value is within the
+    range of the bins.
     """
 
-    def __init__(self, n_times: int, n_bins: int = 300):
+    def __init__(self, n_series: int = 1, n_bins: int = 300):
         """
         Args:
-            n_times: Length of time dimension of each sample.
-            n_bins: Number of bins to use for the histogram. The "effective"
-                number of bins may be as small as 1/4th this number of bins,
-                as there may be bins greater than the max or less than the
-                min value with no samples in them, due to the dynamic resizing
-                of bins.
+            n_series: Number of series of values to keep histograms of.
+            n_bins: Number of bins to use for the histogram, must be even.
+                The "effective" number of bins may be as small as 1/4th this
+                number of bins, as there may be bins greater than the max or
+                less than the min value with no samples in them, due to the
+                dynamic resizing of bins. For any one series it may be smaller
+                still, as the bins span the range of the values of all series.
         """
-        self._n_times = n_times
+        if n_bins % 2 != 0:
+            raise ValueError(
+                f"n_bins must be even so that bins can be doubled in size, got {n_bins}"
+            )
+        self._n_series = n_series
         self._n_bins = n_bins
         self.bin_edges: np.ndarray | None = None
-        self.counts = np.zeros((n_times, n_bins), dtype=np.int64)
+        self.counts = np.zeros((n_series, n_bins), dtype=np.int64)
         self._epsilon: float = EPSILON
 
-    def add(self, value: torch.Tensor, i_time_start: int = 0):
+    def add(self, values: Sequence[torch.Tensor]):
         """
-        Add new values to the histogram.
+        Add new values to the histograms. Non-finite values are ignored.
 
         Args:
-            value: tensor of values of shape (n_times, n_values) to add to the histogram
-            i_time_start: index of the first time to add values to
+            values: 1D tensor of values to add for each series, which may
+                differ in length between series.
         """
-        # add epsilon to ensure all values stay within (and not just equal to)
-        # the bin edges, and to avoid the case where vmin == vmax
-        vmin = float((torch.min(value) - self._epsilon).cpu().numpy())
-        vmax = float((torch.max(value) + self._epsilon).cpu().numpy())
+        if len(values) != self._n_series:
+            raise ValueError(
+                f"expected values for {self._n_series} series, got {len(values)}"
+            )
+        finite_values = [_finite_values(value) for value in values]
+        ranges = [(vmin, vmax) for _, vmin, vmax in filter(None, finite_values)]
+        if len(ranges) == 0:
+            return
+        # the bins must contain the values of all series
+        vmin = min(vmin for vmin, _ in ranges)
+        vmax = max(vmax for _, vmax in ranges)
+        # pad the range to ensure all values stay within (and not just equal
+        # to) the bin edges, and to avoid the case where vmin == vmax
+        pad = self._epsilon * max(1.0, abs(vmin), abs(vmax))
+        vmin, vmax = vmin - pad, vmax + pad
 
         if self.bin_edges is None:
             self.bin_edges = np.linspace(vmin, vmax, self._n_bins + 1)
         else:
             while vmin < self.bin_edges[0]:
-                self._double_size_left()
+                self._double_size("left")
             while vmax > self.bin_edges[-1]:
-                self._double_size_right()
+                self._double_size("right")
 
-        i_time_end = i_time_start + value.shape[0]
-        for i_time in range(i_time_start, i_time_end):
-            try:
-                self.counts[i_time] += (
+        for i_series, finite in enumerate(finite_values):
+            if finite is not None:
+                self.counts[i_series] += (
                     histogram(
-                        value[i_time - i_time_start, :],
+                        finite[0],
                         self.bin_edges[0],
                         self.bin_edges[1] - self.bin_edges[0],
                         self._n_bins,
@@ -178,51 +209,33 @@ class DynamicHistogram:
                     .cpu()
                     .numpy()
                 )
-            except RuntimeError as err:
-                # ignore samples with NaNs
-                logging.error(f"caught exception while computing histogram: {err}")
 
-    def _double_size_left(self):
+    def _double_size(self, direction: Literal["left", "right"]):
         """
-        Double the sizes of bins, extending the histogram
-        to the left (further negative).
+        Double the sizes of bins, extending the histograms to the left
+        (further negative) or to the right (further positive).
         """
         if self.bin_edges is None:
             raise RuntimeError("Cannot double size of bins without bin edges")
-        current_range = self.bin_edges[-1] - self.bin_edges[0]
-        new_range = 2 * current_range
-
-        new_bin_edges = np.linspace(
-            self.bin_edges[-1] - new_range,
-            self.bin_edges[-1],
-            self._n_bins + 1,
-        )
-        new_counts = np.zeros((self._n_times, self._n_bins), dtype=np.int64)
+        new_range = 2 * (self.bin_edges[-1] - self.bin_edges[0])
+        new_counts = np.zeros_like(self.counts)
         combined_counts = self.counts[:, ::2] + self.counts[:, 1::2]
-        new_counts[:, self._n_bins // 2 :] = combined_counts
-        self.bin_edges = new_bin_edges
+        if direction == "left":
+            start, stop = self.bin_edges[-1] - new_range, self.bin_edges[-1]
+            new_counts[:, self._n_bins // 2 :] = combined_counts
+        else:
+            start, stop = self.bin_edges[0], self.bin_edges[0] + new_range
+            new_counts[:, : self._n_bins // 2] = combined_counts
+        self.bin_edges = np.linspace(start, stop, self._n_bins + 1)
         self.counts = new_counts
 
-    def _double_size_right(self):
+    def get_bin_edges(self) -> np.ndarray:
         """
-        Double the sizes of bins, extending the histogram
-        to the right (further positive).
+        Get the bin edges, which are NaN if no finite values have been added.
         """
         if self.bin_edges is None:
-            raise RuntimeError("Cannot double size of bins without bin edges")
-        current_range = self.bin_edges[-1] - self.bin_edges[0]
-        new_range = 2 * current_range
-
-        new_bin_edges = np.linspace(
-            self.bin_edges[0],
-            self.bin_edges[0] + new_range,
-            self._n_bins + 1,
-        )
-        new_counts = np.zeros((self._n_times, self._n_bins), dtype=np.int64)
-        combined_counts = self.counts[:, ::2] + self.counts[:, 1::2]
-        new_counts[:, : self._n_bins // 2] = combined_counts
-        self.bin_edges = new_bin_edges
-        self.counts = new_counts
+            return np.full(self._n_bins + 1, np.nan)
+        return self.bin_edges
 
 
 class DynamicHistogramAggregator:
@@ -236,7 +249,6 @@ class DynamicHistogramAggregator:
         self.percentiles = [99.9999] if percentiles is None else percentiles
         self.histograms: Mapping[str, DynamicHistogram] | None = None
         self.nan_masks = nan_masks
-        self._time_dim = -2
 
     def set_nan_masks(self, data: TensorMapping):
         if self.nan_masks is None:
@@ -261,19 +273,19 @@ class DynamicHistogramAggregator:
             value = torch.masked_select(value, mask)
         else:
             value = value.flatten()
-        return value.unsqueeze(0)
+        return value
 
     @torch.no_grad()
     def record_batch(self, data: TensorMapping):
         self.set_nan_masks(data)
         if self.histograms is None:
             self.histograms = {
-                k: DynamicHistogram(n_times=1, n_bins=self.n_bins) for k in data.keys()
+                k: DynamicHistogram(n_series=1, n_bins=self.n_bins) for k in data.keys()
             }
         for k in data:
             # no matter what data shape is given, combine it all into one histogram
             value = self._remove_nans(k, data[k])
-            self.histograms[k].add(value)
+            self.histograms[k].add([value])
 
     def get_histograms(self) -> dict[str, _Histogram]:
         if self.histograms is None:
@@ -281,8 +293,7 @@ class DynamicHistogramAggregator:
         return_dict: dict[str, _Histogram] = {}
         for k, histogram in self.histograms.items():
             counts, bin_edges = trim_zero_bins(
-                histogram.counts.squeeze(self._time_dim),
-                histogram.bin_edges,
+                histogram.counts[0, :], histogram.get_bin_edges()
             )
             return_dict[k] = _Histogram(counts, bin_edges)
         return return_dict
@@ -297,7 +308,7 @@ class DynamicHistogramAggregator:
                 dims=("bin",),
             )
             data[f"{var_name}_bin_edges"] = xr.DataArray(
-                histogram.bin_edges,
+                histogram.get_bin_edges(),
                 dims=("bin_edges",),
             )
         return xr.Dataset(data)
@@ -350,7 +361,6 @@ class ComparedDynamicHistograms:
         self.target_aggregator: DynamicHistogramAggregator | None = None
         self.prediction_aggregator: DynamicHistogramAggregator | None = None
         self._nan_masks: Mapping[str, torch.Tensor] | None = None
-        self._time_dim = -2
         self._variables: set[str] = set()
         self._compute_percentile_frac = compute_percentile_frac
 
@@ -417,7 +427,7 @@ class ComparedDynamicHistograms:
         return return_dict
 
     def _plot_histogram(
-        self, target_histogram: _Histogram | None, prediction_histogram
+        self, target_histogram: _Histogram, prediction_histogram: _Histogram
     ) -> matplotlib.figure.Figure:
         fig, ax = plt.subplots()
         for histogram, label, line_style, color in zip(
@@ -429,15 +439,14 @@ class ComparedDynamicHistograms:
             normalized_counts = _normalize_histogram(
                 histogram.counts, histogram.bin_edges
             )
-            if histogram is not None:
-                ax.step(
-                    histogram.bin_edges[:-1],
-                    normalized_counts,
-                    line_style,
-                    where="post",
-                    label=label,
-                    color=color,
-                )
+            ax.step(
+                histogram.bin_edges[:-1],
+                normalized_counts,
+                line_style,
+                where="post",
+                label=label,
+                color=color,
+            )
         ax.set(yscale="log")
         ax.legend()
         plt.tight_layout()
@@ -449,25 +458,23 @@ class ComparedDynamicHistograms:
         return_dict: dict[str, matplotlib.figure.Figure | float] = {}
 
         for field_name, histograms in self._get_histograms().items():
-            target = histograms.get("target")
-            prediction = histograms.get("prediction")
+            target = histograms["target"]
+            prediction = histograms["prediction"]
             fig = self._plot_histogram(target, prediction)
             return_dict[field_name] = fig
             plt.close(fig)
             emit_percentiles = (
                 percentile_variables is None or field_name in percentile_variables
             )
-            if emit_percentiles and target is not None:
+            if emit_percentiles:
                 for p in self.percentiles:
                     return_dict[f"target/{p}th-percentile/{field_name}"] = quantile(
                         target.bin_edges, target.counts, p / 100.0
                     )
-            if emit_percentiles and prediction is not None:
-                for p in self.percentiles:
                     return_dict[f"prediction/{p}th-percentile/{field_name}"] = quantile(
                         prediction.bin_edges, prediction.counts, p / 100.0
                     )
-                    if self._compute_percentile_frac and target is not None:
+                    if self._compute_percentile_frac:
                         return_dict[
                             f"prediction_frac_of_target/{p}th-percentile/{field_name}"
                         ] = (
@@ -575,20 +582,20 @@ class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
         target_metrics: dict[str, float] = {}
 
         for field_name, histograms in self._get_histograms().items():
-            target = histograms.get("target")
-            prediction = histograms.get("prediction")
+            target = histograms["target"]
+            prediction = histograms["prediction"]
             fig = self._plot_histogram(target, prediction)
             return_metrics[field_name] = fig
             plt.close(fig)
             emit_percentiles = (
                 percentile_variables is None or field_name in percentile_variables
             )
-            if emit_percentiles and prediction is not None:
+            if emit_percentiles:
                 return_metrics.update(
                     self._get_percentile_metrics_for_field(prediction, field_name)
                 )
 
-                if self._compute_percentile_frac and target is not None:
+                if self._compute_percentile_frac:
                     target_metrics.update(
                         self._get_percentile_metrics_for_field(
                             target,
