@@ -62,6 +62,7 @@ _LABEL_1DEG = {
     "rco2rs1-1deg-hybridsstdiag-jfto-alt-replay-con-fromoff": "rco2 rs1, hybrid-residual diagnosed-SST ocean, FTO (corrector off at its start) then alternating coupled FT with the OHC corrector on throughout (James's recipe) + random-CO2 replay ep{ep} (lifted, EMA)",
     "rco2rs1-1deg-hybridsstdiag-jfto-alt-replay-con": "rco2 rs1, hybrid-residual diagnosed-SST ocean, FTO then alternating coupled FT (James's recipe, OHC corrector on throughout) + random-CO2 replay ep{ep} (lifted, EMA)",
     "ace2p5rs1-1deg-hybridsstdiag-alt-replay": "ACE2.5 rco2 rs1, hybrid-residual diagnosed-SST ocean, alternating coupled FT + random-CO2 replay ep{ep} (lifted, EMA)",
+    "ace2p5rs1-1deg-hybridsstdiag-jfto-alt-replay-con": "ACE2.5 rco2 rs1, hybrid-residual diagnosed-SST ocean, FTO then alternating coupled FT (James's recipe, OHC corrector on throughout) + random-CO2 replay ep{ep} (lifted, EMA)",
 }
 _LABEL = {
     "rco2rs2-after-jointens": "rco2 rs2, after coupled FT ep{ep} (lifted, EMA)",

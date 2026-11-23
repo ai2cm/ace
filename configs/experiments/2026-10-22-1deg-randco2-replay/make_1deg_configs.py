@@ -283,6 +283,33 @@ arms["hybridsstdiag-jfto-alt-replay-con-fromoff"] = (
         "Launch with CKPT_DS=01M6WHHVQJDD47A41HHPWQXNXT.",
     ],
 )
+# 2026-11-23 (Troy): the corrector-on two-stage recipe (the one report PR 209 settles on) with the atmosphere swapped
+# for the random-CO2 ACE2.5 rs1, so the ACE2.5 + hybrid ocean system gets an ocean-only stage too (its only coupled FT
+# so far is the straight alternating + replay arm). Same builder swap as the ace2p5-* arms above.
+for tag, src in (
+    ("ace2p5-hybridsstdiag-jfto-con", "hybridsstdiag-jfto-con"),
+    ("ace2p5-hybridsstdiag-jfto-alt-replay-con", "hybridsstdiag-jfto-alt-replay-con"),
+):
+    c = copy.deepcopy(arms[src][0])
+    b = c["stepper"]["atmosphere"]["stepper"]["step"]["config"]["builder"]
+    assert b["type"] == ace2p5_builder["type"]
+    b["config"] = {
+        **ace2p5_builder["config"],
+        "checkpointing": b["config"]["checkpointing"],
+    }
+    arms[tag] = (
+        c,
+        arms[src][1][:-1]
+        + [
+            f"= -{src} with the atmosphere swapped for the 1deg random-CO2 ACE2.5 rs1 (wandb wb3jfw7u), Troy 2026-11-23.",
+            "Launch with ATMOS_DS=01M6DWYW0RWBN0X33ABS98T0AH OCEAN_DS=01M626JPB247BQWSE0GN35SAXR"
+            + (
+                " CKPT_DS=<the -ace2p5-hybridsstdiag-jfto-con results dataset>."
+                if "alt" in tag
+                else "."
+            ),
+        ],
+    )
 for tag, (c, header) in arms.items():
     out = HERE / "coupled" / f"1deg-randco2rs1-fmean-{tag}.yaml"
     hdr = "".join(
