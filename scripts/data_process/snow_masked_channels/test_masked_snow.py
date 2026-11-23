@@ -1,7 +1,17 @@
+import shutil
+
 import numpy as np
 import pytest
+import xarray as xr
 from fit_masked_snow_stats import Moments
-from masked_snow import PARENTS, SOURCE_SETS, land_snow_fields
+from masked_snow import (
+    MASKED,
+    PARENTS,
+    SHARD_STEPS,
+    SOURCE_SETS,
+    land_snow_fields,
+    store_complete,
+)
 
 
 def _inputs():
@@ -72,3 +82,30 @@ def test_source_sets_name_registered_parents():
         assert all(key in PARENTS for key in keys)
     assert SOURCE_SETS["pic-1pct"] == SOURCE_SETS["pic-1pct-randco2"][:2]
     assert not any("ic3" in key for key in SOURCE_SETS["pic-1pct-randco2"])
+
+
+def _write_masked_store(path, n_steps):
+    shape = (n_steps, 2, 3)
+    ds = xr.Dataset(
+        {
+            name: (("time", "lat", "lon"), np.zeros(shape, np.float32))
+            for name in MASKED.values()
+        },
+        coords={"time": np.arange(n_steps)},
+    )
+    encoding = {
+        name: {"chunks": (1, 2, 3), "shards": (SHARD_STEPS, 2, 3)}
+        for name in MASKED.values()
+    }
+    ds.to_zarr(path, mode="w", encoding=encoding)
+
+
+def test_store_complete_requires_every_step_and_shard(tmp_path):
+    n_steps = SHARD_STEPS + 40
+    store = tmp_path / "store.zarr"
+    assert not store_complete(str(store), n_steps)
+    _write_masked_store(store, n_steps)
+    assert store_complete(str(store), n_steps)
+    assert not store_complete(str(store), n_steps + SHARD_STEPS)
+    shutil.rmtree(store / MASKED["surface_snow_amount"] / "c" / "1")
+    assert not store_complete(str(store), n_steps)

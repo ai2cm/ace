@@ -22,7 +22,8 @@ Usage:
 
 Writes <masked_snow.WORK_DIR>/store-out/<parent-name>-land-snow-masked.zarr,
 resuming a partial store if present. The pipeline scripts upload it next to the
-parent and then delete it.
+parent and then delete it. With --skip-uploaded, nothing is built when the store
+next to the parent is already complete.
 """
 
 import argparse
@@ -37,10 +38,12 @@ from masked_snow import (
     SHARD_STEPS,
     STORE_DIR,
     SWE,
+    gcs_credentials,
     land_fraction,
     land_snow_fields,
     load_mask,
     open_parent,
+    store_complete,
 )
 
 
@@ -48,6 +51,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("dataset", choices=sorted(PARENTS))
     parser.add_argument("--dev", action="store_true", help="first 2 shards only")
+    parser.add_argument(
+        "--skip-uploaded",
+        action="store_true",
+        help="build nothing if the store next to the parent is already complete",
+    )
     args = parser.parse_args()
     parent = PARENTS[args.dataset]
 
@@ -59,6 +67,11 @@ def main():
     ds = open_parent(parent)
     land_frac = land_fraction(ds)
     n = ds.sizes["time"] if not args.dev else 2 * SHARD_STEPS
+    if args.skip_uploaded and store_complete(
+        parent.output_url, n, {"token": gcs_credentials()}
+    ):
+        print(f"  {parent.output_url} is complete; skipping", flush=True)
+        return
     dims = ds[SWE].dims
     spatial_dims = dims[1:]
     spatial_coords = {d: ds[d].values for d in spatial_dims}

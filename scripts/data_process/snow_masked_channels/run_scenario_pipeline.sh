@@ -17,8 +17,9 @@
 # SETS limits the stats stage to some source sets, e.g. after the random-CO2 members
 # change:  DATE=<today> SETS=pic-1pct-randco2 bash run_scenario_pipeline.sh
 #
-# A store that is already complete is skipped by the builder and re-synced as a
-# no-op. Designed to run detached so it survives the interactive session:
+# A store that is already complete on GCS is neither rebuilt nor re-uploaded. A
+# partial local store is resumed. Designed to run detached so it survives the
+# interactive session:
 #   nohup caffeinate -i bash run_scenario_pipeline.sh > ~/.cache/<log> 2>&1 &
 # Outputs are built under $WORK, outside the repository, and deleted once uploaded.
 # Weka copies (scripts/data_process/gcs_to_weka.sh) and training launches are
@@ -48,27 +49,27 @@ case "$STAGE" in
   *) echo "usage: $0 [all|stores|stats]" >&2; exit 1 ;;
 esac
 
+build_and_upload() {
+  local key="$1" name="$2" destination="$3"
+  local store="$WORK/store-out/${name}-${SUFFIX}.zarr"
+  echo "=== $(date) store $key ==="
+  $PY build_masked_snow_channels.py "$key" --skip-uploaded
+  if [[ -d "$store" ]]; then
+    echo "=== $(date) uploading $key to GCS ==="
+    gsutil -m rsync -r "$store" "$destination"
+    rm -rf "$store"
+  fi
+}
+
 if [[ "$STAGE" != stats ]]; then
-  echo "=== $(date) store cm4-picontrol-2026 ==="
-  $PY build_masked_snow_channels.py cm4-picontrol-2026
+  build_and_upload cm4-picontrol-2026 "$PIC" "${BUCKET}/${PIC}/${PIC}-${SUFFIX}.zarr"
   for level in 1xCO2 2xCO2 4xCO2; do
     for ic in 1 2 3; do
-      echo "=== $(date) store cm4-randco2-${level}-ic${ic} ==="
-      $PY build_masked_snow_channels.py "cm4-randco2-${level}-ic${ic}"
-    done
-  done
-
-  echo "=== $(date) uploading stores to GCS ==="
-  gsutil -m rsync -r "$WORK/store-out/${PIC}-${SUFFIX}.zarr" \
-    "${BUCKET}/${PIC}/${PIC}-${SUFFIX}.zarr"
-  for level in 1xCO2 2xCO2 4xCO2; do
-    for ic in 0001 0002 0003; do
-      member="random-CO2-${level}-ic_${ic}"
-      gsutil -m rsync -r "$WORK/store-out/${member}-${SUFFIX}.zarr" \
+      member="random-CO2-${level}-ic_000${ic}"
+      build_and_upload "cm4-randco2-${level}-ic${ic}" "$member" \
         "${RANDCO2_DIR}/${member}-${SUFFIX}.zarr"
     done
   done
-  rm -rf "$WORK/store-out/${PIC}-${SUFFIX}.zarr" "$WORK"/store-out/random-CO2-*-"${SUFFIX}".zarr
 fi
 
 dataset_exists() {

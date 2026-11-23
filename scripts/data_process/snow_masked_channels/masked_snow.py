@@ -216,6 +216,21 @@ def open_parent(parent: Parent) -> xr.Dataset:
     )
 
 
+def store_complete(url: str, n_steps: int, storage_options: dict | None = None) -> bool:
+    """Whether the masked store at ``url`` holds ``n_steps`` time steps with every
+    shard of both channels present, so an interrupted upload, whose metadata may
+    already be complete, does not count."""
+    import fsspec
+
+    fs, root = fsspec.core.url_to_fs(url, **(storage_options or {}))
+    if not fs.exists(f"{root}/zarr.json"):
+        return False
+    if xr.open_zarr(url, storage_options=storage_options).sizes["time"] != n_steps:
+        return False
+    n_shards = -(-n_steps // SHARD_STEPS)
+    return all(len(fs.find(f"{root}/{name}/c")) == n_shards for name in MASKED.values())
+
+
 def load_mask() -> np.ndarray:
     """Static validity mask, 1 on land cells with land_fraction >= 0.5 that are
     not ice sheet, 0 elsewhere. Same array for both datasets."""
