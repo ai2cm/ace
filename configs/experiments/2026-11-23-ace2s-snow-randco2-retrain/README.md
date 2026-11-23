@@ -6,15 +6,15 @@ The random-CO2 ensemble used by `2026-10-06-ace2s-snow-scenario-train`
 variables, CO2 now stepping cleanly every 30 days, and new weather. This round retrains the two
 `pic-1pct-randco2` arms of the 2026-10-06 round on it with the identical recipe (architecture,
 loss, optimizer, epochs, splits; see that round's README), now with two seeds each. It also trains
-a second seed of the two `pic-1pct` arms with that round's configs unchanged, so both source sets
-have a seed spread. All of them, and the two `pic-1pct` fine-tunes of that round, are evaluated on
+a second seed of the two `pic-1pct` arms with that round's configs, so both source sets have a
+seed spread. All of them, and the two `pic-1pct` fine-tunes of that round, are evaluated on
 all three held-out ic_0003 members.
 
 The last ten years of 1pctCO2 (0131-0140) are the project's final holdout and nothing here reads
 them. Relative to the 2026-10-06 configs, the `pic-1pct-randco2` configs stop `val_1pct_late` at
 0130-12-31 and use `inference_1pct` initial conditions 0041-0044 and 0122-0125 (the last rollout
-ends 0130-01-01), and the ramp evaluation stops at 0130-11-13. The `pic-1pct` configs are copied
-unchanged so that seed 1 matches the 2026-10-06 seed 0; their validation and inline rollouts read
+ends 0130-01-01), and the ramp evaluation stops at 0130-11-13. The `pic-1pct` configs keep the
+2026-10-06 windows, so seed 1 matches seed 0 there; their validation and inline rollouts read
 0131-01-01 only.
 
 ## Runs
@@ -30,7 +30,10 @@ Seed 0 of the two `pic-1pct` arms is the 2026-10-06 round's.
 
 Each arm has a `-1-step-pretrain-daily.yaml` (stage 1; 45 epochs on 190 years, 50 on 160) and a
 `-multi-step-finetune-daily.yaml` (stage 2 from the stage-1 `best_ckpt.tar`), shared by its two
-seeds; the launch scripts pass `seed=<seed>` as an override.
+seeds; the launch scripts pass `seed=<seed>` as an override. All stage-1 configs set
+`evaluate_before_training: true` (not set in the 2026-10-06 round), so every validation set and
+inline rollout runs before the first iteration and a data problem fails a job within its first
+hour; it does not change training beyond shifting the random-number stream.
 
 ## Data
 

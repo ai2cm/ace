@@ -7,11 +7,9 @@
 #   ./run-ace-train.sh                                        # all six runs
 #   ./run-ace-train.sh cm4-masked-naive-pic-1pct-randco2-rs0  # a subset
 #
-# Dry run (validation and both inline rollouts before the first iterations; cancel
-# once training iterations have logged):
-#   OVERRIDE="evaluate_before_training=true" ./run-ace-train.sh cm4-masked-naive-pic-1pct-randco2-rs0
-# Job names then get a -dry suffix (set JOB_SUFFIX for another). DRY_RUN=1 prints
-# the gantry commands instead of submitting them.
+# The configs run validation and both inline rollouts before the first
+# iteration, so a data problem fails a job in its first hour. DRY_RUN=1 prints the
+# gantry commands instead of submitting them.
 
 source "$(dirname "$0")/launch-common.sh"
 
@@ -30,16 +28,9 @@ for run in "${RUNS[@]}"; do
   fi
 done
 
-suffix="${JOB_SUFFIX:-}"
-override_args=()
-if [[ -n "${OVERRIDE:-}" ]]; then
-  suffix="${JOB_SUFFIX--dry}"
-  override_args=($OVERRIDE)
-fi
-
 for run in "${RUNS[@]}"; do
   arm="${run%-rs*}"
   seed="${run##*-rs}"
   run_training "$arm-1-step-pretrain-daily.yaml" \
-    "ace2s-snowfix-${arm}-daily-1-step-pretrain-rs${seed}${suffix}" "seed=$seed" "${override_args[@]}"
+    "ace2s-snowfix-${arm}-daily-1-step-pretrain-rs${seed}" "seed=$seed"
 done

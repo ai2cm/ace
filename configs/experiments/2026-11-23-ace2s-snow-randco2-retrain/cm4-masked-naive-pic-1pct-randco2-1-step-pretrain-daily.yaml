@@ -4,6 +4,7 @@ seed: 0
 experiment_dir: /results
 save_checkpoint: true
 validate_using_ema: true
+evaluate_before_training: true  # checks every validation set and inline rollout before training
 max_epochs: 45  # ~8,668 iterations per epoch at batch 8
 save_per_epoch_diagnostics: true
 ema:
