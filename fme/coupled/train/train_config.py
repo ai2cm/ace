@@ -118,6 +118,9 @@ class InlineValidationConfig:
             stochastic n_steps loss configuration keeps validation cost near
             training cost, at the price of averaging each per-step loss over
             only the batches that reached its step.
+        compute_derived_variables: whether to compute derived variables
+            (e.g. column energy and moisture diagnostics) for the validation
+            window. Disable for long windows, where they can exhaust GPU memory.
     """
 
     loader: CoupledDataLoaderConfig
@@ -127,6 +130,7 @@ class InlineValidationConfig:
     name: str | None = None
     weight: float = 1.0
     evaluate_all_steps: bool = True
+    compute_derived_variables: bool = True
 
     def __post_init__(self):
         if self.weight < 0:
@@ -257,6 +261,7 @@ def _get_validation_callback(
             ),
             weight=entry_config.weight,
             evaluate_all_steps=entry_config.evaluate_all_steps,
+            compute_derived_variables=entry_config.compute_derived_variables,
         )
         for entry_config, data, name in validation_entries
     ]
@@ -290,6 +295,7 @@ def _get_validate_stepper_callback(
                 ema=ema,
                 validate_using_ema=validate_using_ema,
                 evaluate_all_steps=entry_config.evaluate_all_steps,
+                compute_derived_variables=entry_config.compute_derived_variables,
             )
             if entry_config.weight > 0:
                 summary = aggregator.get_summary(label=name)

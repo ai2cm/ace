@@ -315,6 +315,9 @@ for (oc, odesc), (arm, desc) in itertools.product(OCEAN_DESC.items(), ATMOS.item
     # 75% of the draws at 1-8 steps centred on 4 and 8, 25% at 12-24 steps; loss on the last step only, as in the template.
     alt_long = copy.deepcopy(alt)
     alt_long["stepper_training"]["n_coupled_steps"] = 24
+    # 480 atmosphere steps x 2 members: the derived variables of a 24-step validation window exhaust an 80 GB GPU
+    for v in alt_long["validation"]:
+        v["compute_derived_variables"] = False
     alt_long["stepper_training"]["ocean"]["n_steps"] = {
         "outcomes": [
             {"steps": n, "probability": pr}

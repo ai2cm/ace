@@ -859,6 +859,7 @@ class ValidationTask(Generic[BD, TO]):
     aggregator_factory: Callable[[], AggregatorABC[TO]]
     weight: float = 0.0
     evaluate_all_steps: bool = True
+    compute_derived_variables: bool = True
 
 
 def build_validation_callback(
@@ -881,6 +882,7 @@ def build_validation_callback(
                 diagnostics_subdir=f"epoch_{epoch:04d}",
                 record_logs=lambda logs: None,
                 evaluate_all_steps=task.evaluate_all_steps,
+                compute_derived_variables=task.compute_derived_variables,
             )
             overlap = all_logs.keys() & summary.logs.keys()
             if overlap:

@@ -162,6 +162,7 @@ validation:
           subset:
             start_time: '2022-01-03T18:00:00'
             stop_time: '2023-10-10T18:00:00'
+  compute_derived_variables: false
 optimization:
   max_grad_norm: 1.0
   use_gradient_accumulation: true
