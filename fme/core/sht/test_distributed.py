@@ -5,7 +5,6 @@ import torch
 import torch_harmonics.distributed as thd
 
 from fme.core import get_device
-from fme.core.compile import compile_backend, compile_module
 from fme.core.distributed import Distributed
 from fme.core.sht import (
     DistributedDiscreteContinuousConvS2,
@@ -153,8 +152,7 @@ def test_transform_compiles_without_graph_break(lmax, mmax, inverse):
     assert explanation.graph_break_count == 0, explanation.break_reasons
 
 
-# (in_shape, out_shape): same grid, an odd latitude count that splits unevenly
-# across polar ranks, and a 2x downsampling as SFNO's DISCO encoders use.
+# odd_latitudes splits unevenly across polar ranks; downsample mirrors SFNO encoders
 DISCO_SHAPES = pytest.mark.parametrize(
     "in_shape, out_shape",
     [
@@ -189,25 +187,21 @@ def test_disco_conv_matches_upstream(in_shape, out_shape):
     torch.nn.init.normal_(conv.bias)
     upstream.bias.data.copy_(conv.bias.data)
     x = _random_local_input(in_shape, torch.float32)()
-    # the weight and bias gradients are local: upstream only reduces them
-    # across ranks through the data-parallel wrapper
+    # weight/bias grads are compared unreduced, as upstream reduces them via DDP
     for actual, expected in zip(
         _disco_conv_forward_backward(conv, x),
         _disco_conv_forward_backward(upstream, x),
     ):
-        # the squared-sum loss accumulates float32 rounding in a different
-        # summation order than upstream's sparse contraction
+        # summation order differs from upstream's sparse contraction
         torch.testing.assert_close(actual, expected, rtol=1e-4, atol=1e-4)
 
 
 @pytest.mark.parallel
 @DISCO_SHAPES
 def test_compiled_disco_conv_matches_eager(in_shape, out_shape):
-    """``Distributed.get_disco_conv_s2`` compiles to one graph and matches eager
-    in forward and backward.
+    """``Distributed.get_disco_conv_s2`` compiles to one graph and matches eager.
 
-    On odd latitudes the backward gathers uneven shards, which neither dynamo
-    nor gloo accepts unless they are padded to equal size.
+    Odd latitudes exercise the padded uneven-shard gather in the backward.
     """
     dist = Distributed.get_instance()
     torch.manual_seed(0)
@@ -216,8 +210,11 @@ def test_compiled_disco_conv_matches_eager(in_shape, out_shape):
     ).to(get_device())
     x = _random_local_input(in_shape, torch.float32)()
     eager = _disco_conv_forward_backward(conv, x)
-    with compile_backend("aot_eager"):
-        compiled_conv = compile_module(conv, fullgraph=True)
-    compiled = _disco_conv_forward_backward(compiled_conv, x)
+    torch._dynamo.reset()
+    try:
+        compiled_conv = torch.compile(conv, backend="aot_eager", fullgraph=True)
+        compiled = _disco_conv_forward_backward(compiled_conv, x)
+    finally:
+        torch._dynamo.reset()
     for actual, expected in zip(compiled, eager):
         torch.testing.assert_close(actual, expected)

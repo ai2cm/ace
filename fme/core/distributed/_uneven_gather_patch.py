@@ -1,14 +1,12 @@
 """Uneven-shard-safe replacement for torch_harmonics' internal ``_gather``.
 
-Upstream ``_gather`` calls ``all_gather`` with unequal shard sizes (e.g. 45
-latitudes over 2 ranks), which dynamo cannot trace (its functional collective
-assumes equal shapes) and gloo rejects even eagerly. This pads shards to equal
-size, gathers, and trims; equal shards behave exactly as upstream.
+Upstream ``_gather`` calls ``all_gather`` with unequal shard sizes, which
+dynamo cannot trace and gloo rejects. This pads shards to equal size, gathers,
+and trims; equal shards behave as upstream.
 
-Copied and adapted from torch-harmonics 0.8.0 (the version pinned in
-pyproject.toml). Recheck this patch whenever that pin is bumped: as of
-torch-harmonics 0.9.3, upstream pads only for backends that need equal shapes,
-so NCCL under dynamo still takes the unequal path.
+Adapted from torch-harmonics 0.8.0 (BSD-3-Clause, Copyright (c) 2022 The
+torch-harmonics Authors). Recheck on pin bumps: as of 0.9.3 upstream pads only
+for backends that need equal shapes, so NCCL under dynamo still breaks.
 """
 
 from __future__ import annotations
