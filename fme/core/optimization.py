@@ -13,7 +13,12 @@ from fme.core.device import get_device
 from fme.core.generics.optimization import OptimizationABC
 from fme.core.muon import ADJUST_LR_FNS as MUON_ADJUST_LR_FNS
 from fme.core.muon import Muon, check_muon_state_dict_compatible
-from fme.core.scheduler import LRScheduler, SchedulerConfig, SequentialSchedulerConfig
+from fme.core.scheduler import (
+    HelicalSchedulerConfig,
+    LRScheduler,
+    SchedulerConfig,
+    SequentialSchedulerConfig,
+)
 from fme.core.typing_ import TensorDict, TensorMapping
 
 
@@ -427,8 +432,8 @@ class OptimizationConfig:
     lr: float = 0.001
     kwargs: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     enable_automatic_mixed_precision: bool = False
-    scheduler: SchedulerConfig | SequentialSchedulerConfig = dataclasses.field(
-        default_factory=lambda: SchedulerConfig()
+    scheduler: SchedulerConfig | SequentialSchedulerConfig | HelicalSchedulerConfig = (
+        dataclasses.field(default_factory=lambda: SchedulerConfig())
     )
     use_gradient_accumulation: bool = False
     max_grad_norm: float | None = None
@@ -471,9 +476,7 @@ class OptimizationConfig:
     @property
     def has_lr_schedule(self) -> bool:
         """Whether a learning rate scheduler is configured."""
-        if isinstance(self.scheduler, SequentialSchedulerConfig):
-            return True
-        return self.scheduler.type is not None
+        return self.scheduler.has_schedule
 
     def build(self, modules: torch.nn.ModuleList, max_epochs: int) -> Optimization:
         named_parameters = [
