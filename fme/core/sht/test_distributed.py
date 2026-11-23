@@ -15,8 +15,7 @@ from fme.core.sht import (
 NLAT, NLON = 8, 16
 BATCH_CHANNEL_SHAPE = (2, 3)
 
-# (lmax, mmax): the transform defaults, and modes truncated as SFNO does with
-# hard_thresholding_fraction=0.5 (lmax=int(nlat*0.5), mmax=int((nlon//2+1)*0.5)).
+# (lmax, mmax): defaults, and SFNO-style truncation (hard_thresholding_fraction=0.5)
 MODES = pytest.mark.parametrize(
     "lmax, mmax",
     [
@@ -27,9 +26,7 @@ MODES = pytest.mark.parametrize(
 
 
 def _get_local_block(x: torch.Tensor) -> torch.Tensor:
-    """This rank's block of ``x``, with the second-to-last dimension split
-    across the polar group and the last dimension split across the azimuth
-    group."""
+    """This rank's (polar, azimuth) block of ``x``."""
     polar_shapes = thd.compute_split_shapes(x.shape[-2], thd.polar_group_size())
     azimuth_shapes = thd.compute_split_shapes(x.shape[-1], thd.azimuth_group_size())
     polar_start = sum(polar_shapes[: thd.polar_group_rank()])
@@ -44,8 +41,7 @@ def _get_local_block(x: torch.Tensor) -> torch.Tensor:
 def _random_local_input(
     spatial_shape: tuple[int, int], dtype: torch.dtype
 ) -> Callable[[], torch.Tensor]:
-    """A factory of random inputs with the given global spatial shape,
-    restricted to this rank's block. Every rank draws the same global tensor."""
+    """Factory of this rank's block of a random global input."""
 
     def make_input() -> torch.Tensor:
         x = torch.randn(
@@ -67,13 +63,8 @@ def _isht_input(isht: torch.nn.Module) -> Callable[[], torch.Tensor]:
 def _assert_compiled_matches_eager(
     module: torch.nn.Module, make_input: Callable[[], torch.Tensor]
 ):
-    """Compile ``module``, call it twice on fresh local inputs, and check
-    each result against eager.
-
-    Without the ``.clone()`` in ``fme.core.sht._distributed``, the second
-    compiled call raises "setStorage ... out of bounds" on torch 2.7-2.9 when
-    the polar dimension is split (H > 1); torch 2.10 is unaffected.
-    """
+    """Two compiled calls match eager. Without the clone, the second call
+    fails on torch 2.7-2.9 when H > 1."""
     torch.manual_seed(0)
     torch._dynamo.reset()
     compiled = torch.compile(module, backend="aot_eager")
@@ -90,8 +81,7 @@ def _assert_matches_upstream(
     upstream: torch.nn.Module,
     make_input: Callable[[], torch.Tensor],
 ):
-    """Call ``module`` and ``upstream`` eagerly on the same fresh local input
-    and check that the results are equal."""
+    """``module`` and ``upstream`` give identical eager outputs."""
     torch.manual_seed(0)
     x = make_input()
     torch.testing.assert_close(module(x), upstream(x), rtol=0, atol=0)
@@ -100,9 +90,7 @@ def _assert_matches_upstream(
 @pytest.mark.parallel
 @MODES
 def test_compiled_sht_matches_eager(lmax, mmax):
-    """The SHT from ``Distributed.get_sht`` matches eager across repeated
-    compiled calls. Only spatial parallelism (``model`` backend) returns the
-    patched ``DistributedRealSHT``; otherwise this checks a non-distributed SHT."""
+    """Compiled SHT matches eager; patched class under spatial parallelism."""
     dist = Distributed.get_instance()
     sht = dist.get_sht(NLAT, NLON, lmax=lmax, mmax=mmax)
     if dist.has_spatial_parallelism:
@@ -113,10 +101,7 @@ def test_compiled_sht_matches_eager(lmax, mmax):
 @pytest.mark.parallel
 @MODES
 def test_compiled_isht_matches_eager(lmax, mmax):
-    """The inverse SHT from ``Distributed.get_isht`` matches eager across
-    repeated compiled calls. Only spatial parallelism (``model`` backend)
-    returns the patched ``DistributedInverseRealSHT``; otherwise this checks a
-    non-distributed inverse SHT."""
+    """Compiled ISHT matches eager; patched class under spatial parallelism."""
     dist = Distributed.get_instance()
     isht = dist.get_isht(NLAT, NLON, lmax=lmax, mmax=mmax)
     if dist.has_spatial_parallelism:
@@ -127,7 +112,7 @@ def test_compiled_isht_matches_eager(lmax, mmax):
 @pytest.mark.parallel
 @MODES
 def test_sht_matches_upstream(lmax, mmax):
-    """The distributed SHT matches the upstream torch-harmonics class."""
+    """Matches upstream torch-harmonics."""
     sht = DistributedRealSHT(NLAT, NLON, lmax=lmax, mmax=mmax).to(get_device())
     upstream = thd.DistributedRealSHT(NLAT, NLON, lmax=lmax, mmax=mmax).to(get_device())
     _assert_matches_upstream(sht, upstream, _sht_input(sht))
@@ -136,7 +121,7 @@ def test_sht_matches_upstream(lmax, mmax):
 @pytest.mark.parallel
 @MODES
 def test_isht_matches_upstream(lmax, mmax):
-    """The distributed inverse SHT matches the upstream torch-harmonics class."""
+    """Matches upstream torch-harmonics."""
     isht = DistributedInverseRealSHT(NLAT, NLON, lmax=lmax, mmax=mmax).to(get_device())
     upstream = thd.DistributedInverseRealSHT(NLAT, NLON, lmax=lmax, mmax=mmax).to(
         get_device()
@@ -148,13 +133,7 @@ def test_isht_matches_upstream(lmax, mmax):
 @MODES
 @pytest.mark.parametrize("inverse", [False, True], ids=["sht", "isht"])
 def test_transform_compiles_without_graph_break(lmax, mmax, inverse):
-    """The distributed transforms compile to a single graph, including the
-    transposes' backward, on a single rank and under spatial parallelism.
-
-    The inverse SHT zeroes the imaginary DC and Nyquist parts in a form dynamo
-    can trace (upstream's ``.imag`` setattr breaks the graph), and the
-    distributed transposes' ``all_to_all`` is traceable (see
-    ``fme.core.distributed._all_to_all_patch``)."""
+    """Forward and transpose backward compile to one graph."""
     transform: torch.nn.Module
     if inverse:
         transform = DistributedInverseRealSHT(NLAT, NLON, lmax=lmax, mmax=mmax)
@@ -188,8 +167,7 @@ DISCO_SHAPES = pytest.mark.parametrize(
 def _disco_conv_forward_backward(
     conv: torch.nn.Module, x: torch.Tensor
 ) -> tuple[torch.Tensor, ...]:
-    """The output of ``conv`` on ``x`` and the gradients of a squared-sum loss
-    with respect to the input, weight and bias."""
+    """Output and input/weight/bias grads of a squared-sum loss."""
     x = x.clone().requires_grad_(True)
     conv.zero_grad()
     out = conv(x)
@@ -201,8 +179,7 @@ def _disco_conv_forward_backward(
 @pytest.mark.parallel
 @DISCO_SHAPES
 def test_disco_conv_matches_upstream(in_shape, out_shape):
-    """The distributed DISCO convolution matches the upstream torch-harmonics
-    class in forward and backward, given the same weights."""
+    """Matches upstream torch-harmonics in forward and backward."""
     torch.manual_seed(0)
     kwargs = dict(in_shape=in_shape, out_shape=out_shape, kernel_shape=(3,))
     conv = DistributedDiscreteContinuousConvS2(3, 2, **kwargs).to(get_device())
@@ -225,9 +202,7 @@ def test_disco_conv_matches_upstream(in_shape, out_shape):
 @pytest.mark.parallel
 @DISCO_SHAPES
 def test_disco_conv_compiles_without_graph_break(in_shape, out_shape):
-    """The DISCO convolution from ``Distributed.get_disco_conv_s2`` traces to a
-    single graph. Upstream's distributed class contracts with a sparse tensor,
-    which dynamo cannot wrap, breaking the graph."""
+    """``Distributed.get_disco_conv_s2`` traces to one graph."""
     dist = Distributed.get_instance()
     torch.manual_seed(0)
     conv = dist.get_disco_conv_s2(

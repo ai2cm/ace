@@ -1,25 +1,16 @@
-"""Distributed SHT and DISCO helpers; import these from ``fme.core.sht``.
+"""Distributed SHT and DISCO helpers; import from ``fme.core.sht``.
 
-``DistributedRealSHT`` and ``DistributedInverseRealSHT`` fork the upstream
-``forward`` from torch-harmonics 0.8.0 (BSD-3-Clause, Copyright (c) 2022 The
-torch-harmonics Authors), adding a ``.clone()`` after ``torch.view_as_complex``
-whenever a ``distributed_transpose`` follows it. Without it, ``torch.compile``
-(torch 2.7-2.9) raises "setStorage ... out of bounds" when that view is passed
-to a transpose. When no transpose follows, the clone is skipped. The inverse
-also zeroes the imaginary DC and Nyquist parts through ``torch.view_as_real``
-instead of upstream's ``.imag`` setattr, which dynamo cannot trace; the values
-are unchanged.
+``DistributedRealSHT``/``DistributedInverseRealSHT`` fork the torch-harmonics
+0.8.0 ``forward`` (BSD-3-Clause, Copyright (c) 2022 The torch-harmonics Authors)
+to clone the ``view_as_complex`` result before a ``distributed_transpose``;
+otherwise ``torch.compile`` on torch 2.7-2.9 raises "setStorage ... out of
+bounds". The inverse zeroes DC/Nyquist via ``view_as_real``, since dynamo
+cannot trace upstream's ``.imag`` setattr.
 
-``DistributedDiscreteContinuousConvS2`` subclasses the upstream class, keeping
-its construction (and so its weights and local convolution tensor), and
-replaces the contraction in ``forward``. Upstream contracts with a sparse
-tensor on CPU, which dynamo cannot trace, or with a CUDA extension; this one
-uses fme's FFT-based contraction from ``fme.core.disco``, which the
-non-distributed convolution already uses, so the convolution compiles to a
-single graph.
+``DistributedDiscreteContinuousConvS2`` replaces upstream's sparse/CUDA-extension
+contraction with fme's FFT contraction so it compiles to one graph.
 
-Recheck against upstream when the torch-harmonics pin is bumped. Other names
-are unmodified re-exports.
+Recheck on torch-harmonics pin bumps.
 """
 
 import torch
@@ -52,9 +43,7 @@ __all__ = [
 
 
 def _view_as_complex(xs: torch.Tensor, clone: bool) -> torch.Tensor:
-    """``torch.view_as_complex(xs)``, cloned if ``clone`` so that a following
-    ``distributed_transpose`` receives a tensor with its own storage.
-    """
+    """``view_as_complex(xs)``, cloned if ``clone`` so it owns its storage."""
     x = torch.view_as_complex(xs)
     return x.clone() if clone else x
 
@@ -97,7 +86,7 @@ class DistributedRealSHT(thd.DistributedRealSHT):
             "...kmr,mlk->...lmr", x, self.weights.to(x.dtype)
         ).contiguous()
 
-        # cast to complex; cloned if the polar transpose below follows
+        # cast to complex; clone before a transpose
         x = _view_as_complex(xs, clone=self.comm_size_polar > 1)
 
         # transpose: after this, l is split and c is local
@@ -129,7 +118,7 @@ class DistributedInverseRealSHT(thd.DistributedInverseRealSHT):
         # einsum
         xs = torch.einsum("...lmr, mlk->...kmr", x, self.pct.to(x.dtype)).contiguous()
 
-        # cast to complex; cloned if any of the transposes below follow
+        # cast to complex; clone before a transpose
         x = _view_as_complex(
             xs, clone=self.comm_size_polar > 1 or self.comm_size_azimuth > 1
         )
@@ -142,8 +131,7 @@ class DistributedInverseRealSHT(thd.DistributedInverseRealSHT):
         if self.comm_size_azimuth > 1:
             x = thd.distributed_transpose_azimuth.apply(x, (-3, -1), self.m_shapes)
 
-        # set DCT and nyquist frequencies to 0, written through view_as_real
-        # because dynamo cannot trace a Tensor.imag setattr
+        # set DCT and nyquist frequencies to 0 (view_as_real: dynamo can't trace .imag=)
         torch.view_as_real(x[..., 0])[..., 1] = 0.0
         if (self.nlon % 2 == 0) and (self.nlon // 2 < x.shape[-1]):
             torch.view_as_real(x[..., self.nlon // 2])[..., 1] = 0.0

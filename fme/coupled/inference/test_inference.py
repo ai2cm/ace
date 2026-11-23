@@ -575,3 +575,19 @@ def test_inference_config_load_stepper_uses_ema_weights(
         config = dataclasses.replace(config, use_ema_if_available=use_ema_if_available)
 
     check(config.load_stepper(), expect_ema)
+
+
+def test_inference_with_output_only_sst(tmp_path: pathlib.Path):
+    config, _, _ = _setup(
+        ocean_in_names=["o_prog", "mask_0", "a_diag"],
+        ocean_out_names=["o_prog", "sst", "o_diag"],
+        atmos_in_names=["a_prog", "surface_temperature", "ocean_fraction"],
+        atmos_out_names=["a_prog", "surface_temperature", "a_diag"],
+        tmp_path=tmp_path,
+        n_coupled_steps=2,
+        coupled_steps_in_memory=1,
+        n_initial_conditions=1,
+    )
+    _run_inference(tmp_path, config)
+    ds = xr.open_dataset(tmp_path / "ocean/autoregressive_predictions.nc")
+    assert ds["sst"].sizes["time"] == 2

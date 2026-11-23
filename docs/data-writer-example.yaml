@@ -13,3 +13,8 @@ files:
       coarsen_factor: 4
     format:
       name: "zarr"
+  - label: "precip_6hourly"
+    names: ["PRATEsfc"]
+    save_reference: false
+    format:
+      name: "zarr"

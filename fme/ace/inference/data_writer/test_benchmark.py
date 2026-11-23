@@ -109,6 +109,7 @@ def test_benchmark_rejects_step_diagnostics(tmp_path):
         )
 
 
+@pytest.mark.filterwarnings("ignore:.*enabled in DataWriterConfig:FutureWarning")
 def test_benchmark_rejects_legacy_netcdf_writers(tmp_path):
     """The legacy netCDF writers write reference data the benchmark cannot supply."""
     with pytest.raises(ValueError, match="save_prediction_files"):
