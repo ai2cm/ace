@@ -16,8 +16,8 @@ SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 cd "$REPO_ROOT"
 for PPM in $LEVELS; do
-  JOB="ace-1deg-era5-${TAG}-fixedsst-co2-${PPM}-10yr"
-  C="ace2p5-fixedsst-co2-${PPM}.yaml"
+  JOB="ace-1deg-era5-${TAG}-fixedsst-co2-${PPM}${CFG_SUFFIX:-}-10yr"   # CFG_SUFFIX=-noec: energy corrector off at inference
+  C="ace2p5-fixedsst-co2-${PPM}${CFG_SUFFIX:-}.yaml"
   out=$(gantry run --name "$JOB" --task-name "$JOB" \
     --description "1deg ERA5 atmosphere-only fixed-SST 10-yr run at CO2 level ${PPM} (${C}) of ${CKPT_DS}:${CKPT_FILE}" \
     --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \

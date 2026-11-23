@@ -34,3 +34,27 @@ for ppm in LEVELS_PPM:
         header + yaml.safe_dump(base, sort_keys=True, width=120)
     )
     print("wrote", ppm)
+
+# Energy corrector off at inference (Troy 2026-11-23: is the reflected-shortwave
+# response to CO2 tied to the energy corrector?): the checkpoint's corrector with
+# total_energy_budget_correction removed, everything else kept.
+NOEC_CORRECTOR = {
+    "type": "atmosphere_corrector",
+    "config": {
+        "conserve_dry_air": True,
+        "moisture_budget_correction": "advection_and_precipitation",
+        "clip_frozen_precipitation": True,
+        "force_positive_names": [f"specific_total_water_{i}" for i in range(8)]
+        + ["Q2m", "PRATEsfc", "total_frozen_precipitation_rate"]
+        + ["ULWRFsfc", "ULWRFtoa"]
+        + ["DLWRFsfc", "DSWRFsfc", "USWRFsfc", "USWRFtoa"],
+    },
+}
+for level in ["400ppm", "460ppm", "550ppm"]:
+    c = yaml.safe_load((HERE / f"ssp/ace2p5-fixedsst-co2-{level}.yaml").read_text())
+    c["stepper_override"]["corrector"] = NOEC_CORRECTOR
+    (HERE / f"ssp/ace2p5-fixedsst-co2-{level}-noec.yaml").write_text(
+        f"# As ace2p5-fixedsst-co2-{level}.yaml, energy corrector off at inference.\n"
+        + yaml.safe_dump(c, sort_keys=True, width=120)
+    )
+    print("wrote noec", level)
