@@ -346,8 +346,33 @@ class OceanData:
 
     @property
     def sea_ice_volume(self) -> torch.Tensor:
-        """Returns the sea ice volume."""
-        return self._get("sea_ice_volume")
+        """Returns the sea ice volume in the cell, in m**3.
+
+        Stored ``sea_ice_volume`` if present; else
+
+            ocean_sea_ice_thickness_mean * area_weights_m2 * sea_surface_fraction
+
+        i.e. HI * ocean_sea_ice_fraction * ocean area, 0 where
+        ``ocean_sea_ice_fraction`` is not positive. NaN where
+        ``ocean_sea_ice_thickness_mean`` or ``ocean_sea_ice_fraction`` is NaN
+        (land).
+        """
+        try:
+            return self._get("sea_ice_volume")
+        except KeyError:
+            return self._sea_ice_volume_from_thickness_mean()
+
+    def _sea_ice_volume_from_thickness_mean(self) -> torch.Tensor:
+        # must not read sea_ice_thickness: its last branch reads sea_ice_volume
+        thickness_mean = self.ocean_sea_ice_thickness_mean
+        ocean_sea_ice_frac = self.ocean_sea_ice_fraction
+        ocean_area = self.area_weights_m2 * self.sea_surface_fraction
+        is_nan = torch.isnan(thickness_mean) | torch.isnan(ocean_sea_ice_frac)
+        has_ice = (ocean_sea_ice_frac > 0) & ~is_nan
+        # safe operand keeps the unselected branch, and its gradient, finite
+        safe_thickness_mean = torch.where(has_ice, thickness_mean, 0.0)
+        volume = safe_thickness_mean * ocean_area
+        return torch.where(is_nan, float("nan"), volume)
 
     @property
     def ocean_sea_ice_thickness_mean(self) -> torch.Tensor:
