@@ -12,15 +12,16 @@ PRIORITY="${PRIORITY:-high}"
 MIN_RUNTIME="${MIN_RUNTIME:-6h}"
 CLUSTERS="${CLUSTERS:-ai2/titan ai2/jupiter ai2/ceres}"
 CFG_NAME="${CFG_NAME:-ace2p5-era5-multistep-ft}"
+EXTRA_NAME="${EXTRA_NAME:-ace2p5_era5_extra.zarr}"                         # ace2p5_shield_extra.zarr for the SHiELD AMIP twin
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SCRIPT_PATH=${SCRIPT_DIR#$REPO_ROOT/}
 BEAKER_USERNAME=$(beaker account whoami --format=json | jq -r '.[0].name')
 cd "$REPO_ROOT"
-JOB="ace-1deg-era5-${CFG_NAME}${JOB_SUFFIX:-}"
+JOB="ace-1deg-${JOB_PREFIX:-era5-}${CFG_NAME}${JOB_SUFFIX:-}"
 CFG="${SCRIPT_PATH}/ssp/${CFG_NAME}.yaml"
 out=$(gantry run --name "$JOB" --task-name "$JOB" \
-  --description "CM4-line ACE2.5 (${CKPT_DS}:${CKPT_FILE}) multi-step fine-tune on ERA5 1deg 6-hourly, summer-2026 ACE2S recipe (${CFG})" \
+  --description "CM4-line ACE2.5 (${CKPT_DS}:${CKPT_FILE}) multi-step fine-tune, summer-2026 ACE2S recipe (${CFG})" \
   --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
   --workspace ai2/ace --priority "$PRIORITY" --min-runtime "$MIN_RUNTIME" \
   $(for X in $CLUSTERS; do printf -- "--cluster %s " "$X"; done) \
@@ -32,7 +33,7 @@ out=$(gantry run --name "$JOB" --task-name "$JOB" \
   --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa \
   --dataset "${ATMOS_STATS_DS}:coupled_atmosphere:/atmos_stats" \
   --dataset "${CKPT_DS}:${CKPT_FILE}:/ckpt.tar" \
-  --dataset "${EXTRA_DS}:ace2p5_era5_extra.zarr:/extra/ace2p5_era5_extra.zarr" \
+  --dataset "${EXTRA_DS}:${EXTRA_NAME}:/extra/${EXTRA_NAME}" \
   ${EXISTING_RESULTS_DS:+--dataset "${EXISTING_RESULTS_DS}:/existing-results"} \
   --gpus "$N_GPUS" --shared-memory 400GiB --budget ai2/atec-climate \
   --allow-dirty --system-python --install "pip install --no-deps ." \
