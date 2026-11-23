@@ -1,22 +1,32 @@
-"""Distributed SHT helpers; import from ``fme.core.sht``.
+"""Distributed SHT and DISCO helpers; import from ``fme.core.sht``.
 
 ``DistributedRealSHT``/``DistributedInverseRealSHT`` fork the torch-harmonics
 0.8.0 ``forward`` (BSD-3-Clause, Copyright (c) 2022 The torch-harmonics Authors)
 to clone the ``view_as_complex`` result before a ``distributed_transpose``;
 otherwise ``torch.compile`` on torch 2.7-2.9 raises "setStorage ... out of
-bounds". Recheck on torch-harmonics pin bumps.
+bounds". The inverse zeroes DC/Nyquist via ``view_as_real``, since dynamo
+cannot trace upstream's ``.imag`` setattr.
+
+``DistributedDiscreteContinuousConvS2`` replaces upstream's sparse/CUDA-extension
+contraction with fme's FFT contraction so it compiles to one graph.
+
+Recheck on torch-harmonics pin bumps.
 """
 
 import torch
 import torch_harmonics.distributed as thd
 from torch_harmonics.distributed import (
-    DistributedDiscreteContinuousConvS2,
     DistributedResampleS2,
     compute_split_shapes,
     distributed_transpose_azimuth,
     distributed_transpose_polar,
     init,
     is_initialized,
+)
+
+from fme.core.disco._disco_utils import (
+    _disco_s2_contraction_fft,
+    _precompute_psi_banded,
 )
 
 __all__ = [
@@ -121,10 +131,10 @@ class DistributedInverseRealSHT(thd.DistributedInverseRealSHT):
         if self.comm_size_azimuth > 1:
             x = thd.distributed_transpose_azimuth.apply(x, (-3, -1), self.m_shapes)
 
-        # set DCT and nyquist frequencies to 0:
-        x[..., 0].imag = 0.0
+        # set DCT and nyquist frequencies to 0
+        torch.view_as_real(x[..., 0])[..., 1] = 0.0
         if (self.nlon % 2 == 0) and (self.nlon // 2 < x.shape[-1]):
-            x[..., self.nlon // 2].imag = 0.0
+            torch.view_as_real(x[..., self.nlon // 2])[..., 1] = 0.0
 
         # apply the inverse (real) FFT
         x = torch.fft.irfft(x, n=self.nlon, dim=-1, norm="forward")
@@ -135,3 +145,63 @@ class DistributedInverseRealSHT(thd.DistributedInverseRealSHT):
             x = thd.distributed_transpose_azimuth.apply(x, (-1, -3), chan_shapes)
 
         return x
+
+
+class DistributedDiscreteContinuousConvS2(thd.DistributedDiscreteContinuousConvS2):
+    """Upstream's distributed DISCO conv using fme's FFT contraction."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        psi_fft_conj, gather_idx = _precompute_psi_banded(
+            self.psi, self.nlat_in_local, self.nlon_in
+        )
+        del self.psi
+        # plain attributes, not buffers: DDP cannot broadcast complex/int buffers
+        self.psi_fft_conj = psi_fft_conj
+        self.psi_gather_idx = gather_idx
+
+    def _apply(self, fn, recurse=True):
+        super()._apply(fn, recurse=recurse)
+        self.psi_fft_conj = fn(self.psi_fft_conj)
+        self.psi_gather_idx = fn(self.psi_gather_idx)
+        return self
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        num_chans = x.shape[1]
+
+        # h and w is split. First we make w local by transposing into channel dim
+        if self.comm_size_azimuth > 1:
+            x = thd.distributed_transpose_azimuth.apply(x, (1, -1), self.lon_in_shapes)
+
+        x = _disco_s2_contraction_fft(
+            x,
+            self.psi_fft_conj.to(x.device),
+            self.psi_gather_idx.to(x.device),
+            self.nlon_out,
+        )
+
+        # sum the partial contractions over the polar group, then keep this
+        # rank's output latitudes
+        x = thd.reduce_from_polar_region(x)
+        x = thd.scatter_to_polar_region(x, -2)
+
+        # transpose back, so that lon is split and channels are local
+        if self.comm_size_azimuth > 1:
+            chan_shapes = thd.compute_split_shapes(num_chans, self.comm_size_azimuth)
+            x = thd.distributed_transpose_azimuth.apply(x, (-1, 1), chan_shapes)
+
+        B, C, K, H, W = x.shape
+        x = x.reshape(B, self.groups, self.groupsize, K, H, W)
+        out = torch.einsum(
+            "bgckxy,gock->bgoxy",
+            x,
+            self.weight.reshape(
+                self.groups, -1, self.weight.shape[1], self.weight.shape[2]
+            ),
+        ).contiguous()
+        out = out.reshape(out.shape[0], -1, H, W)
+
+        if self.bias is not None:
+            out = out + self.bias.reshape(1, -1, 1, 1)
+
+        return out
