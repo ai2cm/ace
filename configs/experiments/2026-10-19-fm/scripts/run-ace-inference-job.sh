@@ -2,7 +2,7 @@
 # Submit one inference job on a training checkpoint via gantry.
 #
 #   run-ace-inference-job.sh MODE CONFIG_FILENAME JOB_NAME JOB_GROUP \
-#       RESULTS_DATASET [CHECKPOINT_PATH] [WANDB_NAME]
+#       RESULTS_DATASET [CHECKPOINT_PATH] [WANDB_NAME] [DATASET_LABEL]
 #
 # MODE selects the entry point and how the config is validated first:
 #   suite      run_eval_suite.py (evaluator suite, one wandb run)
@@ -13,6 +13,7 @@
 # absolute /climate-default path for CHECKPOINT_PATH.
 # WANDB_NAME (default JOB_NAME) is the wandb run name; JOB_NAME is the Beaker
 # experiment and task name.
+# DATASET_LABEL optionally conditions every dataset on that label for Weka jobs.
 # Set SKIP_VALIDATE=1 when the caller has validated the config already.
 # Ported from the 2026-06-26 run-ace-eval.sh / run-ace-evaluator.sh /
 # run-ace-inference.sh. The gantry options follow run-ace-train.sh (same
@@ -31,8 +32,9 @@ JOB_GROUP="$4"
 EXISTING_RESULTS_DATASET="$5"
 CHECKPOINT_PATH="${6:-training_checkpoints/best_inference_ckpt.tar}"
 WANDB_NAME="${7:-$JOB_NAME}"
+DATASET_LABEL="${8:-}"
 if [[ -z "$EXISTING_RESULTS_DATASET" ]]; then
-  echo "usage: $0 MODE CONFIG_FILENAME JOB_NAME JOB_GROUP RESULTS_DATASET [CHECKPOINT_PATH] [WANDB_NAME]" >&2
+  echo "usage: $0 MODE CONFIG_FILENAME JOB_NAME JOB_GROUP RESULTS_DATASET [CHECKPOINT_PATH] [WANDB_NAME] [DATASET_LABEL]" >&2
   exit 2
 fi
 SCRIPT_PATH=$(git rev-parse --show-prefix)  # cwd (the experiment root, set by the submit scripts) relative to the repo root
@@ -75,13 +77,15 @@ if [[ "$EXISTING_RESULTS_DATASET" == "-" ]]; then
   fi
   if [[ "$MODE" == suite ]]; then
     override=(--checkpoint-path "$CHECKPOINT_PATH")
+    if [[ -n "$DATASET_LABEL" ]]; then override+=(--dataset-label "$DATASET_LABEL"); fi
   else
     override=(--override "checkpoint_path=$CHECKPOINT_PATH")
+    if [[ -n "$DATASET_LABEL" ]]; then override+=("labels=[$DATASET_LABEL]"); fi
   fi
   COMMAND+=("${override[@]}")
   VALIDATE+=("${override[@]}")
   launch_args+=(--yes)
-  description="Run ACE FM $MODE on a v3 checkpoint"
+  description="Run ACE FM $MODE on a Weka checkpoint"
 else
   checkpoint_args+=(--dataset "$EXISTING_RESULTS_DATASET:$CHECKPOINT_PATH:/ckpt.tar")
 fi

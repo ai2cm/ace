@@ -32,6 +32,10 @@ Weka. Evaluate both EMA checkpoints with:
 The remaining families use the same checkpoints and flags, with
 --family cm4xshield cm4-1pct sst paper-som paper-era5.
 
+The sfno-v2-c96amip and swin-v2.2-v2-c96amip cohorts also use recorded Weka
+checkpoints. Their full suite uses the trained c96 label for every dataset,
+including out-of-sample CM4/X-SHiELD evaluations.
+
 Families (--family, default all):
 
   eval        {run}-bestinf                     evaluator suite, 2026-06-26 windows
@@ -119,7 +123,8 @@ Usage:
                                             sfno-v2-ft,swin-v2.2-v2-ft,
                                             sfno-v2-ft-e32,sfno-v2-ft-e128,
                                             swin-v2.2-v2-ft-e32,
-                                            swin-v2.2-v2-ft-e128}]
+                                            swin-v2.2-v2-ft-e128,
+                                            sfno-v2-c96amip,swin-v2.2-v2-c96amip}]
                                     [--family FAMILY ...] [--run RUN ...]
                                     [--kind KIND ...] [--sst-grid GRID ...]
                                     [--sst-level LEVEL ...] [--job-name NAME ...]
@@ -150,6 +155,8 @@ from _beaker_listing import (
 from _inference_common import (
     ARCHS,
     BEAKER_MAP_PATH,
+    C96AMIP_ARCHS,
+    C96AMIP_ARM,
     CHECKPOINTS,
     DEFAULT_ARCH,
     DEFAULT_GROUP_DATE,
@@ -157,6 +164,7 @@ from _inference_common import (
     EPOCH_CHECKPOINTS,
     GROUP_DATES,
     INFERENCE_CONFIGS_DIR,
+    LAST_EMA_EPOCHS,
     OLD_RUNS,
     V3_ARCH,
     WANDB_PROJECT,
@@ -167,7 +175,7 @@ from _inference_common import (
     inference_run_names,
 )
 from _submit_common import check_configs_at_head, drop_jobs_in_beaker, submit_job
-from create_fm_v3_jobs import MAX_EPOCHS as V3_MAX_EPOCHS
+from create_fm_c96amip_jobs import LABELS as C96AMIP_LABELS
 from generate_inference_configs import (
     CM4_XSHIELD_FAMILIES,
     EVAL_SUITE_CONFIGS,
@@ -181,6 +189,7 @@ from generate_inference_configs import (
     paper_config_filename,
     sst_config_filename,
 )
+from submit_fm_c96amip_jobs import RECORD_PATH as C96AMIP_RECORD_PATH
 from submit_fm_jobs import WANDB_PREFIX, add_default_beaker_args
 from submit_fm_v3_jobs import RECORD_PATH as V3_RECORD_PATH
 
@@ -188,6 +197,10 @@ HERE = pathlib.Path(__file__).parent
 EXP_DIR = HERE.parent  # experiment root (configs, records); scripts live in scripts/
 RUN_SCRIPT = HERE / "run-ace-inference-job.sh"
 CONFIGS_DIRNAME = INFERENCE_CONFIGS_DIR.name
+WEKA_RECORDS = {
+    V3_ARCH: V3_RECORD_PATH,
+    **dict.fromkeys(C96AMIP_ARCHS, C96AMIP_RECORD_PATH),
+}
 
 WANDB_GROUPS = {
     "eval": "ace2-fm-eval-2026-10-19",
@@ -230,6 +243,8 @@ def listing_text(arch: str) -> str:
     the other archs keep the default, which also covers their --old-runs
     baselines.
     """
+    if arch in C96AMIP_ARCHS:
+        return f"{WANDB_PREFIX}{ARCHS[arch]}-{C96AMIP_ARM}-"
     if arch in GROUP_DATES:
         return f"{WANDB_PREFIX}{ARCHS[arch]}-fm-"
     return DEFAULT_TEXT
@@ -351,7 +366,8 @@ def select_jobs(
 ) -> list[tuple[str, str, str, str]]:
     """(family, run, job name, config filename) of every job of `families`
     on `runs` (sorted), family by family: family_jobs, without the
-    CM4/X-SHiELD families on runs not in cm4_xshield_runs(arch). The job name
+    CM4/X-SHiELD families on runs not in cm4_xshield_runs(arch), except for the
+    explicitly out-of-sample C96 AMIP-only evaluations. The job name
     is the wandb run name; beaker_job_name gives the Beaker experiment name.
     """
     cm4_xshield_ok = set(cm4_xshield_runs(arch))
@@ -359,7 +375,9 @@ def select_jobs(
         (family, run, name, config)
         for family in families
         for run in sorted(runs)
-        if family not in CM4_XSHIELD_FAMILIES or run in cm4_xshield_ok
+        if family not in CM4_XSHIELD_FAMILIES
+        or arch in C96AMIP_ARCHS
+        or run in cm4_xshield_ok
         for name, config in family_jobs(
             family, run, kinds, sst_grids, sst_levels, ckpt, arch
         )
@@ -401,8 +419,8 @@ def resolve_runs(
         if unknown:
             raise SystemExit(f"unknown run(s) {unknown}; available: {runs}")
         runs = [r for r in runs if r in args.run]
-    if args.arch == V3_ARCH:
-        return _resolve_v3_runs(runs, args.beaker_workspace)
+    if args.arch in WEKA_RECORDS:
+        return _resolve_weka_runs(runs, args.beaker_workspace, args.arch)
     if args.use_map:
         mapping = json.loads(BEAKER_MAP_PATH.read_text())
         ready = {r: TrainingOutput(mapping[r]) for r in runs if r in mapping}
@@ -417,11 +435,12 @@ def resolve_runs(
     return {run: TrainingOutput(dataset) for run, dataset in datasets.items()}, skipped
 
 
-def _resolve_v3_runs(
-    runs: list[str], workspace: str
+def _resolve_weka_runs(
+    runs: list[str], workspace: str, arch: str
 ) -> tuple[dict[str, TrainingOutput], dict[str, str]]:
-    records = json.loads(V3_RECORD_PATH.read_text())
-    text = listing_text(V3_ARCH)
+    record_path = WEKA_RECORDS[arch]
+    records = json.loads(record_path.read_text())
+    text = listing_text(arch)
     print(f"Listing experiments in {workspace} matching {text}...")
     by_id = {exp["id"]: exp for exp in list_experiments(workspace, text)}
     ready = {}
@@ -429,7 +448,7 @@ def _resolve_v3_runs(
     for run in runs:
         record = records.get(run)
         if record is None:
-            skipped[run] = f"not in {V3_RECORD_PATH.name}"
+            skipped[run] = f"not in {record_path.name}"
             continue
         exp_id = record["id"]
         if exp_id not in by_id:
@@ -443,13 +462,17 @@ def _resolve_v3_runs(
             "-",
             {
                 "bestinf": record["best_inference_ckpt"],
-                "lastema": record["ema_ckpt_pattern"].format(epoch=V3_MAX_EPOCHS),
+                "lastema": record["ema_ckpt_pattern"].format(
+                    epoch=LAST_EMA_EPOCHS[arch]
+                ),
             },
         )
     return ready, skipped
 
 
-def validate_configs(families_configs: list[tuple[str, str]]) -> None:
+def validate_configs(
+    families_configs: list[tuple[str, str]], dataset_label: str | None = None
+) -> None:
     """Validate each (family, config filename) against this checkout's fme."""
     for family, config in families_configs:
         path = str(INFERENCE_CONFIGS_DIR / config)
@@ -470,6 +493,12 @@ def validate_configs(families_configs: list[tuple[str, str]]) -> None:
                 mode,
                 path,
             ]
+        if dataset_label is not None:
+            cmd += (
+                ["--dataset-label", dataset_label]
+                if mode == "suite"
+                else ["--override", f"labels=[{dataset_label}]"]
+            )
         subprocess.run(cmd, check=True)
         print(f"Validated ({mode}): {config}")
 
@@ -557,8 +586,8 @@ def main() -> None:
     # Same Beaker defaults as the training submitter (submit_fm_jobs.py).
     add_default_beaker_args(parser)
     args = parser.parse_args()
-    if args.arch == V3_ARCH and args.use_map:
-        parser.error("sfno-v3 uses fm_v3_jobs.json instead of --use-map")
+    if args.arch in WEKA_RECORDS and args.use_map:
+        parser.error(f"{args.arch} uses {WEKA_RECORDS[args.arch].name} for checkpoints")
     if args.old_runs and (args.ckpt != ["lastema"] or args.family != ["eval"]):
         raise SystemExit("--old-runs needs --ckpt lastema and --family eval")
     if args.old_runs and args.arch not in OLD_RUNS:
@@ -576,7 +605,11 @@ def main() -> None:
         for run, reason in sorted(skipped.items()):
             print(f"  {run}  ({reason})")
     no_cm4_xshield = sorted(set(ready) - cm4_xshield_ok)
-    if no_cm4_xshield and set(args.family) & set(CM4_XSHIELD_FAMILIES):
+    if (
+        args.arch not in C96AMIP_ARCHS
+        and no_cm4_xshield
+        and set(args.family) & set(CM4_XSHIELD_FAMILIES)
+    ):
         families = "/".join(CM4_XSHIELD_FAMILIES)
         print(f"No {families} jobs (not trained on CM4/X-SHiELD):")
         for run in no_cm4_xshield:
@@ -641,7 +674,8 @@ def main() -> None:
         check_configs_at_head(
             [INFERENCE_CONFIGS_DIR / config for config in {c for _, c in needed}]
         )
-    validate_configs(needed)
+    dataset_label = C96AMIP_LABELS[C96AMIP_ARM] if args.arch in C96AMIP_ARCHS else None
+    validate_configs(needed, dataset_label)
 
     for job in jobs:
         submit_job(
@@ -654,6 +688,7 @@ def main() -> None:
                 job.dataset_id,
                 job.checkpoint,
                 job.wandb_name,
+                *([dataset_label] if dataset_label is not None else []),
             ],
             wandb_project=WANDB_PROJECT,
             args=args,

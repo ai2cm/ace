@@ -2,7 +2,45 @@ import sys
 
 import eval_table
 from _beaker_listing import RUNNING, NamedExperiment
-from _inference_common import V3_ARCH, inference_run_names
+from _inference_common import C96AMIP_ARCHS, V3_ARCH, inference_run_names
+from fm_table import ROWS
+
+
+def test_tables_track_the_six_c96amip_runs(monkeypatch, capsys):
+    listed_names = set()
+
+    def list_jobs(text, names):
+        assert "-fm-c96amip-" in text
+        assert len(names) == 90
+        assert all(name.startswith(text) for name in names)
+        listed_names.update(names)
+        return {}
+
+    monkeypatch.setattr(sys, "argv", ["eval_table.py"])
+    monkeypatch.setattr(eval_table, "newest_by_name", list_jobs)
+    eval_table.main()
+
+    assert {row.label for row in ROWS} == C96AMIP_ARCHS.keys()
+    training = {name for row in ROWS for name in row.names}
+    assert len(training) == 6
+    assert all(
+        sum(name.startswith(run + "-") for name in listed_names) == 30
+        for run in training
+    )
+    assert "| Total |  | 0 | 0 | 0 | 0 | 180 | 180 |" in capsys.readouterr().out
+
+
+def test_eval_table_with_v3_arch_tracks_all_families(monkeypatch, capsys):
+    def list_jobs(text, names):
+        assert text == "ace2-fm-nc-sfno-v3-fm-"
+        assert len(names) == 540
+        return {}
+
+    monkeypatch.setattr(sys, "argv", ["eval_table.py", "--arch", V3_ARCH])
+    monkeypatch.setattr(eval_table, "newest_by_name", list_jobs)
+    eval_table.main()
+
+    assert "| Total |  | 0 | 0 | 0 | 0 | 540 | 540 |" in capsys.readouterr().out
 
 
 def test_eval_table_tracks_v3_eval_checkpoints(monkeypatch, capsys):

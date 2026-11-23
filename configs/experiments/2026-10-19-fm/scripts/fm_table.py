@@ -1,18 +1,7 @@
-"""Progress table for the FM training runs currently tracked.
+"""Progress table for the six C96 AMIP-only FM training runs.
 
-Rows (ROWS), 3 seeds each unless noted:
-- The 18 FM v3 per-grid-cell normalization runs (create_fm_v3_jobs.py, 120
-  epochs, 4 GPUs), one row per network x loss normalization:
-  sfno-v3-{c1,c2,c3}-{scalarloss,cellloss}.
-- Their smoke tests (sfno-v3-smoke-{c2,c3}-cellloss, s0, 2 epochs), while
-  their configs exist.
-- The 6 FM C96 AMIP-only runs and the 6 runs of their ERA5-only baseline
-  (create_fm_c96amip_jobs.py, 120 epochs, 4 GPUs), one row per arm and
-  architecture: sfno-v2-c96amip, swin-v2.2-v2-c96amip, sfno-v2-era5-1979,
-  swin-v2.2-v2-era5-1979; and the C96 smoke tests (sfno-v2-c96amip-smoke,
-  swin-v2.2-v2-c96amip-smoke, s0, 2 epochs), while their configs exist.
-- The 6 1deg, 6-hourly FM runs of create_fm_1deg_jobs (120 epochs, 8 GPUs),
-  one row per arm: sfno-v2-1deg-fm-e3sm-balanced, sfno-v2-1deg-fm-era5.
+One row per architecture (SFNO v2 and Swin v2.2 v2), with three seeds each
+and 120 epochs per run. See create_fm_c96amip_jobs.py for their configs.
 
 Two backends, chosen by whether the `beaker` CLI is on PATH:
 - beaker: one `beaker workspace experiments` listing per row prefix
@@ -20,8 +9,7 @@ Two backends, chosen by whether the `beaker` CLI is on PATH:
   each experiment, as before.
 - gantry (agent VMs, which have no beaker CLI): the gantry shim
   (/usr/local/bin/gantry), which sees only jobs submitted from this VM. Job
-  name -> Beaker id comes from records/fm_v3_jobs.json and
-  records/fm_c96amip_jobs.json (written by submit_fm_v3_jobs.py and
+  name -> Beaker id comes from records/fm_c96amip_jobs.json (written by
   submit_fm_c96amip_jobs.py), else from `gantry list --all` (experiment names are
   agent-alexeyy-<job name>-<suffix>; the newest wins); status from `gantry
   list --all` (a job it calls running counts as queued until `gantry status`
@@ -40,8 +28,7 @@ Two backends, chosen by whether the `beaker` CLI is on PATH:
   its retry either, so a queued job whose W&B run shows progress is counted
   as queued and listed under the tables as "queued (preempted, epoch N)",
   not as never started. Without a W&B run (not started, no epoch done yet,
-  or W&B unreachable) a job falls back to its current-attempt log. Rows of
-  runs submitted outside this VM (the 1deg runs) are left out, with a note.
+  or W&B unreachable) a job falls back to its current-attempt log.
 
 Beaker backend (gantry backend: see above for W&B): epochs done and
 per-phase timings come from the logs of every run (preemption retry) of each
@@ -61,8 +48,7 @@ work, minus the epoch in progress.) Epoch columns cover unfinished (running or
 queued) jobs only, "-" when none; train-time and timing columns cover finished
 and running jobs. The "inference, every 10" column is the inline inference
 after epochs 10, 20, ..., when the every-10th-epoch entries run too; "-" until
-a run of the row has finished one (the smoke test runs all of its inference
-every epoch). All values are measured; there are no estimates.
+a run of the row has finished one. All values are measured.
 
 "Not submitted" counts job names with no Beaker experiment;
 "Failed / Other" counts only experiments that exist and failed or were canceled.
@@ -94,28 +80,10 @@ from _beaker_listing import (  # noqa: E402
     job_status,
     list_experiments,
 )
-from create_fm_1deg_jobs import ARMS as ARMS_1DEG  # noqa: E402
-from create_fm_1deg_jobs import SEEDS as SEEDS_1DEG  # noqa: E402
-from create_fm_1deg_jobs import run_config_name as run_config_name_1deg  # noqa: E402
-from create_fm_c96amip_jobs import ARCHS as C96AMIP_ARCHS  # noqa: E402
-from create_fm_c96amip_jobs import ARMS as C96AMIP_ARMS  # noqa: E402
+from _inference_common import C96AMIP_ARCHS, inference_run_names  # noqa: E402
 from create_fm_c96amip_jobs import MAX_EPOCHS as MAX_EPOCHS_C96AMIP  # noqa: E402
-from create_fm_c96amip_jobs import (
-    SMOKE_MAX_EPOCHS as C96AMIP_SMOKE_EPOCHS,  # noqa: E402
-)
-from create_fm_c96amip_jobs import runs as c96amip_runs  # noqa: E402
-from create_fm_c96amip_jobs import smoke_runs as c96amip_smoke_runs  # noqa: E402
-from create_fm_v3_jobs import LOSSES, NETWORKS, SMOKE_MAX_EPOCHS  # noqa: E402
-from create_fm_v3_jobs import MAX_EPOCHS as MAX_EPOCHS_V3  # noqa: E402
-from create_fm_v3_jobs import runs as v3_runs  # noqa: E402
-from create_fm_v3_jobs import smoke_runs as v3_smoke_runs  # noqa: E402
-from submit_fm_jobs import config_to_job_name  # noqa: E402
+from submit_fm_c96amip_jobs import RECORD_PATH as C96AMIP_RECORD  # noqa: E402
 
-EXP_DIR = pathlib.Path(__file__).parent.parent
-V3_RECORD = EXP_DIR / "records" / "fm_v3_jobs.json"
-C96AMIP_RECORD = EXP_DIR / "records" / "fm_c96amip_jobs.json"
-# The submit scripts' records, each naming the latest submission of its jobs.
-RECORDS = (V3_RECORD, C96AMIP_RECORD)
 GANTRY = "/usr/local/bin/gantry"
 AGENT_PREFIX = "agent-alexeyy-"
 GANTRY_LIST_LIMIT = 500
@@ -192,44 +160,12 @@ class Row:
     label: str
     names: tuple[str, ...]
     max_epochs: int
-    # Submitted from this agent VM (visible through the gantry shim).
-    agent_vm: bool
 
 
-def _rows() -> list[Row]:
-    rows = []
-    v3 = v3_runs()
-    for network in NETWORKS:
-        for loss in LOSSES:
-            names = tuple(
-                r.job_name for r in v3 if (r.network, r.loss) == (network, loss)
-            )
-            rows.append(Row(f"sfno-v3-{network}-{loss}", names, MAX_EPOCHS_V3, True))
-    for smoke in v3_smoke_runs():
-        if smoke.path.exists():
-            label = f"sfno-v3-smoke-{smoke.network}-{smoke.loss}"
-            rows.append(Row(label, (smoke.job_name,), SMOKE_MAX_EPOCHS, True))
-    c96amip = c96amip_runs()
-    for arm in C96AMIP_ARMS:
-        for arch in C96AMIP_ARCHS:
-            names = tuple(r.job_name for r in c96amip if (r.arch, r.arm) == (arch, arm))
-            label = f"{arch.removeprefix('nc-')}-{arm.removeprefix('fm-')}"
-            rows.append(Row(label, names, MAX_EPOCHS_C96AMIP, True))
-    for c96amip_smoke in c96amip_smoke_runs():
-        if c96amip_smoke.path.exists():
-            label = f"{c96amip_smoke.arch.removeprefix('nc-')}-c96amip-smoke"
-            names = (c96amip_smoke.job_name,)
-            rows.append(Row(label, names, C96AMIP_SMOKE_EPOCHS, True))
-    for arm in ARMS_1DEG:
-        names = tuple(
-            config_to_job_name(run_config_name_1deg(arm, seed, False))
-            for seed in SEEDS_1DEG
-        )
-        rows.append(Row(f"sfno-v2-1deg-{arm}", names, 120, False))
-    return rows
-
-
-ROWS = _rows()
+ROWS = [
+    Row(arch, tuple(inference_run_names(arch)), MAX_EPOCHS_C96AMIP)
+    for arch in C96AMIP_ARCHS
+]
 
 
 @dataclass
@@ -670,10 +606,8 @@ def gantry_backend(rows: list[Row]) -> tuple[dict[str, Tracked], dict[str, Progr
         ):
             newest[name] = job
     # The submit script's record names the latest submission of each job.
-    for record in RECORDS:
-        if not record.exists():
-            continue
-        for name, entry in json.loads(record.read_text()).items():
+    if C96AMIP_RECORD.exists():
+        for name, entry in json.loads(C96AMIP_RECORD.read_text()).items():
             if name in names and entry.get("id") in by_id:
                 newest[name] = by_id[entry["id"]]
     # `gantry list` can report a job as running before its container has
@@ -722,7 +656,7 @@ def gantry_backend(rows: list[Row]) -> tuple[dict[str, Tracked], dict[str, Progr
 
 def main() -> None:
     use_beaker = shutil.which("beaker") is not None
-    rows = ROWS if use_beaker else [row for row in ROWS if row.agent_vm]
+    rows = ROWS
     if use_beaker:
         tracked, prog = beaker_backend(rows)
     else:
@@ -784,12 +718,10 @@ def main() -> None:
         print()
         print("Queued (preempted, waiting for a retry): " + ", ".join(preempted) + ".")
     if not use_beaker:
-        hidden = [row.label for row in ROWS if not row.agent_vm]
         print()
         print(
             "Source: gantry shim (no beaker CLI here; it sees only jobs "
-            "submitted from this VM) and W&B (timings, train time, restarts). "
-            "Not shown: " + ", ".join(hidden) + "."
+            "submitted from this VM) and W&B (timings, train time, restarts)."
         )
 
 

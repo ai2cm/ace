@@ -3,6 +3,7 @@ from collections import Counter
 
 import submit_inference_jobs as submit
 from _inference_common import (
+    C96AMIP_ARCHS,
     INFERENCE_CONFIGS_DIR,
     V3_ARCH,
     inference_run_names,
@@ -101,7 +102,9 @@ def test_v3_resolve_runs_uses_succeeded_recorded_experiment(monkeypatch):
             for run, exit_code in [(succeeded, 0), (failed, 1)]
         ],
     )
-    ready, skipped = submit._resolve_v3_runs([succeeded, failed, missing], "ai2/ace")
+    ready, skipped = submit._resolve_weka_runs(
+        [succeeded, failed, missing], "ai2/ace", V3_ARCH
+    )
     assert list(ready) == [succeeded]
     assert set(skipped) == {failed, missing}
     output = ready[succeeded]
@@ -112,3 +115,17 @@ def test_v3_resolve_runs_uses_succeeded_recorded_experiment(monkeypatch):
     assert output.checkpoint("lastema", V3_ARCH) == records[succeeded][
         "ema_ckpt_pattern"
     ].format(epoch=120)
+
+
+def test_c96amip_suites_use_the_trained_label():
+    for arch in C96AMIP_ARCHS:
+        run = inference_run_names(arch)[0]
+        assert run_train_labels(run) == {"c96"}
+        for family in ("eval", "cm4xshield", "cm4-1pct"):
+            [(name, filename)] = submit.family_jobs(family, run, arch=arch)
+            suite = load_suite(
+                str(INFERENCE_CONFIGS_DIR / filename), dataset_label="c96"
+            )
+            for entry in suite.inferences:
+                assert entry.config.labels == ["c96"]
+                assert entry.config_data["loader"]["dataset"]["labels"] == ["c96"]

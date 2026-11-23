@@ -54,7 +54,18 @@ class EvalSuiteConfig:
     config_data: dict[str, Any]
 
 
-def load_suite(path: str, checkpoint_path: str | None = None) -> EvalSuiteConfig:
+def _set_dataset_label(dataset: dict, label: str) -> None:
+    for key in ("concat", "merge"):
+        if key in dataset:
+            for member in dataset[key]:
+                _set_dataset_label(member, label)
+            return
+    dataset["labels"] = [label]
+
+
+def load_suite(
+    path: str, checkpoint_path: str | None = None, dataset_label: str | None = None
+) -> EvalSuiteConfig:
     """Load and strictly validate a suite: every entry as an
     InferenceEvaluatorConfig, the logging block as a LoggingConfig.
     """
@@ -68,6 +79,9 @@ def load_suite(path: str, checkpoint_path: str | None = None) -> EvalSuiteConfig
         names.add(name)
         if checkpoint_path is not None:
             entry_data["config"]["checkpoint_path"] = checkpoint_path
+        if dataset_label is not None:
+            _set_dataset_label(entry_data["config"]["loader"]["dataset"], dataset_label)
+            entry_data["config"]["labels"] = [dataset_label]
         evaluator_config = dacite.from_dict(
             data_class=InferenceEvaluatorConfig,
             data=entry_data["config"],
@@ -92,9 +106,12 @@ def load_suite(path: str, checkpoint_path: str | None = None) -> EvalSuiteConfig
 
 
 def run_eval_suite(
-    path: str, validate_only: bool = False, checkpoint_path: str | None = None
+    path: str,
+    validate_only: bool = False,
+    checkpoint_path: str | None = None,
+    dataset_label: str | None = None,
 ) -> None:
-    suite = load_suite(path, checkpoint_path)
+    suite = load_suite(path, checkpoint_path, dataset_label)
     if validate_only:
         return
 
@@ -128,13 +145,21 @@ def main() -> None:
         "--checkpoint-path", help="Checkpoint to use for every suite entry."
     )
     parser.add_argument(
+        "--dataset-label", help="Label to use for every dataset in the suite."
+    )
+    parser.add_argument(
         "--validate-only",
         action="store_true",
         help="Validate the suite config without running inference.",
     )
     args = parser.parse_args()
     with Distributed.context():
-        run_eval_suite(args.yaml_config, args.validate_only, args.checkpoint_path)
+        run_eval_suite(
+            args.yaml_config,
+            args.validate_only,
+            args.checkpoint_path,
+            args.dataset_label,
+        )
 
 
 if __name__ == "__main__":

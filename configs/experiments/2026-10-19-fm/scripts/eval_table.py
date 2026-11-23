@@ -1,4 +1,4 @@
-"""Status table of the post-training inference jobs of one architecture.
+"""Status table for the six C96 AMIP-only runs' post-training inference jobs.
 
 The expected jobs are those submit_inference_jobs.py submits for every
 inference run of the architecture (_inference_common.inference_run_names),
@@ -9,9 +9,9 @@ _inference_common.arch_checkpoints, i.e. bestinf and lastema and, for the eval
 family of the ft archs, their per-epoch ones: ema1 .. ema7 for sfno-v2-ft and
 swin-v2.2-v2-ft, ema2, ema4, ema8, ema16 for their -e32 long fine-tunes and
 ema8, ema16, ema32, ema64 for the -e128 ones), one row per family and
-checkpoint. For sfno-v3, all families track the 18 production runs at bestinf
-and the epoch-120 lastema checkpoint. Their Beaker
-state comes from one workspace listing (submit_inference_jobs.listing_text);
+checkpoint. By default, the table tracks both C96 AMIP-only architectures at
+bestinf and the epoch-120 lastema checkpoint. Use --arch for a single
+architecture. Beaker state comes from a listing per architecture;
 no logs are read. As in fm_table.py, the newest experiment of each job name
 counts, and preemption retries resolve to that experiment's latest status
 (_beaker_listing.experiment_status).
@@ -22,11 +22,7 @@ counts experiments that exist and failed, were canceled, or have no job.
 Each of those is listed below the table with its experiment id.
 
 Usage:
-    python eval_table.py [--arch {sfno,swin-v2.2,sfno-v2,swin-v2.2-v2,sfno-v3,
-                                  sfno-v2-ext80,swin-v2.2-v2-ext80,
-                                  sfno-v2-ft,swin-v2.2-v2-ft,
-                                  sfno-v2-ft-e32,sfno-v2-ft-e128,
-                                  swin-v2.2-v2-ft-e32,swin-v2.2-v2-ft-e128}]
+    python eval_table.py [--arch ARCH]
                          [--family FAMILY ...]
                          [--ckpt {bestinf,lastema,emaN} ...]
 """
@@ -40,6 +36,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent))
 from _beaker_listing import OK, RUNNING  # noqa: E402
 from _inference_common import (  # noqa: E402
     ARCHS,
+    C96AMIP_ARCHS,
     CHECKPOINTS,
     EPOCH_CHECKPOINTS,
     arch_checkpoints,
@@ -53,7 +50,6 @@ from submit_inference_jobs import (  # noqa: E402
     select_jobs,
 )
 
-DEFAULT_ARCH = "sfno-v2"
 MISSING = "missing"
 COLUMNS = (
     "Family",
@@ -110,8 +106,7 @@ def main() -> None:
     parser.add_argument(
         "--arch",
         choices=list(ARCHS),
-        default=DEFAULT_ARCH,
-        help=f"Architecture of the training runs (default: {DEFAULT_ARCH}).",
+        help="Architecture to count (default: both C96 AMIP-only architectures).",
     )
     parser.add_argument(
         "--family",
@@ -128,9 +123,18 @@ def main() -> None:
         help="Checkpoints to count (default: all the architecture has).",
     )
     args = parser.parse_args()
-    ckpts = arch_checkpoints(args.arch) if args.ckpt is None else args.ckpt
-    jobs = expected_jobs(args.arch, ckpts, args.family)
-    by_name = newest_by_name(listing_text(args.arch), {name for _, _, name in jobs})
+    arches = list(C96AMIP_ARCHS) if args.arch is None else [args.arch]
+    ckpts = args.ckpt or list(
+        dict.fromkeys(ckpt for arch in arches for ckpt in arch_checkpoints(arch))
+    )
+    jobs = []
+    by_name = {}
+    for arch in arches:
+        arch_jobs = expected_jobs(arch, ckpts, args.family)
+        jobs.extend(arch_jobs)
+        by_name.update(
+            newest_by_name(listing_text(arch), {name for _, _, name in arch_jobs})
+        )
     status = {
         name: (
             (by_name[name].status, _queued(by_name[name]))
@@ -147,7 +151,10 @@ def main() -> None:
                 rows.append((family, ckpt, *_counts(cell)))
     rows.append(("Total", "", *_counts([status[n] for _, _, n in jobs])))
 
-    print(f"Inference jobs of {args.arch} ({ARCHS[args.arch]})")
+    if args.arch is None:
+        print("Inference jobs for C96 AMIP-only SFNO v2 and Swin v2.2 v2")
+    else:
+        print(f"Inference jobs of {args.arch} ({ARCHS[args.arch]})")
     print(f"As of {datetime.now(UTC):%Y-%m-%d %H:%M} UTC")
     print()
     _print_table(COLUMNS, rows)
