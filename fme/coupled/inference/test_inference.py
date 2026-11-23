@@ -17,7 +17,7 @@ from fme.core.dataset.xarray import XarrayDataConfig
 from fme.core.logging_utils import LoggingConfig
 from fme.core.registry.corrector import CorrectorSelector
 from fme.core.registry.module import ModuleSelector
-from fme.core.testing import ALLOW_SEEDED_NOISE_GRAPH_BREAKS, mock_wandb
+from fme.core.testing import mock_wandb
 from fme.coupled.data_loading.inference import CoupledForcingDataLoaderConfig
 from fme.coupled.data_loading.test_data_loader import create_coupled_data_on_disk
 from fme.coupled.inference.data_writer import CoupledDataWriterConfig
@@ -394,7 +394,6 @@ def _run_seeded_inference(
     return ds["a_prog"].values
 
 
-@ALLOW_SEEDED_NOISE_GRAPH_BREAKS
 @pytest.mark.slow
 def test_inference_seed_reproducible(tmp_path: pathlib.Path):
     """A seeded run is reproducible end-to-end, and a different seed gives a

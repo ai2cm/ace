@@ -51,7 +51,7 @@ from fme.core.random_state import RandomState
 from fme.core.step.single_module import SingleModuleStepConfig
 from fme.core.step.step import StepSelector
 from fme.core.stepper_state import StepperState
-from fme.core.testing import ALLOW_SEEDED_NOISE_GRAPH_BREAKS, mock_wandb
+from fme.core.testing import mock_wandb
 
 TIMESTEP = datetime.timedelta(hours=6)
 
@@ -365,7 +365,6 @@ def save_noise_conditioned_stepper(
     torch.save({"stepper": stepper.get_state()}, path)
 
 
-@ALLOW_SEEDED_NOISE_GRAPH_BREAKS
 @pytest.mark.slow
 def test_segmented_stochastic_inference_matches_single_run(tmp_path):
     """The acceptance test: a seeded stochastic rollout split into two segments is

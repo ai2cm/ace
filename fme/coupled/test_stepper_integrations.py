@@ -34,12 +34,6 @@ class AddBias(torch.nn.Module):
         return x + self.bias
 
 
-@pytest.mark.allow_graph_breaks(
-    reason=(
-        "gradient accumulation registers module backward hooks, which dynamo "
-        "traces only with compiled autograd"
-    )
-)
 def test_stepper_gradient_accumulation_integration():
     ocean_in_names = ["o_prog", "o_sfc_temp", "o_mask", "a_diag1"]
     ocean_out_names = ["o_prog", "o_sfc_temp", "o_diag1", "o_diag2"]

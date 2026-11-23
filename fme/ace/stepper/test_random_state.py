@@ -30,11 +30,7 @@ from fme.ace.stepper.single_module import Stepper, StepperConfig
 from fme.core.random_state import RandomState
 from fme.core.registry.module import ModuleSelector
 from fme.core.step import SingleModuleStepConfig, StepSelector
-from fme.core.testing import (
-    ALLOW_SEEDED_NOISE_GRAPH_BREAKS,
-    get_dataset_info,
-    trivial_network_and_loss_normalization,
-)
+from fme.core.testing import get_dataset_info, trivial_network_and_loss_normalization
 
 DEVICE = fme.get_device()
 
@@ -151,7 +147,6 @@ def _rollout(
     return torch.cat(outputs, dim=1)
 
 
-@ALLOW_SEEDED_NOISE_GRAPH_BREAKS
 def test_seeded_rollout_independent_of_forward_steps_in_memory():
     """A seeded rollout gives identical results whether run in one window or
     split into smaller windows (the forward_steps_in_memory invariant)."""
@@ -173,7 +168,6 @@ def test_seeded_rollout_independent_of_forward_steps_in_memory():
     torch.testing.assert_close(single, chunked, rtol=0, atol=0)
 
 
-@ALLOW_SEEDED_NOISE_GRAPH_BREAKS
 def test_two_seeded_rollouts_match_and_differ_by_seed():
     """Same seed -> identical rollout; different seed -> different; and the
     unseeded default is not reproducible across runs."""

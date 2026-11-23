@@ -45,8 +45,6 @@ from fme.core.step.single_module import (
 )
 from fme.core.step.step import StepABC, StepSelector
 from fme.core.testing import (
-    ALLOW_SEEDED_NOISE_GRAPH_BREAKS,
-    assert_step_modules_have_no_graph_breaks,
     get_dataset_info,
     skip_unless_cuda,
     trivial_network_and_loss_normalization,
@@ -2635,27 +2633,6 @@ def test_step_compiles_its_modules_after_distributed_wrapping(
         assert module.forward_module._orig_mod is module.torch_module, attr
 
 
-@pytest.mark.parametrize("training", [True, False], ids=["train", "eval"])
-@pytest.mark.parametrize("selector_getter,module_attrs", _COMPILED_MODULE_CASES)
-def test_step_compiled_modules_have_no_graph_breaks(
-    selector_getter: Callable[[], StepSelector],
-    module_attrs: list[str],
-    training: bool,
-):
-    """Each module traces into one graph with the inputs the step passes it."""
-    torch.manual_seed(0)
-    with compile_enabled(False):
-        step = get_step(selector_getter(), DEFAULT_IMG_SHAPE)
-    args = StepArgs(
-        input=get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples=2),
-        next_step_input_data=get_tensor_dict(
-            step.next_step_input_names, DEFAULT_IMG_SHAPE, n_samples=2
-        ),
-        labels=None,
-    )
-    assert_step_modules_have_no_graph_breaks(step, args, training)
-
-
 def _train_step_once(
     step: StepABC, input_data: TensorDict, next_step_input_data: TensorDict
 ) -> tuple[TensorDict, dict[str, torch.Tensor]]:
@@ -2684,7 +2661,6 @@ def _relative_error(
     return (actual - expected).norm().item() / scale
 
 
-@ALLOW_SEEDED_NOISE_GRAPH_BREAKS
 @pytest.mark.slow
 @pytest.mark.timeout(300)
 @pytest.mark.parametrize("selector_getter,module_attrs", _COMPILED_MODULE_CASES)

@@ -862,9 +862,7 @@ class ReturnZerosModule(torch.nn.Module):
         )  # unused
 
     def forward(self, x):
-        # a traceable assert, since a data-dependent Python branch would
-        # graph-break when the step compiles this module
-        torch._assert_async(torch.all(~torch.isnan(x)))
+        assert torch.all(~torch.isnan(x))
         batch_size, n_channels, nlat, nlon = x.shape
         assert n_channels == self.n_in_channels
         zero = torch.zeros(

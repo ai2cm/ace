@@ -12,19 +12,17 @@ from fme.core.device import get_device
 logger = logging.getLogger(__name__)
 
 
-def _parse_flag_env(name: str, value: str | None) -> bool | None:
-    # an empty value (e.g. FME_COMPILE=) is treated as unset
+def _parse_compile_env(value: str | None) -> bool | None:
+    # an empty value (FME_COMPILE=) is treated as unset
     if not value:
         return None
     if value == "1":
         return True
     if value == "0":
         return False
-    raise ValueError(f"{name} must be '0' or '1' (or unset or empty), got {value!r}.")
-
-
-def _parse_compile_env(value: str | None) -> bool | None:
-    return _parse_flag_env("FME_COMPILE", value)
+    raise ValueError(
+        f"FME_COMPILE must be '0' or '1' (or unset or empty), got {value!r}."
+    )
 
 
 DEFAULT_COMPILE_BACKEND = "inductor"  # torch.compile's own default
@@ -51,9 +49,6 @@ def _parse_compile_backend_env(value: str | None) -> str | None:
 _COMPILE_OVERRIDE: bool | None = _parse_compile_env(os.environ.get("FME_COMPILE"))
 _BACKEND_OVERRIDE: str | None = _parse_compile_backend_env(
     os.environ.get("FME_COMPILE_BACKEND")
-)
-_FULLGRAPH_OVERRIDE: bool | None = _parse_flag_env(
-    "FME_COMPILE_FULLGRAPH", os.environ.get("FME_COMPILE_FULLGRAPH")
 )
 _LOGGED_AUTO_SKIP = False
 RECOMPILE_LIMIT = 32
@@ -82,27 +77,6 @@ def compile_backend(backend: str) -> Generator[None, None, None]:
         yield
     finally:
         _BACKEND_OVERRIDE = previous
-
-
-@contextlib.contextmanager
-def compile_fullgraph(fullgraph: bool = True) -> Generator[None, None, None]:
-    """Override ``FME_COMPILE_FULLGRAPH`` within the context."""
-    global _FULLGRAPH_OVERRIDE
-    previous = _FULLGRAPH_OVERRIDE
-    try:
-        _FULLGRAPH_OVERRIDE = fullgraph
-        yield
-    finally:
-        _FULLGRAPH_OVERRIDE = previous
-
-
-def get_compile_fullgraph() -> bool:
-    """Whether :func:`compile_module` uses ``fullgraph=True``.
-
-    False by default, so a graph break costs speed rather than failing a run.
-    ``FME_COMPILE_FULLGRAPH=1`` makes graph breaks raise (the test suite sets it).
-    """
-    return bool(_FULLGRAPH_OVERRIDE)
 
 
 def get_compile_backend() -> str:
@@ -156,10 +130,9 @@ def compile_module(module: nn.Module, **kwargs: Any) -> nn.Module:
     through one shared dynamo entry function even unwrapped. The train,
     validation and inference variants of several modules easily exhaust it, so
     raise it to :data:`RECOMPILE_LIMIT` (keeping larger user values); past it,
-    dynamo warns and runs eagerly. Explicit ``backend``/``fullgraph`` kwargs
-    override the configured defaults.
+    dynamo warns and runs eagerly. An explicit ``backend`` kwarg overrides
+    the configured default.
     """
     _raise_recompile_limit(RECOMPILE_LIMIT)
     kwargs.setdefault("backend", get_compile_backend())
-    kwargs.setdefault("fullgraph", get_compile_fullgraph())
     return torch.compile(module, **kwargs)
