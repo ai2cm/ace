@@ -10,13 +10,20 @@ from unittest.mock import MagicMock
 import dacite
 import pytest
 import torch
+import xarray as xr
 import yaml
 
 from fme.core.testing.model import compare_restored_parameters
 from fme.core.testing.wandb import mock_wandb
 from fme.downscaling.data import RegionSamplingConfig
 from fme.downscaling.test_utils import create_test_data_on_disk, data_paths_helper
-from fme.downscaling.train import Trainer, TrainerConfig, main, restore_checkpoint
+from fme.downscaling.train import (
+    Trainer,
+    TrainerConfig,
+    initialize_from_checkpoint,
+    main,
+    restore_checkpoint,
+)
 from fme.downscaling.typing_ import FineResCoarseResPair
 
 NUM_TIMESTEPS = 4
@@ -385,3 +392,133 @@ def test_resume_two_workers(default_trainer_config, tmp_path):
     initial_process.check_returncode()
     resume_process = subprocess.run(command)
     resume_process.check_returncode()
+
+
+@pytest.mark.medium_duration
+def test_initialize_from_checkpoint(default_trainer_config, tmp_path):
+    config = dacite.from_dict(data_class=TrainerConfig, data=default_trainer_config)
+    trainer1 = config.build()
+    trainer1.startEpoch = 3
+    trainer1.num_batches_seen = 7
+    trainer1.best_valid_loss = 0.5
+    trainer1.save_epoch_checkpoints()
+    trainer2 = config.build()
+    assert any(
+        not torch.equal(p1, p2)
+        for p1, p2 in zip(
+            trainer1.model.modules.parameters(), trainer2.model.modules.parameters()
+        )
+    )
+    initialize_from_checkpoint(trainer2, trainer1.epoch_checkpoint_path)
+    assert all(
+        torch.equal(p1, p2)
+        for p1, p2 in zip(
+            trainer1.model.modules.parameters(), trainer2.model.modules.parameters()
+        )
+    )
+    # only the weights are taken from the checkpoint
+    assert trainer2.startEpoch == 0
+    assert trainer2.num_batches_seen == 0
+    assert trainer2.best_valid_loss == float("inf")
+    # the EMA starts from the loaded weights
+    with trainer2._ema_context():
+        assert all(
+            torch.equal(p1, p2)
+            for p1, p2 in zip(
+                trainer1.model.modules.parameters(),
+                trainer2.model.modules.parameters(),
+            )
+        )
+
+
+@pytest.mark.medium_duration
+def test_initialize_from_checkpoint_raises_for_normalization_mismatch(
+    default_trainer_config, stats_data_paths, tmp_path
+):
+    # names that are in the stats files
+    base_config = _update_in_out_names(
+        copy.deepcopy(default_trainer_config), ["var0", "var1"], ["var0", "var1"]
+    )
+    config = dacite.from_dict(data_class=TrainerConfig, data=base_config)
+    trainer1 = config.build()
+    trainer1.save_epoch_checkpoints()
+
+    mismatched_config = copy.deepcopy(base_config)
+    mean_path, std_path = stats_data_paths
+    doubled_std_path = tmp_path / "stats-std-doubled.nc"
+    with xr.open_dataset(std_path) as ds:
+        (2 * ds).to_netcdf(doubled_std_path)
+    mismatched_config["model"]["normalization"]["fine"] = {
+        "global_means_path": str(mean_path),
+        "global_stds_path": str(doubled_std_path),
+    }
+    trainer2 = dacite.from_dict(
+        data_class=TrainerConfig, data=mismatched_config
+    ).build()
+    with pytest.raises(ValueError, match="normalization"):
+        initialize_from_checkpoint(trainer2, trainer1.epoch_checkpoint_path)
+
+
+@pytest.mark.medium_duration
+def test_initialize_from_checkpoint_raises_for_name_mismatch(
+    default_trainer_config, tmp_path
+):
+    config = _update_in_out_names(
+        copy.deepcopy(default_trainer_config), ["var0", "var1"], ["var0", "var1"]
+    )
+    trainer1 = dacite.from_dict(data_class=TrainerConfig, data=config).build()
+    trainer1.save_epoch_checkpoints()
+    reordered = _update_in_out_names(
+        copy.deepcopy(default_trainer_config), ["var1", "var0"], ["var0", "var1"]
+    )
+    trainer2 = dacite.from_dict(data_class=TrainerConfig, data=reordered).build()
+    with pytest.raises(ValueError, match="in_names"):
+        initialize_from_checkpoint(trainer2, trainer1.epoch_checkpoint_path)
+
+
+@pytest.mark.medium_duration
+def test_train_main_init_checkpoint_and_save_checkpoint_epochs(
+    default_trainer_config, tmp_path
+):
+    """A run initialized from another run's checkpoint keeps the requested
+    epoch checkpoints, and a restart resumes from its own latest checkpoint
+    rather than re-initializing."""
+    first = copy.deepcopy(default_trainer_config)
+    first["max_epochs"] = 1
+    with mock_wandb():
+        main(_store_config(tmp_path, first, "first.yaml"))
+    init_path = os.path.join(first["experiment_dir"], "checkpoints", "latest.ckpt")
+    assert os.path.isfile(init_path)
+
+    second = copy.deepcopy(default_trainer_config)
+    second_dir = tmp_path / "second"
+    second["experiment_dir"] = str(second_dir)
+    second["init_checkpoint_path"] = init_path
+    second["max_epochs"] = 3
+    second["segment_epochs"] = 2
+    second["save_checkpoint_epochs"] = [1, 3]
+    second_path = _store_config(tmp_path, second, "second.yaml")
+    init_mock = unittest.mock.MagicMock(side_effect=initialize_from_checkpoint)
+    with unittest.mock.patch(
+        "fme.downscaling.train.initialize_from_checkpoint", new=init_mock
+    ):
+        with mock_wandb() as wandb:
+            main(second_path)
+            # persist the id and last step since mock_wandb doesn't
+            wandb_id = wandb.get_id()
+            last_step = len(wandb.get_logs()) - 1
+        init_mock.assert_called_once()
+        checkpoints = second_dir / "checkpoints"
+        assert (checkpoints / "epoch_0001.ckpt").is_file()
+        assert not (checkpoints / "epoch_0002.ckpt").exists()
+        assert not (checkpoints / "epoch_0003.ckpt").exists()
+        with mock_wandb() as wandb:
+            wandb.set_id(wandb_id)
+            wandb.set_last_received_step(last_step)
+            main(second_path)
+        init_mock.assert_called_once()  # resumed, not re-initialized
+        assert (checkpoints / "epoch_0003.ckpt").is_file()
+        saved = torch.load(
+            checkpoints / "epoch_0003.ckpt", map_location="cpu", weights_only=False
+        )
+        assert saved["startEpoch"] == 3

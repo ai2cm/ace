@@ -1,7 +1,9 @@
 import argparse
 import contextlib
+import copy
 import dataclasses
 import logging
+import math
 import os
 import shutil
 import time
@@ -31,7 +33,11 @@ from fme.downscaling.data import (
     RegionSamplingConfig,
     load_static_inputs,
 )
-from fme.downscaling.models import DiffusionModel, DiffusionModelConfig
+from fme.downscaling.models import (
+    DiffusionModel,
+    DiffusionModelConfig,
+    PairedNormalizationConfig,
+)
 
 
 def _save_checkpoint(trainer: "Trainer", path: str) -> None:
@@ -81,6 +87,74 @@ def restore_checkpoint(trainer: "Trainer") -> None:
     )
     ema_model = trainer.model.from_state(ema_checkpoint["model"])
     trainer.ema = EMATracker.from_state(ema_checkpoint["ema"], ema_model.modules)
+
+
+def _normalization_mismatches(
+    saved: PairedNormalizationConfig,
+    current: PairedNormalizationConfig,
+    names: dict[str, list[str]],
+) -> list[str]:
+    """Names (by resolution) whose saved and current normalization differ."""
+    saved = copy.deepcopy(saved)
+    current = copy.deepcopy(current)
+    saved.load()
+    current.load()
+    mismatches = []
+    for res, res_names in names.items():
+        saved_res = getattr(saved, res)
+        current_res = getattr(current, res)
+        for kind in ("means", "stds"):
+            saved_values = getattr(saved_res, kind)
+            current_values = getattr(current_res, kind)
+            for name in sorted(set(res_names)):
+                if name not in saved_values or name not in current_values:
+                    mismatches.append(f"{res} {kind}[{name}] missing")
+                elif not math.isclose(
+                    float(saved_values[name]),
+                    float(current_values[name]),
+                    rel_tol=1e-6,
+                    abs_tol=1e-12,
+                ):
+                    mismatches.append(f"{res} {kind}[{name}]")
+    return mismatches
+
+
+def initialize_from_checkpoint(trainer: "Trainer", path: str) -> None:
+    """
+    Initialize the model weights of a new training run from a checkpoint.
+
+    Only the weights of the saved model are used: the optimizer, epoch count
+    and best validation metrics start fresh, and the EMA starts from the loaded
+    weights. The saved model must have the same input and output names,
+    normalization and upsampling as the configured model.
+    """
+    checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+    state = checkpoint["model"]
+    trainer.model.validate_upsampling_matches_state(state)
+    saved_config = DiffusionModelConfig.from_state(state["config"])
+    current_config = trainer.model.config
+    for attr in ("in_names", "out_names"):
+        if list(getattr(saved_config, attr)) != list(getattr(current_config, attr)):
+            raise ValueError(
+                f"Checkpoint {path} has {attr}={getattr(saved_config, attr)}, "
+                f"but the configured model has {getattr(current_config, attr)}."
+            )
+    mismatches = _normalization_mismatches(
+        saved_config.normalization,
+        current_config.normalization,
+        names={
+            "coarse": list(current_config.in_names) + list(current_config.out_names),
+            "fine": list(current_config.out_names),
+        },
+    )
+    if mismatches:
+        raise ValueError(
+            f"Checkpoint {path} was trained with different normalization than "
+            f"the configured model: {mismatches}"
+        )
+    trainer.model.module.load_state_dict(state["module"], strict=True)
+    trainer.ema = trainer.config.ema.build(trainer.model.modules)
+    logging.info(f"Initialized model weights from {path}")
 
 
 class Trainer:
@@ -145,6 +219,9 @@ class Trainer:
             self.best_histogram_tail_checkpoint_path = os.path.join(
                 self.config.checkpoint_dir, "best_histogram_tail.ckpt"
             )
+
+    def _epoch_checkpoint_path(self, n_epochs: int) -> str:
+        return os.path.join(self.config.checkpoint_dir, f"epoch_{n_epochs:04d}.ckpt")
 
     def _get_batch_generator(
         self,
@@ -338,6 +415,17 @@ class Trainer:
 
     def save_epoch_checkpoints(self) -> None:
         if self.epoch_checkpoint_path is not None:
+            if self.startEpoch in self.config.save_checkpoint_epochs:
+                # Saved like best.ckpt (with EMA weights if validating with
+                # EMA), so it can be used directly for inference.
+                if self.validate_using_ema:
+                    context = self._ema_context
+                else:
+                    context = contextlib.nullcontext  # type: ignore
+                path = self._epoch_checkpoint_path(self.startEpoch)
+                logging.info(f"Saving checkpoint after epoch {self.startEpoch}")
+                with context():
+                    _save_checkpoint(self, path)
             logging.info(f"Saving latest checkpoint")
             _save_checkpoint(self, self.epoch_checkpoint_path)
             WandB.get_instance().mark_checkpoint()
@@ -414,6 +502,16 @@ class TrainerConfig:
             (validation patches are unchanged so metrics
             stay comparable). Requires ``coarse_patch_extent_lat`` and
             ``coarse_patch_extent_lon`` to be set.
+        init_checkpoint_path: Optional checkpoint (e.g. a ``best.ckpt`` of an
+            earlier run) whose model weights initialize a new run, for
+            fine-tuning. The optimizer, epoch count and best validation
+            metrics start fresh and the EMA starts from the loaded weights.
+            Ignored when the run resumes from its own ``latest.ckpt``. The
+            saved model must have the same input and output names,
+            normalization and upsampling as ``model``.
+        save_checkpoint_epochs: Numbers of completed epochs after which to also
+            save ``checkpoints/epoch_NNNN.ckpt``, which is kept. Saved like
+            ``best.ckpt``: with EMA weights if ``validate_using_ema``.
     """
 
     model: DiffusionModelConfig
@@ -435,6 +533,8 @@ class TrainerConfig:
     resume_results_dir: str | None = None
     log_loss_vs_noise: bool = False
     region_sampling: RegionSamplingConfig | None = None
+    init_checkpoint_path: str | None = None
+    save_checkpoint_epochs: list[int] = dataclasses.field(default_factory=list)
 
     def __post_init__(self):
         if (
@@ -548,6 +648,8 @@ def main(config_path: str):
     if trainer.resuming:
         logging.info(f"Resuming training from {trainer.epoch_checkpoint_path}")
         restore_checkpoint(trainer)
+    elif train_config.init_checkpoint_path is not None:
+        initialize_from_checkpoint(trainer, train_config.init_checkpoint_path)
     logging.info(f"Number of parameters: {count_parameters(trainer.model.modules)}")
     trainer.train()
 
