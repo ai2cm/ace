@@ -157,7 +157,15 @@ ATMOS = {
     "ace2p5cm4": "ACE2.5-CM4-ERA5-6HR, the CM4-pretrained ACE2.5 fine-tuned on ERA5 (wandb ace-samudra-coupled-cm4/9l60thd4, epoch 16; CM4 normalization, CO2 input, CM4-named and CM4-sign stress so no rename or scale)",
 }
 # the CM4-line arm runs only the current candidate's recipe (MSE FTO, then the ensemble-loss alternating stage)
-ARM_STAGES = {"ace2p5cm4": ("fto-mse", "fto-mse-then-alt", "fto-mse-then-alt-long120")}
+ARM_STAGES = {
+    "ace2p5cm4": (
+        "fto",
+        "fto-then-alt",
+        "fto-mse",
+        "fto-mse-then-alt",
+        "fto-mse-then-alt-long120",
+    )
+}
 
 
 def base(arm, ocean_name):
