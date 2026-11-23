@@ -253,11 +253,8 @@ RAW_FILENAMES = {
     FLUX_FIELDS: "fluxes_2d.zarr",
     INSTANTANEOUS_PHYSICS_FIELDS: "instantaneous_physics_fields.zarr",
     STATIC_FIELDS: "static.zarr",
-    PRESSURE_FIELDS: "instantaneous_surface_and_sea_level_pressure.zarr",
+    PRESSURE_FIELDS: "instantaneous_dynamical_fields.zarr",
 }
-
-LAND_FRAC_25KM_PATH = "gs://vcm-ml-intermediate/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/25km/land_fraction.zarr"  # noqa
-LAND_FRAC_3KM_PATH = "gs://vcm-ml-intermediate/2025-11-19-X-SHiELD-AMIP-downscaling-land-fraction/3km/land_fraction.zarr"  # noqa
 
 # Variables to extract from each file group (for 25km and 3km resolutions)
 # Note: These use standardized variable names that already exist in the source files
@@ -276,16 +273,18 @@ FILENAME_KEY_TO_VARIABLES = {
 
 # Source data paths for SHiELD AMIP plus-4K simulations
 COARSE_RES_PATH = (  # ~100km resolution
-    "gs://vcm-ml-intermediate/2026-02-12-X-SHiELD-AMIP-plus-4K-1deg-8layer-1yr.zarr"
+    "gs://vcm-ml-intermediate/2026-11-16-X-SHiELD-AMIP-plus-4K-1deg-8layer-11yr.zarr"
 )
 MED_RES_BASE_PATH = (  # ~25km resolution
-    "gs://vcm-ml-raw-flexible-retention/2026-02-09-X-SHiELD-AMIP-plus-4K-downscaling/"
+    "gs://vcm-ml-raw-flexible-retention/2026-10-28-X-SHiELD-AMIP-plus-4K-downscaling/"
     "regridded-zarrs/gaussian_grid_180_by_360_refined_to_720_by_1440/plus-4K"
 )
 FINE_RES_BASE_PATH = (  # ~3km resolution
-    "gs://vcm-ml-raw-flexible-retention/2026-02-09-X-SHiELD-AMIP-plus-4K-downscaling/"
+    "gs://vcm-ml-raw-flexible-retention/2026-10-28-X-SHiELD-AMIP-plus-4K-downscaling/"
     "regridded-zarrs/gaussian_grid_180_by_360_refined_to_5760_by_11520/plus-4K"
 )
+LAND_FRAC_25KM_PATH = f"{MED_RES_BASE_PATH}/land_fraction.zarr"
+LAND_FRAC_3KM_PATH = f"{FINE_RES_BASE_PATH}/land_fraction.zarr"
 
 
 def main(
