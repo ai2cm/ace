@@ -1,0 +1,5 @@
+group|tag|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override_args|min_runtime
+
+SamudrACEv2-ace2p5-adamw|rs0|train|urgent|b200|4||3|ai2/ace|seed=0|8h
+SamudrACEv2-ace2p5-adamw|rs1|train|urgent|b200|4||3|ai2/ace|seed=1|8h
+SamudrACEv2-ace2p5-adamw|rs2|train|urgent|b200|4||3|ai2/ace|seed=2|8h

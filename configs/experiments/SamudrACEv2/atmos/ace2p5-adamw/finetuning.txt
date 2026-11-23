@@ -1,0 +1,7 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# Pretraining not launched: after checkpoint selection, fill wandb_id and
+# results_dataset from the training.txt run and flip the seed(s) to "train".
+SamudrACEv2-ace2p5-adamw-ft|rs0|ace2-cm4-atmos-noLSM||best_ckpt|skip|urgent|b200|4||3|ai2/ace|seed=0||8h
+SamudrACEv2-ace2p5-adamw-ft|rs1|ace2-cm4-atmos-noLSM||best_ckpt|skip|urgent|b200|4||3|ai2/ace|seed=1||8h
+SamudrACEv2-ace2p5-adamw-ft|rs2|ace2-cm4-atmos-noLSM||best_ckpt|skip|urgent|b200|4||3|ai2/ace|seed=2||8h
