@@ -23,6 +23,7 @@ from fme.core.ocean_derived_variables import (
     _compute_ocean_derived_variable,
     compute_ocean_derived_quantities,
     get_ocean_derived_variable_metadata,
+    sea_ice_volume,
 )
 from fme.core.typing_ import TensorDict, TensorMapping
 
@@ -741,3 +742,58 @@ def test_manometric_sea_level_wright97_skipped_on_healpix():
     assert "mld_wright97" in out
     assert "manometric_sea_level_wright97" not in out
     assert "steric_sea_level_wright97" in out
+
+
+def test_sea_ice_volume_derived_variable_round_trip():
+    """Derived sea_ice_volume recovers HI from the thickness mean."""
+    n_lat, n_lon = 4, 8
+    horizontal_coordinates = LatLonCoordinates(
+        lat=torch.linspace(-60, 60, n_lat),
+        lon=torch.linspace(0, 360, n_lon + 1)[:-1],
+    )
+    ocean_sea_ice_frac = torch.full((1, 1, n_lat, n_lon), 0.6)
+    ocean_sea_ice_frac[:, :, 0, 0] = 0.0
+    thickness_mean = 1.2 * ocean_sea_ice_frac
+    thickness_mean[:, :, 1, 1] = float("nan")
+    data = {
+        "ocean_sea_ice_thickness_mean": thickness_mean,
+        "ocean_sea_ice_fraction": ocean_sea_ice_frac,
+        "sea_surface_fraction": torch.full((1, 1, n_lat, n_lon), 0.7),
+    }
+    out = _compute_ocean_derived_variable(
+        data,
+        depth_coordinate=None,
+        timestep=TIMESTEP,
+        label="sea_ice_volume",
+        derived_variable_func=sea_ice_volume,
+        cell_area_provider=horizontal_coordinates,
+    )
+    assert out["sea_ice_volume"][0, 0, 0, 0] == 0.0
+    assert torch.isnan(out["sea_ice_volume"][0, 0, 1, 1])
+    hi_from_mean = OceanData(data).sea_ice_thickness
+    volume_only = {k: v for k, v in out.items() if k != "ocean_sea_ice_thickness_mean"}
+    hi_from_volume = HI(
+        OceanData(volume_only, cell_area_provider=horizontal_coordinates), TIMESTEP
+    )
+    has_ice = ocean_sea_ice_frac > 0
+    torch.testing.assert_close(
+        hi_from_volume[has_ice], hi_from_mean[has_ice], equal_nan=True
+    )
+
+
+def test_sea_ice_volume_derived_variable_keeps_stored():
+    stored = torch.tensor([[5.0]])
+    data = {
+        "sea_ice_volume": stored,
+        "ocean_sea_ice_thickness_mean": torch.tensor([[1.0]]),
+        "ocean_sea_ice_fraction": torch.tensor([[0.5]]),
+    }
+    out = _compute_ocean_derived_variable(
+        data,
+        depth_coordinate=None,
+        timestep=TIMESTEP,
+        label="sea_ice_volume",
+        derived_variable_func=sea_ice_volume,
+        exists_ok=True,
+    )
+    assert out["sea_ice_volume"] is stored
