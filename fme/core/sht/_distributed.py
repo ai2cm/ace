@@ -131,7 +131,7 @@ class DistributedInverseRealSHT(thd.DistributedInverseRealSHT):
         if self.comm_size_azimuth > 1:
             x = thd.distributed_transpose_azimuth.apply(x, (-3, -1), self.m_shapes)
 
-        # set DCT and nyquist frequencies to 0 (view_as_real: dynamo can't trace .imag=)
+        # set DCT and nyquist frequencies to 0
         torch.view_as_real(x[..., 0])[..., 1] = 0.0
         if (self.nlon % 2 == 0) and (self.nlon // 2 < x.shape[-1]):
             torch.view_as_real(x[..., self.nlon // 2])[..., 1] = 0.0

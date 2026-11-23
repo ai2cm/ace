@@ -132,11 +132,10 @@ def test_backward_pass():
 
 
 def test_inductor_compiled_forward_matches_eager_on_cpu():
-    """The forward compiles with inductor on CPU and matches eager.
+    """Inductor-compiled forward matches eager on CPU.
 
-    Regression test: the irfft input is a non-contiguous einsum output, for
-    which inductor's CPU stride prediction of ``aten._fft_c2r`` disagrees with
-    the real kernel output, failing with "expected size ..., stride ...".
+    Regression test for inductor mispredicting ``aten._fft_c2r`` output strides
+    on a non-contiguous irfft input.
     """
     try:
         torch.compile(lambda t: t + 1, backend="inductor")(torch.zeros(2))
