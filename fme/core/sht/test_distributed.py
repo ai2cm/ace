@@ -5,6 +5,7 @@ import torch
 import torch_harmonics.distributed as thd
 
 from fme.core import get_device
+from fme.core.compile import compile_backend, compile_module
 from fme.core.distributed import Distributed
 from fme.core.sht import (
     DistributedDiscreteContinuousConvS2,
@@ -201,18 +202,22 @@ def test_disco_conv_matches_upstream(in_shape, out_shape):
 
 @pytest.mark.parallel
 @DISCO_SHAPES
-def test_disco_conv_compiles_without_graph_break(in_shape, out_shape):
-    """``Distributed.get_disco_conv_s2`` traces to one graph."""
+def test_compiled_disco_conv_matches_eager(in_shape, out_shape):
+    """``Distributed.get_disco_conv_s2`` compiles to one graph and matches eager
+    in forward and backward.
+
+    On odd latitudes the backward gathers uneven shards, which neither dynamo
+    nor gloo accepts unless they are padded to equal size.
+    """
     dist = Distributed.get_instance()
     torch.manual_seed(0)
     conv = dist.get_disco_conv_s2(
         3, 2, in_shape=in_shape, out_shape=out_shape, kernel_shape=(3,)
     ).to(get_device())
     x = _random_local_input(in_shape, torch.float32)()
-    torch._dynamo.reset()
-    try:
-        explanation = torch._dynamo.explain(conv)(x)
-    finally:
-        torch._dynamo.reset()
-    assert explanation.graph_break_count == 0, explanation.break_reasons
-    assert explanation.graph_count == 1
+    eager = _disco_conv_forward_backward(conv, x)
+    with compile_backend("aot_eager"):
+        compiled_conv = compile_module(conv, fullgraph=True)
+    compiled = _disco_conv_forward_backward(compiled_conv, x)
+    for actual, expected in zip(compiled, eager):
+        torch.testing.assert_close(actual, expected)

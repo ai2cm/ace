@@ -27,9 +27,7 @@ def _parse_compile_env(value: str | None) -> bool | None:
     return _parse_flag_env("FME_COMPILE", value)
 
 
-DEFAULT_COMPILE_BACKEND = "inductor"
-"""The backend modules compile with unless overridden: ``torch.compile``'s own
-default, so production compiles exactly as a bare ``torch.compile`` would."""
+DEFAULT_COMPILE_BACKEND = "inductor"  # torch.compile's own default
 
 
 def _validate_backend(backend: str, source: str) -> str:
@@ -44,9 +42,7 @@ def _validate_backend(backend: str, source: str) -> str:
 
 
 def _parse_compile_backend_env(value: str | None) -> str | None:
-    # an empty value (FME_COMPILE_BACKEND=) is treated as unset; only a set
-    # value is validated, so importing fme does not pay for listing backends
-    # while a typo still fails at startup
+    # empty is unset; validating only set values keeps import cheap
     if not value:
         return None
     return _validate_backend(value, "FME_COMPILE_BACKEND")
@@ -65,11 +61,7 @@ RECOMPILE_LIMIT = 32
 
 @contextlib.contextmanager
 def compile_enabled(enabled: bool = True) -> Generator[None, None, None]:
-    """Force ``torch.compile`` of step modules on or off within the context.
-
-    Args:
-        enabled: If True, compile on any device. If False, run eagerly.
-    """
+    """Force compilation on (any device) or off within the context."""
     global _COMPILE_OVERRIDE
     previous = _COMPILE_OVERRIDE
     try:
@@ -81,16 +73,7 @@ def compile_enabled(enabled: bool = True) -> Generator[None, None, None]:
 
 @contextlib.contextmanager
 def compile_backend(backend: str) -> Generator[None, None, None]:
-    """Set the ``torch.compile`` backend that :func:`compile_module` uses
-    within the context, overriding ``FME_COMPILE_BACKEND``.
-
-    This selects only the backend; whether modules compile at all is still
-    decided by :func:`is_compile_enabled`.
-
-    Args:
-        backend: A registered ``torch.compile`` backend, e.g. ``"inductor"``
-            or ``"aot_eager"``.
-    """
+    """Override ``FME_COMPILE_BACKEND`` within the context."""
     global _BACKEND_OVERRIDE
     _validate_backend(backend, "compile_backend")
     previous = _BACKEND_OVERRIDE
@@ -103,13 +86,7 @@ def compile_backend(backend: str) -> Generator[None, None, None]:
 
 @contextlib.contextmanager
 def compile_fullgraph(fullgraph: bool = True) -> Generator[None, None, None]:
-    """Set whether :func:`compile_module` compiles with ``fullgraph`` within
-    the context, overriding ``FME_COMPILE_FULLGRAPH``.
-
-    Args:
-        fullgraph: If True, a graph break raises instead of splitting the
-            compiled forward pass into several graphs.
-    """
+    """Override ``FME_COMPILE_FULLGRAPH`` within the context."""
     global _FULLGRAPH_OVERRIDE
     previous = _FULLGRAPH_OVERRIDE
     try:
@@ -120,25 +97,19 @@ def compile_fullgraph(fullgraph: bool = True) -> Generator[None, None, None]:
 
 
 def get_compile_fullgraph() -> bool:
-    """Whether :func:`compile_module` compiles with ``fullgraph=True``.
+    """Whether :func:`compile_module` uses ``fullgraph=True``.
 
     False by default, so a graph break costs speed rather than failing a run.
-    Setting the ``FME_COMPILE_FULLGRAPH`` environment variable to ``1`` makes
-    any graph break raise; the test suite does this so that a break in any
-    compiled module fails the test that runs it. :func:`compile_fullgraph`
-    overrides the environment variable within a context.
+    ``FME_COMPILE_FULLGRAPH=1`` makes graph breaks raise (the test suite sets it).
     """
     return bool(_FULLGRAPH_OVERRIDE)
 
 
 def get_compile_backend() -> str:
-    """The ``torch.compile`` backend that :func:`compile_module` uses.
+    """The backend :func:`compile_module` uses.
 
-    This is :data:`DEFAULT_COMPILE_BACKEND` (inductor) unless the
-    ``FME_COMPILE_BACKEND`` environment variable names another registered
-    backend, e.g. ``aot_eager``, which traces with dynamo and AOTAutograd but
-    runs the traced graph eagerly instead of generating kernels, so it compiles
-    much faster. :func:`compile_backend` overrides both within a context.
+    Inductor unless ``FME_COMPILE_BACKEND`` names another registered backend,
+    e.g. ``aot_eager``, which skips kernel generation and compiles much faster.
     """
     if _BACKEND_OVERRIDE is not None:
         return _BACKEND_OVERRIDE
@@ -148,12 +119,9 @@ def get_compile_backend() -> str:
 def is_compile_enabled() -> bool:
     """Whether steps should compile the modules they own.
 
-    By default, modules are compiled only when running on CUDA: inductor on CPU
-    needs a C++ toolchain and fails on some networks, and on MPS it is
-    experimental. Setting the ``FME_COMPILE`` environment variable to ``0``
-    disables compilation everywhere, and setting it to ``1`` forces it on any
-    device, in which case any compiler failure on that device is the user's to
-    resolve. :func:`compile_enabled` overrides both within a context.
+    By default only on CUDA: inductor on CPU needs a C++ toolchain and fails on
+    some networks, and on MPS it is experimental. ``FME_COMPILE=0`` disables
+    compilation everywhere; ``FME_COMPILE=1`` forces it on any device.
     """
     global _LOGGED_AUTO_SKIP
     if _COMPILE_OVERRIDE is not None:
@@ -183,28 +151,13 @@ def _raise_recompile_limit(limit: int) -> None:
 def compile_module(module: nn.Module, **kwargs: Any) -> nn.Module:
     """``torch.compile`` a module, first raising dynamo's recompile limit.
 
-    Without distributed data parallel every module is wrapped in the same
-    ``DummyWrapper``, so all compiled modules are traced through one
-    ``DummyWrapper.forward`` code object and share its recompile budget, which
-    defaults to 8 and is easily used up by the train, validation and inference
-    variants of several modules. Instances with the same structure share one
-    cache entry, so only distinct module types and their variants count.
-    Compiling the unwrapped module would not help: on torch 2.10 dynamo traces
-    every compiled module through one shared entry function, whose budget is
-    shared the same way. This raises the process-global
-    ``torch._dynamo.config.recompile_limit`` to :data:`RECOMPILE_LIMIT`,
-    leaving any larger user-set value in place. When the limit is still hit,
-    dynamo logs a warning on the ``torch._dynamo`` logger and runs the
-    remaining variants eagerly.
-
-    The backend is :func:`get_compile_backend` and ``fullgraph`` is
-    :func:`get_compile_fullgraph` unless ``kwargs`` names them explicitly, in
-    which case the explicit values win: a caller that asks for particular
-    options needs them, while the configured ones are only defaults.
-
-    Args:
-        module: The module to compile.
-        kwargs: Forwarded to ``torch.compile``.
+    All compiled modules share one recompile budget (default 8): they trace
+    through the same ``DummyWrapper.forward`` without DDP, and on torch 2.10
+    through one shared dynamo entry function even unwrapped. The train,
+    validation and inference variants of several modules easily exhaust it, so
+    raise it to :data:`RECOMPILE_LIMIT` (keeping larger user values); past it,
+    dynamo warns and runs eagerly. Explicit ``backend``/``fullgraph`` kwargs
+    override the configured defaults.
     """
     _raise_recompile_limit(RECOMPILE_LIMIT)
     kwargs.setdefault("backend", get_compile_backend())

@@ -1,21 +1,9 @@
 """Uneven-shard-safe replacement for torch_harmonics' internal ``_gather``.
 
-``torch_harmonics.distributed.primitives._gather`` gathers shards whose sizes
-along ``dim_`` may differ across ranks (e.g. 45 latitudes split over 2 ranks
-into 23 and 22 rows) by calling ``torch.distributed.all_gather`` with
-unequal tensor sizes. It does so in the backward of
-``scatter_to_polar_region``, used by the distributed DISCO convolution, and in
-``gather_from_polar_region``. Unequal sizes fail in two ways:
-
-* under ``torch.compile``, dynamo rewrites ``all_gather`` to a functional
-  collective that assumes equal shapes, so tracing fails with
-  ``expand: attempting to expand a dimension of length 23 -> 22``;
-* the gloo backend rejects unequal sizes even when running eagerly.
-
-The replacement pads each shard to the largest size along ``dim_``, gathers
-equal shapes, then trims each piece back to its size before concatenating,
-the same padding torch-harmonics itself applies for gloo in later releases.
-When all shards have equal sizes it behaves exactly like the original.
+Upstream ``_gather`` calls ``all_gather`` with unequal shard sizes (e.g. 45
+latitudes over 2 ranks), which dynamo cannot trace (its functional collective
+assumes equal shapes) and gloo rejects even eagerly. This pads shards to equal
+size, gathers, and trims; equal shards behave exactly as upstream.
 
 Copied and adapted from torch-harmonics 0.8.0 (the version pinned in
 pyproject.toml). Recheck this patch whenever that pin is bumped: as of
@@ -39,12 +27,7 @@ def _padded_gather(
     shapes_: list[int] | None,
     group=None,
 ) -> torch.Tensor:
-    """Gather ``input_`` along ``dim_`` from all ranks of ``group``.
-
-    Semantics mirror torch-harmonics 0.8.0's ``_gather``: ``shapes_`` holds
-    the size along ``dim_`` of each rank's shard, or is None when all shards
-    have the same shape.
-    """
+    """torch-harmonics 0.8.0 ``_gather``; ``shapes_`` is per-rank sizes or None."""
     comm_size = dist.get_world_size(group=group)
     if shapes_ is not None and len(shapes_) != comm_size:
         raise ValueError(
@@ -74,10 +57,7 @@ def _padded_gather(
 
 
 def patch_uneven_gather() -> None:
-    """Replace torch-harmonics' ``_gather`` with :func:`_padded_gather`.
-
-    Safe to call multiple times; only the first call installs the patch.
-    """
+    """Replace torch-harmonics' ``_gather`` with :func:`_padded_gather`; idempotent."""
     global _original_gather
     if _original_gather is not None:
         return  # already patched

@@ -82,12 +82,10 @@ CONDITIONAL_BUILDERS = [
 
 
 class Module:
-    """A built network together with its label encoding.
+    """A built network and its label encoding.
 
-    ``module`` owns the parameters and state; ``forward_module``, when given,
-    is what is actually called on the forward pass (e.g. a ``torch.compile``d
-    view of ``module``). Keeping the two separate means compilation never
-    changes the state dict, so checkpoints are unaffected.
+    ``module`` owns the parameters; ``forward_module`` (e.g. a compiled view)
+    is what the forward pass calls, so compiling never changes the state dict.
     """
 
     def __init__(
@@ -104,11 +102,7 @@ class Module:
 
     @property
     def forward_module(self) -> nn.Module:
-        """The module actually called on the forward pass.
-
-        This is the compiled view when :meth:`compile` has been applied, and
-        the parameter-owning module otherwise.
-        """
+        """The compiled view if compiled, else the parameter-owning module."""
         if self._forward_module is None:
             return self._module
         return self._forward_module
@@ -130,15 +124,9 @@ class Module:
     def compile(self, **kwargs: Any) -> "Module":
         """Return a Module whose forward pass runs through ``torch.compile``.
 
-        The underlying module (parameters, state dict, ``torch_module``) is
-        unchanged; only the callable used in ``__call__`` is compiled. Call
-        after any distributed wrapping so the compiled graph includes it.
-        Returns this Module unchanged when the builder declared compilation
-        unsupported at registration (see :meth:`ModuleSelector.register`), or when
-        compilation is disabled (see :func:`fme.core.compile.is_compile_enabled`).
-
-        Args:
-            kwargs: Forwarded to :func:`fme.core.compile.compile_module`.
+        Parameters and state dict are unchanged. Call after any distributed
+        wrapping so the compiled graph includes it. No-op when compilation is
+        disabled or the builder declared it unsupported.
         """
         if not is_compile_enabled():
             return self
@@ -151,7 +139,6 @@ class Module:
         return self._replace(forward_module=compile_module(self._module, **kwargs))
 
     def _replace(self, **changes: Any) -> "Module":
-        """A copy of this Module with the given constructor arguments replaced."""
         kwargs: dict[str, Any] = {
             "module": self._module,
             "label_encoding": self._label_encoding,
@@ -194,13 +181,9 @@ class Module:
     def wrap_module(self, callable: Callable[[nn.Module], nn.Module]) -> "Module":
         """Wrap the module called on the forward pass.
 
-        On an uncompiled Module, ``callable`` wraps the underlying module. On a
-        compiled Module, it is invoked once, on the compiled forward callable,
-        and the parameter-owning module is left as is, so the wrapper sits
-        outside the compiled graph. That suits per-call wrappers such as
-        activation checkpointing, but a wrapper that must be inside the graph
-        or must wrap the parameters (e.g. distributed data parallel) has to be
-        applied before :meth:`compile`.
+        On a compiled Module this wraps the compiled callable, outside the
+        graph; wrappers that must own the parameters (e.g. DDP) go before
+        :meth:`compile`.
         """
         if self._forward_module is not None:
             return self._replace(forward_module=callable(self._forward_module))
@@ -268,16 +251,9 @@ class ModuleSelector:
     ) -> Callable[[Type[ModuleConfig]], Type[ModuleConfig]]:  # noqa: UP006
         """Register a ModuleConfig builder under ``type_name``.
 
-        Args:
-            type_name: name used in configuration to select the builder.
-            compile_unsupported_reason: if given, why ``torch.compile`` cannot
-                be used with the modules this builder builds, e.g. because the
-                forward pass has data-dependent shapes. :meth:`Module.compile`
-                then logs this reason and leaves the module uncompiled, instead
-                of letting dynamo spend a long tracing attempt before falling
-                back to eager. Declared at registration rather than on the
-                builder so that it is not a dataclass field (which would leak
-                into ``ModuleSelector.config`` and serialized checkpoints).
+        ``compile_unsupported_reason``, if given, makes :meth:`Module.compile`
+        log it and stay eager rather than spend a long failed trace. It lives
+        here, not on the builder, so it does not leak into checkpoints.
         """
         return cls.registry.register(
             type_name, compile_unsupported_reason=compile_unsupported_reason

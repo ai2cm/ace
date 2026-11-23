@@ -148,31 +148,19 @@ class DistributedInverseRealSHT(thd.DistributedInverseRealSHT):
 
 
 class DistributedDiscreteContinuousConvS2(thd.DistributedDiscreteContinuousConvS2):
-    """Upstream's distributed DISCO convolution on the 2-sphere, contracting
-    with fme's FFT-based contraction instead of a sparse tensor or the CUDA
-    extension, so that dynamo traces it to a single graph.
-
-    Each rank holds the input latitudes of its polar shard and all output
-    latitudes, as upstream does: the contraction produces partial sums over
-    the local input latitudes, which are then summed across the polar group
-    and split back into latitude shards.
-    """
+    """Upstream's distributed DISCO conv using fme's FFT contraction."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         psi_fft_conj, gather_idx = _precompute_psi_banded(
             self.psi, self.nlat_in_local, self.nlon_in
         )
-        # replaces the sparse tensor upstream contracts with
         del self.psi
-        # plain attributes rather than buffers, as in fme.core.disco: DDP
-        # cannot broadcast complex or integer buffers, and these are
-        # deterministic given the rank's polar shard
+        # plain attributes, not buffers: DDP cannot broadcast complex/int buffers
         self.psi_fft_conj = psi_fft_conj
         self.psi_gather_idx = gather_idx
 
     def _apply(self, fn, recurse=True):
-        # moves the plain-attribute tensors along with .to() / .cuda()
         super()._apply(fn, recurse=recurse)
         self.psi_fft_conj = fn(self.psi_fft_conj)
         self.psi_gather_idx = fn(self.psi_gather_idx)

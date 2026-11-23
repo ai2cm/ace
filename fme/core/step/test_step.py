@@ -656,9 +656,8 @@ def test_step_applies_wrapper(config: StepSelector):
         ),
         wrapper=wrapper,
     )
-    # each module's forward callable (the module itself when eager, or its
-    # torch.compile view exposing it as _orig_mod) is wrapped once per call,
-    # and the wrapped result is what that forward pass runs
+    # the wrapper receives each module's forward callable, which is the module
+    # itself or its torch.compile view (exposing the module as _orig_mod)
     assert len(wrapped) == multi_calls * len(step.modules)
     assert [w.call_count for w in wrapped] == [1] * len(wrapped)
     received = {id(w.side_effect): w.side_effect for w in wrapped}.values()
@@ -2588,21 +2587,16 @@ _COMPILED_MODULE_CASES = [
 _EAGER_STEP_TYPES = {
     "FCN3": "FCN3Step compiles in a follow-up PR and runs eagerly until then",
 }
-"""Registered step types that own modules but do not compile them, and why."""
 
 
 def _is_production_step_type(step_type: str) -> bool:
-    # test modules register mock step types into the same process-global
-    # registry when they share a pytest worker with this one
+    # test modules sharing this pytest worker register mock step types
     module_name = StepSelector.registry._types[step_type].__module__
     return not module_name.rsplit(".", 1)[-1].startswith("test_")
 
 
 def test_compiled_module_cases_cover_every_registered_step_type():
-    """Every registered step type either has a compile case (which also runs
-    under inductor in test_inductor_compiled_step_matches_eager) or is listed
-    as running eagerly, so a new step type cannot silently skip compilation
-    coverage."""
+    """A new step type cannot silently skip compilation coverage."""
     covered = {
         param.values[0]().type for param in _COMPILED_MODULE_CASES
     } | _EAGER_STEP_TYPES.keys()
@@ -2619,11 +2613,8 @@ def test_compiled_module_cases_cover_every_registered_step_type():
 def test_step_compiles_its_modules_after_distributed_wrapping(
     selector_getter: Callable[[], StepSelector], module_attrs: list[str]
 ):
-    """Every module a step owns is compiled, on top of the distributed wrapper,
-    so the wrapper is inside the compiled graph and state-dict keys are
-    unchanged. Numerics are covered by the rest of the suite, which compiles
-    whenever production does (on CUDA).
-    """
+    """Every module a step owns is compiled on top of its distributed wrapper,
+    keeping state-dict keys unchanged."""
     torch.manual_seed(0)
     selector = selector_getter()
     with compile_enabled(False):
@@ -2631,15 +2622,16 @@ def test_step_compiles_its_modules_after_distributed_wrapping(
     with compile_enabled(True):
         compiled_step = get_step(selector, DEFAULT_IMG_SHAPE)
     assert compiled_step.get_state().keys() == eager_step.get_state().keys()
+    assert {
+        id(operator.attrgetter(attr)(compiled_step).torch_module)
+        for attr in module_attrs
+    } == {id(module) for module in compiled_step.modules}
     for attr in module_attrs:
         module = operator.attrgetter(attr)(compiled_step)
         assert module.is_compiled, attr
         assert not operator.attrgetter(attr)(eager_step).is_compiled, attr
-        # at single rank Distributed.wrap_module returns a DummyWrapper; finding
-        # it directly under the compiled callable is the ordering under test
+        # single-rank Distributed.wrap_module returns a DummyWrapper
         assert isinstance(module.torch_module, DummyWrapper), attr
-        # _orig_mod is how torch._dynamo's OptimizedModule exposes the module
-        # torch.compile was called on
         assert module.forward_module._orig_mod is module.torch_module, attr
 
 
@@ -2650,21 +2642,10 @@ def test_step_compiled_modules_have_no_graph_breaks(
     module_attrs: list[str],
     training: bool,
 ):
-    """Every module a step compiles traces into a single graph, with the
-    inputs the step actually passes it, in training mode with gradients and
-    in evaluation mode without.
-
-    A graph break still runs, so the numerics tests pass, but it splits the
-    compiled forward pass into pieces and falls back to Python in between.
-    """
+    """Each module traces into one graph with the inputs the step passes it."""
     torch.manual_seed(0)
-    # the uncompiled module is exactly what Module.compile hands torch.compile
     with compile_enabled(False):
         step = get_step(selector_getter(), DEFAULT_IMG_SHAPE)
-    compiled_modules = {
-        id(operator.attrgetter(attr)(step).torch_module) for attr in module_attrs
-    }
-    assert compiled_modules == {id(module) for module in step.modules}
     args = StepArgs(
         input=get_tensor_dict(step.input_names, DEFAULT_IMG_SHAPE, n_samples=2),
         next_step_input_data=get_tensor_dict(
@@ -2678,9 +2659,7 @@ def test_step_compiled_modules_have_no_graph_breaks(
 def _train_step_once(
     step: StepABC, input_data: TensorDict, next_step_input_data: TensorDict
 ) -> tuple[TensorDict, dict[str, torch.Tensor]]:
-    """Run one training forward and backward pass through ``step``, with any
-    random draws taken from a fixed generator, and return its outputs and the
-    gradients of its parameters."""
+    """Outputs and parameter gradients of one seeded training step."""
     for module in step.modules:
         module.train()
         module.zero_grad(set_to_none=True)
@@ -2712,13 +2691,8 @@ def _relative_error(
 def test_inductor_compiled_step_matches_eager(
     selector_getter: Callable[[], StepSelector], module_attrs: list[str]
 ):
-    """Each step type, compiled with inductor as in production, trains like
-    the eager step: outputs and gradients match within floating point
-    tolerance, and gradients reach the same parameters.
-
-    The rest of the suite compiles steps with ``aot_eager``, which traces the
-    same graphs but never runs inductor's code generation.
-    """
+    """Inductor-compiled outputs and gradients match eager; the rest of the
+    suite uses ``aot_eager``, which skips inductor's code generation."""
     skip_unless_cuda()
     torch.manual_seed(0)
     selector = selector_getter()

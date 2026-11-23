@@ -41,11 +41,8 @@ class Registry(Generic[T]):
             type_name: name used in configuration to indicate the decorated
                 class as the target type to be initialized when using `get`.
             compile_unsupported_reason: if given, why ``torch.compile`` cannot
-                be used with what the registered type builds. It is a property
-                of the type rather than of a config instance, so it is kept
-                here instead of as a dataclass field, keeping it out of
-                serialized configs and checkpoints. Read it back with
-                `get_compile_unsupported_reason`.
+                be used with what the type builds. Kept here, not as a
+                dataclass field, so it stays out of serialized configs.
         """
 
         def register_func(cls: type[T]) -> type[T]:
@@ -74,7 +71,5 @@ class Registry(Generic[T]):
         return cls.from_state(config)
 
     def get_compile_unsupported_reason(self, type_name: str) -> str | None:
-        """The reason given at registration for why ``torch.compile`` cannot be
-        used with the type, or None if compilation is supported.
-        """
+        """The registered compile-unsupported reason, or None."""
         return self._compile_unsupported_reasons.get(type_name)

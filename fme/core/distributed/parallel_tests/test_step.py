@@ -300,9 +300,8 @@ def test_step_applies_wrapper(config: StepSelector):
         ),
         wrapper=wrapper,
     )
-    # each module's forward callable (the module itself when eager, or its
-    # torch.compile view exposing it as _orig_mod) is wrapped once per call,
-    # and the wrapped result is what that forward pass runs
+    # the wrapper receives each module's forward callable, which is the module
+    # itself or its torch.compile view (exposing the module as _orig_mod)
     assert len(wrapped) == multi_calls * len(step.modules)
     assert [w.call_count for w in wrapped] == [1] * len(wrapped)
     received = {id(w.side_effect): w.side_effect for w in wrapped}.values()
@@ -315,12 +314,10 @@ def test_step_applies_wrapper(config: StepSelector):
 @pytest.mark.parametrize("config", SELECTOR_CONFIG_CASES)
 @pytest.mark.parallel
 def test_step_modules_have_no_graph_breaks(config: StepSelector, training: bool):
-    """Under every spatial decomposition, each module a step compiles traces
-    into a single graph, including the distributed SHT and DISCO code paths
-    and the data parallel wrapper that a single rank never runs."""
+    """Each module traces into one graph under every spatial decomposition,
+    including the distributed SHT, DISCO and data parallel paths."""
     torch.manual_seed(0)
     img_shape = DEFAULT_IMG_SHAPE
-    # the uncompiled module is exactly what Module.compile hands torch.compile
     with compile_enabled(False):
         step = get_step(config, img_shape)
     dist = Distributed.get_instance()

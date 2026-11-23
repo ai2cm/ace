@@ -2,7 +2,7 @@ import dataclasses
 import datetime
 import logging
 import pathlib
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 from unittest import mock
 
@@ -367,8 +367,7 @@ class _LinearNet(torch.nn.Module):
 
 @pytest.mark.medium_duration
 def test_module_compile_matches_uncompiled_and_keeps_state():
-    """compile() changes only the forward callable: same outputs, same
-    state-dict keys, same underlying torch module; wrapping preserves it."""
+    """compile() changes only the forward callable, and wrapping preserves it."""
     torch.manual_seed(0)
     net = _LinearNet().to(fme.get_device())
     module = Module(net, label_encoding=None)
@@ -384,8 +383,8 @@ def test_module_compile_matches_uncompiled_and_keeps_state():
 
     assert compiled.forward_module is not compiled.torch_module
 
-    # a per-call wrapper (e.g. activation checkpointing) is applied once, to
-    # the compiled forward callable, and leaves the parameter-owning module
+    # a per-call wrapper (e.g. activation checkpointing) wraps the compiled
+    # forward callable, not the parameter-owning module
     wrapper = mock.Mock(side_effect=lambda m: (lambda *args: 2 * m(*args)))
     wrapped = compiled.wrap_module(wrapper)
     wrapper.assert_called_once_with(compiled.forward_module)
@@ -403,8 +402,6 @@ def test_module_compile_matches_uncompiled_and_keeps_state():
 )
 @dataclasses.dataclass
 class MockModuleBuilderCompileUnsupported(ModuleConfig):
-    """Mock builder that declares torch.compile unsupported."""
-
     param_shapes: list[tuple[int, ...]]
 
     @classmethod
@@ -425,9 +422,7 @@ def _build_compile_unsupported_module() -> Module:
 def test_compile_unsupported_builder_runs_eagerly_without_tracing(
     caplog: pytest.LogCaptureFixture,
 ):
-    """A builder declaring compilation unsupported is left uncompiled, with the
-    declared reason logged, and never reaches torch.compile, since tracing an
-    untraceable module can take minutes before falling back."""
+    """Tracing an untraceable module can take minutes before falling back."""
     module = _build_compile_unsupported_module()
     with (
         compile_enabled(True),
@@ -440,22 +435,8 @@ def test_compile_unsupported_builder_runs_eagerly_without_tracing(
     assert "not traceable" in caplog.text
 
 
-def test_compile_unsupported_builder_does_not_log_when_compile_disabled(
-    caplog: pytest.LogCaptureFixture,
-):
-    """With compilation off, nothing would have been compiled anyway, so the
-    compile-unsupported reason is not logged on every step build."""
-    module = _build_compile_unsupported_module()
-    with compile_enabled(False), caplog.at_level(logging.INFO):
-        compiled = module.compile()
-    assert not compiled.is_compiled
-    assert "torch.compile skipped" not in caplog.text
-
-
 def test_registered_builder_without_compile_reason_compiles():
-    """A builder registered without a compile-unsupported reason is compiled
-    when built through ModuleSelector, and the registration option does not
-    leak into the serialized selector config."""
+    """The registration option also stays out of the serialized config."""
     selector = ModuleSelector(type="mock", config={"param_shapes": [(2, 3)]})
     module = selector.build(
         n_in_channels=1, n_out_channels=1, dataset_info=DatasetInfo()
@@ -474,12 +455,27 @@ def test_registered_builder_without_compile_reason_compiles():
     assert "compile_unsupported_reason" not in dataclasses.asdict(unsupported_selector)
 
 
-def test_module_compile_is_a_no_op_when_compile_disabled():
-    module = Module(_LinearNet(), label_encoding=None)
-    with compile_enabled(False), mock.patch("torch.compile") as mock_compile:
+@pytest.mark.parametrize(
+    "build_module",
+    [
+        pytest.param(lambda: Module(_LinearNet(), label_encoding=None), id="linear"),
+        pytest.param(_build_compile_unsupported_module, id="compile_unsupported"),
+    ],
+)
+def test_module_compile_is_a_silent_no_op_when_compile_disabled(
+    build_module: Callable[[], Module], caplog: pytest.LogCaptureFixture
+):
+    module = build_module()
+    with (
+        compile_enabled(False),
+        caplog.at_level(logging.INFO),
+        mock.patch("torch.compile") as mock_compile,
+    ):
         compiled = module.compile()
     mock_compile.assert_not_called()
     assert not compiled.is_compiled
+    # the compile-unsupported reason is not logged on every step build
+    assert "torch.compile skipped" not in caplog.text
 
 
 def _ncsfno_config_with_legacy_keys() -> dict[str, Any]:

@@ -44,13 +44,11 @@ class MLPConfig(ModuleConfig):
 
 
 class MLP(nn.Sequential):
-    """An ``nn.Sequential`` whose forward is defined in fme rather than torch.
+    """``nn.Sequential`` with forward defined in fme.
 
-    Distributed data parallel runs its wrapped module in a frame that
-    ``torch.compile`` (dynamo) starts afresh, and dynamo skips such a frame,
-    running it eagerly, when its code is in torch itself, as
-    ``nn.Sequential.forward`` is. Overriding forward here gives dynamo a frame
-    to compile. The state dict is the same as the parent ``nn.Sequential``'s.
+    Under DDP, dynamo starts a fresh frame for the wrapped module and skips it
+    (runs eagerly) when its code lives in torch, as ``nn.Sequential.forward``
+    does. Same state dict as ``nn.Sequential``.
     """
 
     def forward(self, input: torch.Tensor) -> torch.Tensor:

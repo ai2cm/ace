@@ -1,15 +1,8 @@
 """Traceable, gloo-compatible replacement for torch.distributed.all_to_all.
 
-``torch_harmonics.distributed`` transposes data between spatial ranks with
-the list form of ``torch.distributed.all_to_all``, which has two problems:
-
-* the gloo backend does not implement it;
-* dynamo cannot trace it on any backend, so every transpose breaks the graph
-  of a compiled module.
-
-This module monkey-patches ``torch.distributed.all_to_all`` with an
-implementation on top of the functional ``all_to_all_single`` collective,
-which gloo implements and dynamo traces into the graph.
+torch_harmonics' spatial transposes use list-form ``all_to_all``, which gloo
+does not implement and dynamo cannot trace (a graph break per transpose). The
+functional ``all_to_all_single`` has neither problem.
 """
 
 from __future__ import annotations
@@ -30,13 +23,7 @@ def _all_to_all_via_single(
     input_tensor_list: list[torch.Tensor],
     group: dist.ProcessGroup | None = None,
 ) -> None:
-    """Implement ``all_to_all`` semantics with ``all_to_all_single``.
-
-    Rank *r* sends ``input_tensor_list[i]`` to rank *i* and receives into
-    ``output_tensor_list[i]`` from rank *i*. The inputs are flattened into
-    one buffer, exchanged with per-rank split sizes, and the received chunks
-    copied into the outputs, so only data is moved and values are unchanged.
-    """
+    """``all_to_all`` semantics via one flattened ``all_to_all_single``."""
     if group is None:
         group = dist.group.WORLD
     # gloo does not exchange complex tensors, so exchange their real views
@@ -57,13 +44,9 @@ def _all_to_all_via_single(
 
 
 def patch_all_to_all() -> None:
-    """Monkey-patch ``torch.distributed.all_to_all`` with
-    :func:`_all_to_all_via_single` for synchronous calls on every backend.
+    """Patch ``dist.all_to_all`` for synchronous calls; idempotent.
 
-    Asynchronous calls (``async_op=True``) delegate to the original
-    ``all_to_all``, which gloo does not support.
-
-    Safe to call multiple times; only the first call installs the patch.
+    ``async_op=True`` calls still go to the original (unsupported on gloo).
     """
     global _original_all_to_all
     if _original_all_to_all is not None:

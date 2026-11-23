@@ -102,27 +102,14 @@ class SecondaryDecoder:
         return wrapped
 
     def compile(self, **kwargs: Any) -> "SecondaryDecoder":
-        """Return a decoder whose forward pass runs through ``torch.compile``.
-
-        This decoder is left unchanged, mirroring :meth:`wrap_module`. Call
-        after any distributed wrapping so the compiled graph includes it. The
-        underlying parameters and state dict are unchanged, so checkpoints are
-        unaffected.
-
-        Args:
-            kwargs: Forwarded to :meth:`fme.core.registry.module.Module.compile`.
-        """
+        """Return a compiled copy; call after any distributed wrapping."""
         compiled = copy.copy(self)
         compiled._module = self._module.compile(**kwargs)
         return compiled
 
     def to(self, device) -> "SecondaryDecoder":
-        """Return a decoder whose module is on ``device``.
-
-        Like :meth:`wrap_module` and :meth:`compile`, the result is a new
-        decoder; as with :meth:`fme.core.registry.module.Module.to`, the
-        underlying parameters are moved in place, and this must be called
-        before :meth:`compile`.
+        """Return a copy on ``device`` (parameters move in place); call before
+        :meth:`compile`.
         """
         moved = copy.copy(self)
         moved._module = self._module.to(device)

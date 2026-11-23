@@ -308,8 +308,7 @@ class SeparateRadiationStep(StepABC):
         dist = Distributed.get_instance()
         self.module = self.module.wrap_module(dist.wrap_module)
         self.radiation_module = self.radiation_module.wrap_module(dist.wrap_module)
-        # after distributed wrapping, so the wrapper is inside the compiled
-        # graph; state dict keys are unchanged
+        # after distributed wrapping, so the wrapper is in the compiled graph
         self.module = self.module.compile()
         self.radiation_module = self.radiation_module.compile()
         self._timestep = timestep

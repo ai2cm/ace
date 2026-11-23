@@ -1,10 +1,6 @@
 """Every registered network traces into a single torch.compile graph.
 
-Steps compile the networks they build from a ``ModuleSelector`` (see
-``Module.compile``). A graph break does not change results, so numerics tests
-keep passing, but it splits the compiled forward pass into pieces with Python
-running in between. These tests trace each registered network the way a step
-calls it and fail on any break.
+A graph break does not change results, so numerics tests cannot catch one.
 """
 
 import dataclasses
@@ -162,20 +158,16 @@ _NETWORK_CASES: dict[str, _NetworkCase] = {
 _UNCOVERED_NETWORK_TYPES = {
     "prebuilt": "returns a module supplied in code rather than a network of its own",
 }
-"""Registered builders compile supports but these tests do not trace, and why."""
 
 
 def _is_production_network_type(type_name: str) -> bool:
-    # test modules register mock builders into the same process-global
-    # registry when they share a pytest worker with this one
+    # test modules sharing this pytest worker register mock builders
     module_name = ModuleSelector.registry._types[type_name].__module__
     return not module_name.rsplit(".", 1)[-1].startswith("test_")
 
 
 def test_network_cases_cover_every_registered_network_type():
-    """Every registered builder is traced below, declares compilation
-    unsupported at registration (so it runs eagerly), or is listed as
-    uncovered, so a new builder cannot silently skip graph-break coverage."""
+    """A new builder cannot silently skip graph-break coverage."""
     covered = {case.selector.type for case in _NETWORK_CASES.values()}
     registered = {
         type_name
@@ -200,8 +192,7 @@ def _explain_case(
     module = case.selector.build(
         n_in_channels=_N_IN, n_out_channels=_N_OUT, dataset_info=case.dataset_info()
     )
-    # Module.compile hands torch_module to torch.compile, and Module.__call__
-    # passes encoded labels as a keyword argument to conditional networks
+    # trace what Module.compile compiles, called as Module.__call__ calls it
     torch_module = module.torch_module.to(fme.get_device())
     torch_module.train(training)
     kwargs = {}
@@ -217,9 +208,7 @@ def _explain_case(
 @pytest.mark.parametrize("training", [True, False], ids=["train", "eval"])
 @pytest.mark.parametrize("case_name", _NETWORK_CASES.keys())
 def test_network_has_no_graph_breaks(case_name: str, training: bool):
-    """The network's forward pass traces into one graph, in training mode with
-    gradients and in evaluation mode without (batch norm and dropout take
-    different paths in each)."""
+    """Train and eval differ in batch norm and dropout paths."""
     explanation = _explain_case(_NETWORK_CASES[case_name], training)
     assert explanation.graph_break_count == 0, explanation.break_reasons
     assert explanation.graph_count == 1

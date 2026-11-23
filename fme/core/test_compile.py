@@ -47,16 +47,13 @@ def test_parse_compile_backend_env(value: str | None, expected: str | None | typ
     if expected is ValueError:
         with pytest.raises(ValueError, match="FME_COMPILE_BACKEND must name"):
             _parse_compile_backend_env(value)
+    elif expected is None:
+        # listing backends is slow, and importing fme must not pay for it
+        with mock.patch("torch._dynamo.list_backends") as mock_list_backends:
+            assert _parse_compile_backend_env(value) is None
+        mock_list_backends.assert_not_called()
     else:
         assert _parse_compile_backend_env(value) == expected
-
-
-@pytest.mark.parametrize("value", [None, ""])
-def test_unset_compile_backend_env_skips_listing_backends(value: str | None):
-    # listing backends is slow, and importing fme must not pay for it
-    with mock.patch("torch._dynamo.list_backends") as mock_list_backends:
-        assert _parse_compile_backend_env(value) is None
-    mock_list_backends.assert_not_called()
 
 
 def _use_auto(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -89,8 +86,7 @@ def test_override_compiles_off_cuda():
 
 @pytest.mark.parallel
 def test_forced_compile_stays_on_under_parallelism():
-    """Under the parallel test matrix, including spatial splits of longitude
-    and latitude, forcing compilation on enables it."""
+    """Spatial splits of longitude and latitude do not disable compilation."""
     with compile_enabled(True):
         assert is_compile_enabled()
 
@@ -104,17 +100,14 @@ def test_compile_module_raises_recompile_limit():
 def test_hitting_recompile_limit_warns_and_runs_eagerly(
     caplog: pytest.LogCaptureFixture,
 ):
-    """Falling back to eager at the limit costs speed, so it must be visible.
-    Dynamo warns on the ``torch._dynamo`` logger, which does not propagate to
-    the root logger, so caplog's handler is attached to it directly. The
-    suite-wide ``dynamo_hygiene`` and ``session_compile_fullgraph`` fixtures
-    make hitting the limit raise, so this test turns both off to exercise the
-    production fallback."""
+    """Falling back to eager at the limit costs speed, so it must be visible."""
     net = torch.nn.Linear(2, 2)
     module = compile_module(net, backend="eager", fullgraph=False)
+    # the torch._dynamo logger does not propagate to the root logger
     dynamo_logger = logging.getLogger("torch._dynamo")
     dynamo_logger.addHandler(caplog.handler)
     try:
+        # dynamo_hygiene makes hitting the limit raise; restore production
         with torch._dynamo.config.patch(
             recompile_limit=1, fail_on_recompile_limit_hit=False
         ):
@@ -161,15 +154,13 @@ def test_compile_module_options(fullgraph: bool, kwargs: dict, expected: dict):
     mock_compile.assert_called_once_with(net, **expected)
 
 
+class _BreaksGraph(torch.nn.Module):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        torch._dynamo.graph_break()
+        return x + 1
+
+
 def test_test_session_compiles_with_fullgraph():
-    """The suite-wide fixture makes any graph break in a compiled module fail
-    the test that runs it, rather than silently splitting the graph."""
-
-    class _BreaksGraph(torch.nn.Module):
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-            torch._dynamo.graph_break()
-            return x + 1
-
     compiled = compile_module(_BreaksGraph(), backend="eager")
     with pytest.raises(torch._dynamo.exc.Unsupported):
         compiled(torch.zeros(2))
@@ -177,13 +168,5 @@ def test_test_session_compiles_with_fullgraph():
 
 @pytest.mark.allow_graph_breaks(reason="the module graph-breaks on purpose")
 def test_allow_graph_breaks_marker_compiles_without_fullgraph():
-    """A test marked with a known graph break still compiles its modules,
-    without failing on the break."""
-
-    class _BreaksGraph(torch.nn.Module):
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-            torch._dynamo.graph_break()
-            return x + 1
-
     compiled = compile_module(_BreaksGraph(), backend="eager")
     torch.testing.assert_close(compiled(torch.zeros(2)), torch.ones(2))

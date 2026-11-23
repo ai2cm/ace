@@ -13,25 +13,15 @@ from fme.core.device import get_device
 from fme.core.step.args import StepArgs
 from fme.core.step.step import StepABC
 
+# inductor's code generation takes tens of seconds per network; aot_eager
+# still runs dynamo and AOTAutograd, so tracing errors and recompiles surface
 TEST_COMPILE_BACKEND = "aot_eager"
-"""The backend the test suite compiles with unless ``FME_COMPILE_BACKEND`` is set.
-
-Inductor's code generation takes tens of seconds per network, too slow for
-every test that builds a step. ``aot_eager`` still runs dynamo tracing and
-AOTAutograd, so graph breaks, tracing errors and recompiles surface across the
-suite; targeted tests select inductor with
-:func:`fme.core.compile.compile_backend`.
-"""
 
 
 @pytest.fixture(autouse=True, scope="session")
 def session_compile_backend() -> Iterator[None]:
-    """Compile with :data:`TEST_COMPILE_BACKEND` for the whole test session,
-    unless ``FME_COMPILE_BACKEND`` is set (e.g. to ``inductor``).
-
-    Applied to every test via ``pytest_plugins`` in the root ``conftest.py``.
-    The backend is also exported as ``FME_COMPILE_BACKEND`` so that entrypoints
-    run in a subprocess (e.g. under ``torchrun``) compile with it too.
+    """Compile with :data:`TEST_COMPILE_BACKEND` unless ``FME_COMPILE_BACKEND``
+    is set, exporting it so subprocess entrypoints use it too.
     """
     if os.environ.get("FME_COMPILE_BACKEND"):
         yield
@@ -46,21 +36,11 @@ def session_compile_backend() -> Iterator[None]:
 
 @pytest.fixture(autouse=True, scope="session")
 def session_compile_fullgraph() -> Iterator[None]:
-    """Compile with ``fullgraph=True`` for a single-process test session,
-    unless ``FME_COMPILE_FULLGRAPH`` is set.
+    """Make any graph break fail the test, unless ``FME_COMPILE_FULLGRAPH`` is
+    set or the run is multi-process.
 
-    Production tolerates graph breaks, which cost speed but not correctness,
-    so numerics tests alone would never catch one. With ``fullgraph`` on, a
-    break in any module a test compiles fails that test, whatever network
-    config it runs. Applied to every test via ``pytest_plugins`` in the root
-    ``conftest.py``.
-
-    Multi-process runs (``torchrun``, where ``WORLD_SIZE`` > 1) and the
-    subprocesses tests launch keep the production default: distributed data
-    parallel's forward graph-breaks by design before running the wrapped
-    module, which ``fullgraph`` rejects. There, graph breaks are checked by
-    tracing each module with ``torch._dynamo.explain`` instead (see
-    :func:`assert_step_modules_have_no_graph_breaks`).
+    DDP's forward graph-breaks by design, which ``fullgraph`` rejects; there,
+    :func:`assert_step_modules_have_no_graph_breaks` checks breaks instead.
     """
     if (
         os.environ.get("FME_COMPILE_FULLGRAPH")
@@ -78,26 +58,15 @@ ALLOW_SEEDED_NOISE_GRAPH_BREAKS = pytest.mark.allow_graph_breaks(
         "dynamo cannot pass into a graph"
     )
 )
-"""Marks a test whose compiled modules draw noise under
-:func:`fme.core.rand.use_generator`, which graph-breaks at every draw."""
 
 
 @pytest.fixture(autouse=True)
 def dynamo_hygiene(request: pytest.FixtureRequest) -> Iterator[None]:
-    """Isolate each test's dynamo state from the rest of the suite.
+    """Reset dynamo around each test and raise on hitting the recompile limit.
 
-    Applied to every test via ``pytest_plugins`` in the root ``conftest.py``.
-    Dynamo's cache is process-global, and every compiled module is traced
-    through the same ``DummyWrapper.forward`` code object, so without a reset
-    tests sharing an xdist worker would share its recompile budget, and later
-    tests would silently run eagerly once it is used up.
-
-    Within a test, hitting the recompile limit raises instead of falling back
-    to eager, so tests cannot pass without running the compiled code they
-    claim to exercise.
-
-    A test marked ``allow_graph_breaks(reason)`` compiles without
-    ``fullgraph``, for compiled modules with a known graph break.
+    All compiled modules trace through one ``DummyWrapper.forward``, so tests
+    sharing a worker would share its recompile budget and later ones would
+    silently run eagerly. ``allow_graph_breaks(reason)`` turns off fullgraph.
     """
     marker = request.node.get_closest_marker("allow_graph_breaks")
     if marker is not None and not marker.kwargs.get("reason"):
@@ -116,9 +85,7 @@ def dynamo_hygiene(request: pytest.FixtureRequest) -> Iterator[None]:
 
 
 def skip_unless_cuda() -> None:
-    """Skip the calling test unless it runs on CUDA, where production compiles
-    with inductor; inductor on CPU is opt-in and unsupported.
-    """
+    """Skip unless on CUDA, the only device production compiles on."""
     if get_device().type != "cuda":
         pytest.skip("production compiles with inductor only on CUDA")
 
@@ -126,9 +93,7 @@ def skip_unless_cuda() -> None:
 def _capture_module_calls(
     step: StepABC, args: StepArgs
 ) -> dict[int, tuple[tuple[Any, ...], dict[str, Any]]]:
-    """Run ``step`` once and return the inputs of the first call to each
-    module it runs, keyed by the ``id`` of the callable that received them.
-    """
+    """Inputs of the first call to each module ``step`` runs, by module id."""
     calls: dict[int, tuple[tuple[Any, ...], dict[str, Any]]] = {}
 
     def recording_wrapper(module: Callable[..., Any]) -> Callable[..., Any]:
@@ -146,17 +111,10 @@ def assert_step_modules_have_no_graph_breaks(
     step: StepABC, args: StepArgs, training: bool
 ) -> None:
     """Assert every module ``step`` owns traces into a single graph, with the
-    inputs the step actually passes it.
+    inputs the step passes it.
 
-    ``step`` must be built with compilation disabled, so that each of its
-    modules is exactly what ``Module.compile`` would hand ``torch.compile``.
-
-    Args:
-        step: The step whose modules to trace.
-        args: Inputs for one call of the step.
-        training: If True, trace in training mode with gradients enabled,
-            otherwise in evaluation mode without (batch norm and dropout take
-            different paths in each).
+    ``step`` must be built with compilation disabled, so each module is what
+    ``Module.compile`` would hand ``torch.compile``.
     """
     for module in step.modules:
         module.train(training)

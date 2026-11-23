@@ -655,10 +655,8 @@ _TRAIN_AND_INFERENCE_CASES = [
             use_healpix=True,
         ),
         id="HEALPix",
-        # On CUDA the HEALPix UNet is compiled three times (no-grad, with
-        # grad, and dynamic batch size), each a large graph from the per-face
-        # padding; the aot_eager compiles alone take ~85 s on a laptop CPU,
-        # over the default 90 s timeout on the CI GPU runner.
+        # on CUDA the HEALPix UNet compiles three large graphs (no-grad, grad,
+        # dynamic batch), over the default 90 s timeout on the CI GPU runner
         marks=pytest.mark.timeout(300),
     ),
     pytest.param(
@@ -1035,9 +1033,7 @@ def test_resume_two_workers(tmp_path, nettype, tmpdir: pathlib.Path):
 def test_train_and_inference_compile_with_inductor_like_production(
     tmp_path: pathlib.Path,
 ):
-    """Train and run inference through the entrypoints in a fresh process
-    without the test session's compile settings, so the full loops run
-    through inductor-generated code as in production."""
+    """Entrypoints run with production compile defaults in a fresh process."""
     train_config, inference_config = _setup(
         tmp_path, "SphericalFourierNeuralOperatorNet"
     )
@@ -1054,8 +1050,7 @@ def test_train_and_inference_compile_with_inductor_like_production(
         env=env,
     )
     process.check_returncode()
-    # inductor writes the code it generates to its cache directory, so an
-    # empty directory means the run never compiled with inductor
+    # an empty inductor cache means the run never compiled with inductor
     assert any(path.is_file() for path in inductor_cache_dir.rglob("*"))
     assert (tmp_path / "results" / "training_checkpoints" / "best_ckpt.tar").exists()
 

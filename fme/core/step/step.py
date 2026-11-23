@@ -411,9 +411,8 @@ class StepABC(abc.ABC):
 
         Args:
             args: The arguments to the step function.
-            wrapper: Wrapper to apply, once per call, over each module's
-                forward callable before calling it: the nn.Module itself, or
-                its ``torch.compile`` view when the module is compiled.
+            wrapper: Wrapper to apply over each module's forward callable
+                (its compiled view, if compiled) before calling.
 
         Returns:
             A ``StepOutput`` carrying the denormalized data at the next time
