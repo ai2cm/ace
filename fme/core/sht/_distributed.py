@@ -25,6 +25,7 @@ from torch_harmonics.distributed import (
 )
 
 from fme.core.disco._disco_utils import (
+    _apply_disco_weights,
     _disco_s2_contraction_fft,
     _precompute_psi_banded,
 )
@@ -190,18 +191,6 @@ class DistributedDiscreteContinuousConvS2(thd.DistributedDiscreteContinuousConvS
             chan_shapes = thd.compute_split_shapes(num_chans, self.comm_size_azimuth)
             x = thd.distributed_transpose_azimuth.apply(x, (-1, 1), chan_shapes)
 
-        B, C, K, H, W = x.shape
-        x = x.reshape(B, self.groups, self.groupsize, K, H, W)
-        out = torch.einsum(
-            "bgckxy,gock->bgoxy",
-            x,
-            self.weight.reshape(
-                self.groups, -1, self.weight.shape[1], self.weight.shape[2]
-            ),
-        ).contiguous()
-        out = out.reshape(out.shape[0], -1, H, W)
-
-        if self.bias is not None:
-            out = out + self.bias.reshape(1, -1, 1, 1)
-
-        return out
+        return _apply_disco_weights(
+            x, self.weight, self.bias, self.groups, self.groupsize
+        )

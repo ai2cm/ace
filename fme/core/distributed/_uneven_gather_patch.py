@@ -4,9 +4,10 @@ Upstream ``_gather`` calls ``all_gather`` with unequal shard sizes, which
 dynamo cannot trace and gloo rejects. This pads shards to equal size, gathers,
 and trims; equal shards behave as upstream.
 
-Adapted from torch-harmonics 0.8.0 (BSD-3-Clause, Copyright (c) 2022 The
-torch-harmonics Authors). Recheck on pin bumps: as of 0.9.3 upstream pads only
-for backends that need equal shapes, so NCCL under dynamo still breaks.
+Based on torch-harmonics 0.8.0 ``_gather`` (BSD-3-Clause, Copyright (c) 2022
+The torch-harmonics Authors), with pad-and-trim added for uneven shards; the
+0.8.0 version does not pad. Recheck on pin bumps: as of 0.9.3 upstream pads
+only for backends that need equal shapes, so NCCL under dynamo still breaks.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ def _padded_gather(
     shapes_: list[int] | None,
     group=None,
 ) -> torch.Tensor:
-    """torch-harmonics 0.8.0 ``_gather``; ``shapes_`` is per-rank sizes or None."""
+    """``_gather`` that pads uneven shards; ``shapes_`` is per-rank sizes or None."""
     comm_size = dist.get_world_size(group=group)
     if shapes_ is not None and len(shapes_) != comm_size:
         raise ValueError(
