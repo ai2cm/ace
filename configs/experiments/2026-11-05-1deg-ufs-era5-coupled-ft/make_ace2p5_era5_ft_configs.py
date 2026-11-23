@@ -189,13 +189,8 @@ SHIELD_EXTRA = "ace2p5_shield_extra.zarr"
 
 
 def ds_shield(subsets: list[dict[str, str]] | None = None) -> dict[str, Any]:
-    # PRMSL in Pa like ERA5 (the builder asserts it); ACE2.5's CM4 stats are in hPa
-    shield = {
-        "data_path": SHIELD,
-        "file_pattern": "ic_0001.zarr",
-        "engine": "zarr",
-        "overwrite": {"multiply_scalar": {"PRMSL": 0.01}},
-    }
+    # PRMSL is in mb here (the builder asserts it), the unit of ACE2.5's CM4 stats: no rescaling, unlike ERA5
+    shield = {"data_path": SHIELD, "file_pattern": "ic_0001.zarr", "engine": "zarr"}
     extra = {"data_path": "/extra", "file_pattern": SHIELD_EXTRA, "engine": "zarr"}
     if not subsets:
         return {"merge": [shield, extra]}

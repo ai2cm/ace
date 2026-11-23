@@ -48,10 +48,10 @@ for v in PLACEHOLDERS + ["lake_fraction", "carbon_dioxide"]:
 tdim = "time"
 ydim, xdim = [d for d in src.PRATEsfc.dims if d != tdim]
 nt, ny, nx = src.sizes[tdim], src.sizes[ydim], src.sizes[xdim]
-# the training config multiplies PRMSL by 0.01 (ACE2.5 was trained with hPa): the store must be in Pa
+# ACE2.5 was trained with PRMSL in hPa and the training config reads this store unscaled: it must be in hPa
 prmsl = float(src.PRMSL.isel({tdim: slice(1000, 1008)}).mean())
 print("PRMSL units", src.PRMSL.attrs.get("units"), "mean", prmsl, flush=True)
-assert 9.0e4 < prmsl < 1.1e5, "PRMSL is not in Pa: fix overwrite.multiply_scalar"
+assert 900 < prmsl < 1100, "PRMSL is not in hPa: add overwrite.multiply_scalar"
 co2 = src.global_mean_co2.load().values.astype("float64") * 1e6
 assert np.isfinite(co2).all() and 250 < co2.min() and co2.max() < 500, (
     co2.min(),
