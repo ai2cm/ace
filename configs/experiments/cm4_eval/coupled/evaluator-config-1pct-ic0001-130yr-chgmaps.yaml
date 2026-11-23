@@ -1,0 +1,61 @@
+# job_runner/evaluate.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/cm4_eval/coupled
+experiment_dir: /results
+n_coupled_steps: 9488  # --min-runtime 6h
+coupled_steps_in_memory: 16
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+          engine: zarr
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-atmosphere.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+          engine: zarr
+  start_indices:
+    times:
+    - '0001-01-06T00:00:00'
+# Prediction only: the CM4 targets come from their GCS stores (TMP2m, PRATEsfc:
+# 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr; ocean_heat_content:
+# the target maps of the 1pct-ic0001-130yr-maps eval). No seed, as the -maps config:
+# a new rollout, so all three fields are saved from this one trajectory.
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+      - label: ocean_heat_content_monthly
+        names: [ocean_heat_content]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: false
+        format:
+          name: zarr
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+      - label: t2m_precip_monthly
+        names: [TMP2m, PRATEsfc]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: false
+        format:
+          name: zarr
