@@ -9,8 +9,10 @@ from fme.core.compile import (
     RECOMPILE_LIMIT,
     _parse_compile_backend_env,
     _parse_compile_env,
+    _parse_flag_env,
     compile_backend,
     compile_enabled,
+    compile_fullgraph,
     compile_module,
     is_compile_enabled,
 )
@@ -28,6 +30,11 @@ def test_parse_compile_env(value: str | None, expected: bool | None | type):
             _parse_compile_env(value)
     else:
         assert _parse_compile_env(value) is expected
+
+
+def test_parse_flag_env_names_the_variable_in_errors():
+    with pytest.raises(ValueError, match="FME_COMPILE_FULLGRAPH must be '0' or '1'"):
+        _parse_flag_env("FME_COMPILE_FULLGRAPH", "true")
 
 
 @pytest.mark.parametrize(
@@ -95,7 +102,7 @@ def test_hitting_recompile_limit_warns_and_runs_eagerly(
 ):
     """Falling back to eager at the limit costs speed, so it must be visible."""
     net = torch.nn.Linear(2, 2)
-    module = compile_module(net, backend="eager")
+    module = compile_module(net, backend="eager", fullgraph=False)
     # the torch._dynamo logger does not propagate to the root logger
     dynamo_logger = logging.getLogger("torch._dynamo")
     dynamo_logger.addHandler(caplog.handler)
@@ -117,19 +124,49 @@ def test_hitting_recompile_limit_warns_and_runs_eagerly(
 
 
 @pytest.mark.parametrize(
-    "kwargs, expected",
+    "fullgraph, kwargs, expected",
     [
-        pytest.param({}, {"backend": "eager"}, id="configured"),
         pytest.param(
-            {"backend": "aot_eager"}, {"backend": "aot_eager"}, id="explicit_wins"
+            False, {}, {"backend": "eager", "fullgraph": False}, id="configured"
+        ),
+        pytest.param(
+            True,
+            {},
+            {"backend": "eager", "fullgraph": True},
+            id="configured_fullgraph",
+        ),
+        pytest.param(
+            False,
+            {"backend": "aot_eager", "fullgraph": True},
+            {"backend": "aot_eager", "fullgraph": True},
+            id="explicit_options_win",
         ),
     ],
 )
-def test_compile_module_options(kwargs: dict, expected: dict):
+def test_compile_module_options(fullgraph: bool, kwargs: dict, expected: dict):
     net = torch.nn.Linear(2, 2)
     with (
         compile_backend("eager"),
+        compile_fullgraph(fullgraph),
         mock.patch("torch.compile", side_effect=lambda m, **_: m) as mock_compile,
     ):
         compile_module(net, **kwargs)
     mock_compile.assert_called_once_with(net, **expected)
+
+
+class _BreaksGraph(torch.nn.Module):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        torch._dynamo.graph_break()
+        return x + 1
+
+
+def test_test_session_compiles_with_fullgraph():
+    compiled = compile_module(_BreaksGraph(), backend="eager")
+    with pytest.raises(torch._dynamo.exc.Unsupported):
+        compiled(torch.zeros(2))
+
+
+@pytest.mark.allow_graph_breaks(reason="the module graph-breaks on purpose")
+def test_allow_graph_breaks_marker_compiles_without_fullgraph():
+    compiled = compile_module(_BreaksGraph(), backend="eager")
+    torch.testing.assert_close(compiled(torch.zeros(2)), torch.ones(2))
