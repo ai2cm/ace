@@ -1358,3 +1358,45 @@ def test_allow_missing_variables_false_raises_on_missing(mock_monthly_netcdfs):
             IntSchedule.from_constant(2),
             allow_missing_variables=False,
         )
+
+
+@pytest.mark.parametrize(
+    "mock_data_fixture, engine, file_pattern",
+    [
+        ("mock_monthly_netcdfs", "netcdf4", "*.nc"),
+        ("mock_monthly_zarr", "zarr", "*.zarr"),
+    ],
+)
+def test_renamed_variables(mock_data_fixture, engine, file_pattern, request):
+    mock_data: MockData = request.getfixturevalue(mock_data_fixture)
+    names = mock_data.var_names.all_names
+    config = XarrayDataConfig(
+        data_path=mock_data.tmpdir, engine=engine, file_pattern=file_pattern
+    )
+    dataset = xarray_dataset_constructor(config, names, 2)
+    renamed_config = XarrayDataConfig(
+        data_path=mock_data.tmpdir,
+        engine=engine,
+        file_pattern=file_pattern,
+        renamed_variables={"foo": "renamed_foo", "constant_var": "renamed_constant"},
+    )
+    rename = {"foo": "renamed_foo", "constant_var": "renamed_constant"}
+    renamed_names = [rename.get(n, n) for n in names]
+    renamed_dataset = xarray_dataset_constructor(renamed_config, renamed_names, 2)
+    data = dataset[1][0]
+    renamed_data = renamed_dataset[1][0]
+    assert set(renamed_data) == set(renamed_names)
+    for name in names:
+        torch.testing.assert_close(renamed_data[rename.get(name, name)], data[name])
+    metadata = renamed_dataset.properties.variable_metadata
+    assert "renamed_foo" in metadata
+    assert "foo" not in metadata
+
+
+def test_renamed_variables_old_name_is_not_found(mock_monthly_netcdfs):
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(
+        data_path=mock_data.tmpdir, renamed_variables={"foo": "renamed_foo"}
+    )
+    with pytest.raises(ValueError, match="foo"):
+        xarray_dataset_constructor(config, ["foo"], 2)

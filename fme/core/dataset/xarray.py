@@ -435,6 +435,10 @@ class XarrayDataConfig(DatasetConfigABC):
             is used specifically for selecting times. Horizontal dimensions are
             also not currently supported.
         labels: Optional list of labels to be returned with the data.
+        renamed_variables: Optional mapping from a variable's name in the
+            files to the name it is loaded under, e.g. ``{"UGRD10m":
+            "eastward_wind_at_ten_meters"}``. Requested names, returned data
+            and variable metadata all use the new names.
 
     Examples:
         If data is stored in a directory with multiple netCDF files which can be
@@ -466,6 +470,7 @@ class XarrayDataConfig(DatasetConfigABC):
     fill_nans: FillNaNsConfig | None = None
     isel: Mapping[str, Slice | int] = dataclasses.field(default_factory=dict)
     labels: list[str] | None = None
+    renamed_variables: Mapping[str, str] = dataclasses.field(default_factory=dict)
 
     def _default_file_pattern_check(self):
         if self.engine == "zarr" and self.file_pattern == "*.nc":
@@ -551,6 +556,10 @@ class XarrayDataset(DatasetABC):
         self._horizontal_coordinates: HorizontalCoordinates
         self._names = names
         self._allow_missing_variables = allow_missing_variables
+        self._renamed_variables = dict(config.renamed_variables)
+        self._names_in_files = {
+            new: old for old, new in self._renamed_variables.items()
+        }
         self.path = config.data_path
         self.file_pattern = config.file_pattern
         self.engine = config.engine
@@ -570,12 +579,14 @@ class XarrayDataset(DatasetABC):
             config.infer_timestep,
             max_sample_n_times=n_timesteps.max_value,
         )
-        first_dataset = xr.open_dataset(
-            self.full_paths[0],
-            decode_times=False,
-            decode_timedelta=False,
-            engine=self.engine,
-            chunks=None,
+        first_dataset = self._rename(
+            xr.open_dataset(
+                self.full_paths[0],
+                decode_times=False,
+                decode_timedelta=False,
+                engine=self.engine,
+                chunks=None,
+            )
         )
         self._spatial_mask_provider = _get_spatial_mask_provider(
             first_dataset, self.dtype
@@ -636,7 +647,7 @@ class XarrayDataset(DatasetABC):
             return {}
         # opened directly rather than via _open_file so that closing this
         # handle cannot close one shared through the file handle cache
-        ds = _open_xr_dataset(self.full_paths[0], engine=self.engine)
+        ds = self._rename(_open_xr_dataset(self.full_paths[0], engine=self.engine))
         ds = ds.isel(**self.isel)
         tensors = {}
         for name in self._time_invariant_names:
@@ -785,7 +796,8 @@ class XarrayDataset(DatasetABC):
         # Don't use open_mfdataset here, because it will give time-invariant
         # fields a time dimension. We assume that all fields are present in the
         # netcdf file corresponding to the first chunk of time.
-        with _open_xr_dataset(self.full_paths[0], engine=self.engine) as ds:
+        with _open_xr_dataset(self.full_paths[0], engine=self.engine) as raw_ds:
+            ds = self._rename(raw_ds)
             for name in self._names:
                 if name in StaticDerivedData.names:
                     static_derived_names.append(name)
@@ -847,9 +859,20 @@ class XarrayDataset(DatasetABC):
         else:
             return self._timestep
 
+    def _rename(self, ds: xr.Dataset) -> xr.Dataset:
+        """Rename variables in ``ds`` per ``XarrayDataConfig.renamed_variables``."""
+        to_rename = {
+            old: new for old, new in self._renamed_variables.items() if old in ds
+        }
+        if not to_rename:
+            return ds
+        return ds.rename(to_rename)
+
     def _open_file(self, idx):
         logger.debug(f"Opening file {self.full_paths[idx]}")
-        return _open_file_fh_cached(self.full_paths[idx], engine=self.engine)
+        return self._rename(
+            _open_file_fh_cached(self.full_paths[idx], engine=self.engine)
+        )
 
     @property
     def sample_start_times(self) -> xr.CFTimeIndex:
@@ -927,16 +950,23 @@ class XarrayDataset(DatasetABC):
             shape = [n_steps] + self._shape_excluding_time_after_selection
             total_steps += n_steps
             if self.engine == "zarr":
-                tensor_dict = load_series_data_zarr_async(
+                tensor_dict_in_files = load_series_data_zarr_async(
                     idx=start,
                     n_steps=n_steps,
                     path=self.full_paths[file_idx],
-                    names=self._time_dependent_names,
+                    names=[
+                        self._names_in_files.get(n, n)
+                        for n in self._time_dependent_names
+                    ],
                     final_dims=self.dims,
                     final_shape=shape,
                     fill_nans=self.fill_nans,
                     nontime_selection=self._isel_tuple,
                 )
+                tensor_dict = {
+                    self._renamed_variables.get(n, n): v
+                    for n, v in tensor_dict_in_files.items()
+                }
             else:
                 ds = self._open_file(file_idx)
                 ds = ds.isel(**self.isel)
