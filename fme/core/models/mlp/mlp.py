@@ -2,6 +2,7 @@ import dataclasses
 from collections.abc import Mapping
 from typing import Any
 
+import torch
 from torch import nn
 
 from fme.core.dataset_info import DatasetInfo
@@ -42,7 +43,19 @@ class MLPConfig(ModuleConfig):
         )
 
 
-def _build_mlp(in_dim: int, out_dim: int, n_hidden: int, depth: int) -> nn.Sequential:
+class MLP(nn.Sequential):
+    """``nn.Sequential`` with forward defined in fme.
+
+    Under DDP, dynamo starts a fresh frame for the wrapped module and skips it
+    (runs eagerly) when its code lives in torch, as ``nn.Sequential.forward``
+    does. Same state dict as ``nn.Sequential``.
+    """
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return super().forward(input)
+
+
+def _build_mlp(in_dim: int, out_dim: int, n_hidden: int, depth: int) -> MLP:
     """Build an MLP network with the given parameters."""
     if depth < 1:
         raise ValueError(f"depth must be >= 1, got {depth}")
@@ -58,4 +71,4 @@ def _build_mlp(in_dim: int, out_dim: int, n_hidden: int, depth: int) -> nn.Seque
             layers.append(nn.GELU())
         layers.append(nn.Conv2d(n_hidden, out_dim, kernel_size=1))
 
-    return nn.Sequential(*layers)
+    return MLP(*layers)

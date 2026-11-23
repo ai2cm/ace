@@ -1,5 +1,6 @@
 import copy
 import dataclasses
+import os
 import pathlib
 import subprocess
 import tempfile
@@ -654,6 +655,9 @@ _TRAIN_AND_INFERENCE_CASES = [
             use_healpix=True,
         ),
         id="HEALPix",
+        # on CUDA the HEALPix UNet compiles three large graphs (no-grad, grad,
+        # dynamic batch), over the default 90 s timeout on the CI GPU runner
+        marks=pytest.mark.timeout(300),
     ),
     pytest.param(
         TrainAndInferenceTestSettings(nettype="Samudra"),
@@ -1019,6 +1023,36 @@ def test_resume_two_workers(tmp_path, nettype, tmpdir: pathlib.Path):
     ]
     resume_process = subprocess.run(resume_subprocess_args, cwd=tmpdir)
     resume_process.check_returncode()
+
+
+@pytest.mark.slow
+@pytest.mark.timeout(600)
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="production compiles only on CUDA"
+)
+def test_train_and_inference_compile_with_inductor_like_production(
+    tmp_path: pathlib.Path,
+):
+    """Entrypoints run with production compile defaults in a fresh process."""
+    train_config, inference_config = _setup(
+        tmp_path, "SphericalFourierNeuralOperatorNet"
+    )
+    inductor_cache_dir = tmp_path / "inductor_cache"
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if name not in ("FME_COMPILE", "FME_COMPILE_BACKEND")
+    }
+    env["TORCHINDUCTOR_CACHE_DIR"] = str(inductor_cache_dir)
+    process = subprocess.run(
+        [JOB_SUBMISSION_SCRIPT_PATH, train_config, inference_config, "1"],
+        cwd=tmp_path,
+        env=env,
+    )
+    process.check_returncode()
+    # an empty inductor cache means the run never compiled with inductor
+    assert any(path.is_file() for path in inductor_cache_dir.rglob("*"))
+    assert (tmp_path / "results" / "training_checkpoints" / "best_ckpt.tar").exists()
 
 
 def _create_copy_weights_after_batch_config(

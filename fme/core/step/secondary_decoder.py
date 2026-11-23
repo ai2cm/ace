@@ -3,6 +3,7 @@
 import copy
 import dataclasses
 from collections.abc import Callable
+from typing import Any
 
 import torch
 from torch import nn
@@ -100,10 +101,19 @@ class SecondaryDecoder:
         wrapped._module = self._module.wrap_module(wrapper)
         return wrapped
 
+    def compile(self, **kwargs: Any) -> "SecondaryDecoder":
+        """Return a compiled copy; call after any distributed wrapping."""
+        compiled = copy.copy(self)
+        compiled._module = self._module.compile(**kwargs)
+        return compiled
+
     def to(self, device) -> "SecondaryDecoder":
-        """Move the module to the specified device."""
-        self._module = self._module.to(device)
-        return self
+        """Return a copy on ``device`` (parameters move in place); call before
+        :meth:`compile`.
+        """
+        moved = copy.copy(self)
+        moved._module = self._module.to(device)
+        return moved
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the decoder."""
@@ -148,6 +158,10 @@ class NoSecondaryDecoder:
         self, wrapper: Callable[[nn.Module], nn.Module]
     ) -> "NoSecondaryDecoder":
         """No-op for wrapping module."""
+        return self
+
+    def compile(self, **kwargs: Any) -> "NoSecondaryDecoder":
+        """No-op: there is no module to compile."""
         return self
 
     @property

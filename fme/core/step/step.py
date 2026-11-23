@@ -411,7 +411,8 @@ class StepABC(abc.ABC):
 
         Args:
             args: The arguments to the step function.
-            wrapper: Wrapper to apply over each nn.Module before calling.
+            wrapper: Wrapper to apply over each module's forward callable
+                (its compiled view, if compiled) before calling.
 
         Returns:
             A ``StepOutput`` carrying the denormalized data at the next time

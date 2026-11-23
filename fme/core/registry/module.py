@@ -1,5 +1,6 @@
 import abc
 import dataclasses
+import logging
 from collections.abc import Callable, Mapping
 
 # we use Type to distinguish from type attr of ModuleSelector
@@ -9,10 +10,13 @@ import dacite
 import torch
 from torch import nn
 
+from fme.core.compile import compile_module, is_compile_enabled
 from fme.core.dataset_info import DatasetInfo
 from fme.core.labels import BatchLabels, LabelEncoding
 
 from .registry import Registry
+
+logger = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
@@ -78,9 +82,30 @@ CONDITIONAL_BUILDERS = [
 
 
 class Module:
-    def __init__(self, module: nn.Module, label_encoding: LabelEncoding | None):
+    """A built network and its label encoding.
+
+    ``module`` owns the parameters; ``forward_module`` (e.g. a compiled view)
+    is what the forward pass calls, so compiling never changes the state dict.
+    """
+
+    def __init__(
+        self,
+        module: nn.Module,
+        label_encoding: LabelEncoding | None,
+        forward_module: nn.Module | None = None,
+        compile_unsupported_reason: str | None = None,
+    ):
         self._module = module
         self._label_encoding = label_encoding
+        self._forward_module = forward_module
+        self._compile_unsupported_reason = compile_unsupported_reason
+
+    @property
+    def forward_module(self) -> nn.Module:
+        """The compiled view if compiled, else the parameter-owning module."""
+        if self._forward_module is None:
+            return self._module
+        return self._forward_module
 
     def __call__(
         self, input: torch.Tensor, labels: BatchLabels | None = None
@@ -92,9 +117,40 @@ class Module:
             if labels is None:
                 raise TypeError("Labels are required for conditional models")
             encoded_labels = labels.conform_to_encoding(self._label_encoding)
-            return self._module(input, labels=encoded_labels.tensor)
+            return self.forward_module(input, labels=encoded_labels.tensor)
         else:
-            return self._module(input)
+            return self.forward_module(input)
+
+    def compile(self, **kwargs: Any) -> "Module":
+        """Return a Module whose forward pass runs through ``torch.compile``.
+
+        Parameters and state dict are unchanged. Call after any distributed
+        wrapping so the compiled graph includes it. No-op when compilation is
+        disabled or the builder declared it unsupported.
+        """
+        if not is_compile_enabled():
+            return self
+        if self._compile_unsupported_reason is not None:
+            logger.info(
+                "torch.compile skipped, module runs eagerly: "
+                f"{self._compile_unsupported_reason}"
+            )
+            return self
+        return self._replace(forward_module=compile_module(self._module, **kwargs))
+
+    def _replace(self, **changes: Any) -> "Module":
+        kwargs: dict[str, Any] = {
+            "module": self._module,
+            "label_encoding": self._label_encoding,
+            "forward_module": self._forward_module,
+            "compile_unsupported_reason": self._compile_unsupported_reason,
+        }
+        kwargs.update(changes)
+        return Module(**kwargs)
+
+    @property
+    def is_compiled(self) -> bool:
+        return self._forward_module is not None
 
     @property
     def torch_module(self) -> nn.Module:
@@ -123,10 +179,23 @@ class Module:
         self._module.load_state_dict(state)
 
     def wrap_module(self, callable: Callable[[nn.Module], nn.Module]) -> "Module":
-        return Module(callable(self._module), self._label_encoding)
+        """Wrap the module called on the forward pass.
+
+        On a compiled Module this wraps the compiled callable, outside the
+        graph; wrappers that must own the parameters (e.g. DDP) go before
+        :meth:`compile`.
+        """
+        if self._forward_module is not None:
+            return self._replace(forward_module=callable(self._forward_module))
+        return self._replace(module=callable(self._module))
 
     def to(self, device: torch.device) -> "Module":
-        return Module(self._module.to(device), self._label_encoding)
+        if self._forward_module is not None:
+            raise RuntimeError(
+                "Module.to must be called before Module.compile; moving a "
+                "compiled module between devices is not supported."
+            )
+        return self._replace(module=self._module.to(device))
 
 
 @dataclasses.dataclass
@@ -178,9 +247,17 @@ class ModuleSelector:
 
     @classmethod
     def register(
-        cls, type_name: str
+        cls, type_name: str, compile_unsupported_reason: str | None = None
     ) -> Callable[[Type[ModuleConfig]], Type[ModuleConfig]]:  # noqa: UP006
-        return cls.registry.register(type_name)
+        """Register a ModuleConfig builder under ``type_name``.
+
+        ``compile_unsupported_reason``, if given, makes :meth:`Module.compile`
+        log it and stay eager rather than spend a long failed trace. It lives
+        here, not on the builder, so it does not leak into checkpoints.
+        """
+        return cls.registry.register(
+            type_name, compile_unsupported_reason=compile_unsupported_reason
+        )
 
     def build(
         self,
@@ -213,7 +290,13 @@ class ModuleSelector:
             n_out_channels=n_out_channels,
             dataset_info=dataset_info,
         )
-        return Module(module, label_encoding)
+        return Module(
+            module,
+            label_encoding,
+            compile_unsupported_reason=self.registry.get_compile_unsupported_reason(
+                self.type
+            ),
+        )
 
     @classmethod
     def get_available_types(cls):
