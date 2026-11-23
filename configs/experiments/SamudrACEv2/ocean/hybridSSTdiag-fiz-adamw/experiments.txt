@@ -3,3 +3,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 SamudrACEv2-hybridSSTdiag-fiz-adamw|rs0|01M8596C468AFQ7Z7J5JZ7195C|training|best_inference_ckpt|normal|--min-runtime 8h
 
 SamudrACEv2-hybridSSTdiag-fiz-adamw|rs1|01M8596TKN9X4J764G4QKRCTCT|training|best_inference_ckpt|normal|--min-runtime 8h
+
+SamudrACEv2-hybridSSTdiag-fiz-adamw|rs2|01M85977NE60WVY5K48AKC2VN5|training|best_inference_ckpt|normal|--min-runtime 8h
