@@ -1,0 +1,17 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
+
+# U74 (ai2cm workspace .scratch/2026-11-15-2110-coupled-ft-enso-randco2-training): standard coupled evals of
+# p7czybxj (1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff, beaker 01M78QYC5QWEVW15TP05E4TKBF) that U24 lists as missing:
+# ema_ckpt_0001 1pct; ema_ckpt_0002, ema_ckpt_0003 1pct + piC. Maintainer go 2026-11-23.
+# ema_ckpt_0001 piC exists (wandb acg815zo, beaker 01M7AZ11YK7RRCRGQRBZ8E269A, launched by gantry from
+# troya/2026-10-29-1deg-hybrid-sstdiag-coupled-ft, no experiments.txt row; its checkpoint dataset 01M7AYNFTJTGNWHJ3BY3SHF3K4
+# is a SHA256-identical copy of 01M79M8QMQV6PFG839CAWKBZHN:training_checkpoints/ema_ckpt_0001.tar).
+# Configs, priority, min_runtime as this branch's X-run 1pct/piC rows (U10_eval_rows.py); checkpoints from the final
+# training job's results dataset 01M79M8QMQV6PFG839CAWKBZHN (as the 08c rows in coupled_enso_rank1/).
+# launch: ./job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_p7czybxj_std . --config-dir configs/experiments/cm4_eval/coupled
+# --config-dir configs/experiments/cm4_eval/coupled
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_1pct-ic0001-130yr|ema_ckpt_0001|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_1pct-ic0001-130yr|ema_ckpt_0002|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_piC-ic0151-200yr|ema_ckpt_0002|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_piC-ic0151-200yr|ema_ckpt_0003|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN
