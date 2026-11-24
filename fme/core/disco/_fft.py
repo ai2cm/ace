@@ -43,6 +43,10 @@ def irfft(
     if n is None:
         n = 2 * (x.size(dim) - 1)
 
+    # inductor's CPU stride prediction for aten._fft_c2r is wrong for some
+    # non-contiguous inputs (e.g. einsum outputs), failing compiled runs
+    x = x.contiguous()
+
     # written through view_as_real because dynamo cannot trace Tensor.imag setattr
     torch.view_as_real(x[..., 0])[..., 1] = 0.0
     if (n % 2 == 0) and (n // 2 < x.size(dim)):

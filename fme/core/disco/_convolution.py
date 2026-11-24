@@ -15,7 +15,12 @@ import torch.nn as nn
 
 from . import _filter_basis as _filter_basis_module
 from ._cache import lru_cache
-from ._disco_utils import _disco_s2_contraction_fft, _get_psi, _precompute_psi_banded
+from ._disco_utils import (
+    _apply_disco_weights,
+    _disco_s2_contraction_fft,
+    _get_psi,
+    _precompute_psi_banded,
+)
 from ._filter_basis import FilterBasis
 from ._quadrature import precompute_latitudes, precompute_longitudes
 
@@ -373,20 +378,6 @@ class DiscreteContinuousConvS2(DiscreteContinuousConv):
             self.psi_gather_idx.to(x.device),
             self.nlon_out,
         )
-
-        B, C, K, H, W = x.shape
-        x = x.reshape(B, self.groups, self.groupsize, K, H, W)
-
-        out = torch.einsum(
-            "bgckxy,gock->bgoxy",
-            x,
-            self.weight.reshape(
-                self.groups, -1, self.weight.shape[1], self.weight.shape[2]
-            ),
-        ).contiguous()
-        out = out.reshape(B, -1, H, W)
-
-        if self.bias is not None:
-            out = out + self.bias.reshape(1, -1, 1, 1)
-
-        return out
+        return _apply_disco_weights(
+            x, self.weight, self.bias, self.groups, self.groupsize
+        )

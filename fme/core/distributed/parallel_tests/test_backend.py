@@ -250,8 +250,8 @@ def test_gloo_all_to_all_patch():
     if not torch_dist.is_initialized():
         pytest.skip("Requires distributed process group")
 
-    import fme.core.distributed._gloo_patch as gloo_patch
-    from fme.core.distributed._gloo_patch import patch_gloo_alltoall
+    import fme.core.distributed._all_to_all_patch as all_to_all_patch
+    from fme.core.distributed._all_to_all_patch import patch_all_to_all
 
     backend = torch_dist.get_backend()
     if backend != "gloo":
@@ -268,20 +268,20 @@ def test_gloo_all_to_all_patch():
         return inputs, outputs
 
     # Temporarily remove the patch (if already applied) to test the unpatched path.
-    saved_original = gloo_patch._original_all_to_all
+    saved_original = all_to_all_patch._original_all_to_all
     saved_current = torch_dist.all_to_all
     try:
         if saved_original is not None:
             # Restore the real (unpatched) all_to_all.
             torch_dist.all_to_all = saved_original
-            gloo_patch._original_all_to_all = None
+            all_to_all_patch._original_all_to_all = None
 
         inputs, outputs = _make_buffers()
         with pytest.raises(RuntimeError):
             torch_dist.all_to_all(outputs, inputs)
 
         # Now apply the patch and verify it works.
-        patch_gloo_alltoall()
+        patch_all_to_all()
         inputs, outputs = _make_buffers()
         torch_dist.all_to_all(outputs, inputs)
         for i in range(size):
@@ -290,4 +290,4 @@ def test_gloo_all_to_all_patch():
     finally:
         # Restore whatever state was in place before.
         torch_dist.all_to_all = saved_current
-        gloo_patch._original_all_to_all = saved_original
+        all_to_all_patch._original_all_to_all = saved_original

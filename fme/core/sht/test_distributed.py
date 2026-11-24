@@ -6,7 +6,11 @@ import torch_harmonics.distributed as thd
 
 from fme.core import get_device
 from fme.core.distributed import Distributed
-from fme.core.sht import DistributedInverseRealSHT, DistributedRealSHT
+from fme.core.sht import (
+    DistributedDiscreteContinuousConvS2,
+    DistributedInverseRealSHT,
+    DistributedRealSHT,
+)
 
 NLAT, NLON = 8, 16
 BATCH_CHANNEL_SHAPE = (2, 3)
@@ -123,3 +127,94 @@ def test_isht_matches_upstream(lmax, mmax):
         get_device()
     )
     _assert_matches_upstream(isht, upstream, _isht_input(isht))
+
+
+@pytest.mark.parallel
+@MODES
+@pytest.mark.parametrize("inverse", [False, True], ids=["sht", "isht"])
+def test_transform_compiles_without_graph_break(lmax, mmax, inverse):
+    """Forward and transpose backward compile to one graph."""
+    transform: torch.nn.Module
+    if inverse:
+        transform = DistributedInverseRealSHT(NLAT, NLON, lmax=lmax, mmax=mmax)
+        make_input = _isht_input(transform)
+    else:
+        transform = DistributedRealSHT(NLAT, NLON, lmax=lmax, mmax=mmax)
+        make_input = _sht_input(transform)
+    transform = transform.to(get_device())
+    # an input requiring grad makes dynamo also trace the transposes' backward
+    x = make_input().requires_grad_(True)
+    torch._dynamo.reset()
+    try:
+        explanation = torch._dynamo.explain(transform)(x)
+    finally:
+        torch._dynamo.reset()
+    assert explanation.graph_break_count == 0, explanation.break_reasons
+
+
+# odd_latitudes splits unevenly across polar ranks; downsample mirrors SFNO encoders
+DISCO_SHAPES = pytest.mark.parametrize(
+    "in_shape, out_shape",
+    [
+        pytest.param((NLAT, NLON), (NLAT, NLON), id="same_grid"),
+        pytest.param((9, 18), (9, 18), id="odd_latitudes"),
+        pytest.param((NLAT, NLON), (NLAT // 2, NLON // 2), id="downsample"),
+    ],
+)
+
+
+def _disco_conv_forward_backward(
+    conv: torch.nn.Module, x: torch.Tensor
+) -> tuple[torch.Tensor, ...]:
+    """Output and input/weight/bias grads of a squared-sum loss."""
+    x = x.clone().requires_grad_(True)
+    conv.zero_grad()
+    out = conv(x)
+    out.square().sum().backward()
+    assert x.grad is not None
+    return out.detach(), x.grad, conv.weight.grad.clone(), conv.bias.grad.clone()
+
+
+@pytest.mark.parallel
+@DISCO_SHAPES
+def test_disco_conv_matches_upstream(in_shape, out_shape):
+    """Matches upstream torch-harmonics in forward and backward."""
+    torch.manual_seed(0)
+    kwargs = dict(in_shape=in_shape, out_shape=out_shape, kernel_shape=(3,))
+    conv = DistributedDiscreteContinuousConvS2(3, 2, **kwargs).to(get_device())
+    upstream = thd.DistributedDiscreteContinuousConvS2(3, 2, **kwargs).to(get_device())
+    upstream.load_state_dict(conv.state_dict())
+    torch.nn.init.normal_(conv.bias)
+    upstream.bias.data.copy_(conv.bias.data)
+    x = _random_local_input(in_shape, torch.float32)()
+    # weight/bias grads are compared unreduced, as upstream reduces them via DDP
+    for actual, expected in zip(
+        _disco_conv_forward_backward(conv, x),
+        _disco_conv_forward_backward(upstream, x),
+    ):
+        # summation order differs from upstream's sparse contraction
+        torch.testing.assert_close(actual, expected, rtol=1e-4, atol=1e-4)
+
+
+@pytest.mark.parallel
+@DISCO_SHAPES
+def test_compiled_disco_conv_matches_eager(in_shape, out_shape):
+    """``Distributed.get_disco_conv_s2`` compiles to one graph and matches eager.
+
+    Odd latitudes exercise the padded uneven-shard gather in the backward.
+    """
+    dist = Distributed.get_instance()
+    torch.manual_seed(0)
+    conv = dist.get_disco_conv_s2(
+        3, 2, in_shape=in_shape, out_shape=out_shape, kernel_shape=(3,)
+    ).to(get_device())
+    x = _random_local_input(in_shape, torch.float32)()
+    eager = _disco_conv_forward_backward(conv, x)
+    torch._dynamo.reset()
+    try:
+        compiled_conv = torch.compile(conv, backend="aot_eager", fullgraph=True)
+        compiled = _disco_conv_forward_backward(compiled_conv, x)
+    finally:
+        torch._dynamo.reset()
+    for actual, expected in zip(compiled, eager):
+        torch.testing.assert_close(actual, expected)

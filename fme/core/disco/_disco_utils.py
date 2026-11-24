@@ -135,3 +135,35 @@ def _disco_s2_contraction_fft(
 
     y = y.reshape(batch_size, n_chans, kernel_size, nlat_out, nlon_out).contiguous()
     return y.to(x.dtype)
+
+
+def _apply_disco_weights(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor | None,
+    groups: int,
+    groupsize: int,
+) -> torch.Tensor:
+    """Contract DISCO basis responses with the grouped weights and add bias.
+
+    Parameters
+    ----------
+    x : (B, C, K, H, W) output of ``_disco_s2_contraction_fft``
+    weight : (C_out, groupsize, K)
+    bias : (C_out,) or None
+
+    Returns:
+    -------
+    (B, C_out, H, W)
+    """
+    B, C, K, H, W = x.shape
+    x = x.reshape(B, groups, groupsize, K, H, W)
+    out = torch.einsum(
+        "bgckxy,gock->bgoxy",
+        x,
+        weight.reshape(groups, -1, weight.shape[1], weight.shape[2]),
+    ).contiguous()
+    out = out.reshape(B, -1, H, W)
+    if bias is not None:
+        out = out + bias.reshape(1, -1, 1, 1)
+    return out
