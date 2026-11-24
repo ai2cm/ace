@@ -1,8 +1,8 @@
 #!/bin/bash
 # CPU Beaker job: ingest one period of raw UFS replay cycles (pipeline/raw_ingest.py) into a NEW
-# 6-hourly store on weka, resumable (finished timesteps are skipped on restart).
+# 6-hourly store in the job's results dataset, resumable with `beaker experiment resume` (finished timesteps are skipped).
 #   YEAR=1985 ./launch-raw-ingest.sh
-#   START=1980-01-01T00 END=1980-01-01T18 LABEL=smoke OUT_DIR=/climate-default/<dir> ./launch-raw-ingest.sh
+#   START=1980-01-01T00 END=1980-01-01T18 LABEL=smoke ./launch-raw-ingest.sh
 set -euo pipefail
 REPO_ROOT=$(git rev-parse --show-toplevel)
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -11,7 +11,7 @@ YEAR="${YEAR:-}"
 START="${START:-${YEAR:?YEAR or START/END}-01-01T00}"
 END="${END:-${YEAR}-12-31T18}"
 LABEL="${LABEL:-$YEAR}"
-OUT_DIR="${OUT_DIR:-/climate-default/2026-11-24-ufs-replay-ocean-1deg-19level-1980-1993-6h}"
+OUT_DIR="${OUT_DIR:-/results}"   # the job's results dataset (weka was full on 2026-11-24); a /climate-default/<new dir> also works
 WORKERS="${WORKERS:-14}"
 CPUS="${CPUS:-16}"
 MEMORY="${MEMORY:-200GiB}"
