@@ -1,0 +1,96 @@
+# job_runner/evaluate.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/cm4_eval/coupled/paper
+# ../evaluator-config-1pct-ic0001-130yr.yaml plus the outputs of
+# configs/experiments/cm4_eval/coupled/evaluator-config-1pct-ic0001-130yr-{maps,amoc,chgmaps}.yaml
+# in one rollout, regional ocean writers replaced by global maps: zarr writers, global
+# monthly ocean maps (sst, hfds_total_area, OHC, sea ice, thetao_0..18), global
+# monthly TMP2m and PRATEsfc, tropical Pacific monthly surface fluxes and wind stress,
+# 5-day vo_0..18 on the 26.5N Atlantic row (AMOC). Prediction only: CM4 targets are read
+# from their GCS stores.
+# experiment_dir is not set here: each experiments.txt row must set a unique GCS
+# directory in its override column (space-separated key=value, passed to
+# --override), e.g.
+#   experiment_dir=gs://vcm-ml-experiments/jamesd/<YYYY-MM-DD>-<slug>-paper-eval/coupled/p7czybxj/1pct-ic0001-130yr-paper
+n_coupled_steps: 9488  # --min-runtime 7h
+coupled_steps_in_memory: 16
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+loader:
+  num_data_workers: 1
+  dataset:
+    ocean:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-ocean.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-ocean-5daily.zarr
+          engine: zarr
+    atmosphere:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-1pctco2-1deg-coupled-atmosphere.zarr
+          engine: zarr
+        - data_path: /climate-default
+          file_pattern: 2026-06-19-CM4-1pctCO2-atmosphere-land-1deg-8layer-140yr.zarr
+          engine: zarr
+  start_indices:
+    times:
+    - '0001-01-06T00:00:00'
+aggregator:
+  step_diagnostics:
+    correction_maps: true
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+      - label: ocean_maps_monthly
+        names: [sst, hfds_total_area, ocean_heat_content, sea_ice_volume, ocean_sea_ice_fraction, thetao_0, thetao_1, thetao_2, thetao_3, thetao_4, thetao_5, thetao_6, thetao_7, thetao_8, thetao_9, thetao_10, thetao_11, thetao_12, thetao_13, thetao_14, thetao_15, thetao_16, thetao_17, thetao_18]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: false
+        format:
+          name: zarr
+      - label: amoc_26n_5daily
+        names: [vo_0, vo_1, vo_2, vo_3, vo_4, vo_5, vo_6, vo_7, vo_8, vo_9,
+                vo_10, vo_11, vo_12, vo_13, vo_14, vo_15, vo_16, vo_17, vo_18]
+        lat_extent: [26.0, 27.0]  # one 1-degree row, centre nearest RAPID 26.5N
+        lon_extent: [255.0, 355.0]  # Gulf of Mexico to Africa; land at both ends, no lon-0 wrap
+        save_reference: false
+        format:
+          name: zarr
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+    - label: tropical_pacific_monthly
+      names:
+      - eastward_surface_wind_stress
+      - northward_surface_wind_stress
+      - DSWRFsfc
+      - USWRFsfc
+      - DLWRFsfc
+      - ULWRFsfc
+      - LHTFLsfc
+      - SHTFLsfc
+      - PRATEsfc
+      lat_extent: [-20.0, 20.0]
+      lon_extent: [120.0, 290.0]
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+      format:
+        name: zarr
+    - label: t2m_precip_monthly
+      names: [TMP2m, PRATEsfc]
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+      format:
+        name: zarr
