@@ -1,3 +1,9 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
 
-SamudrACEv2-jointpairs|o0a2rs0|01M83GGB0HWGK9X63WJ1DY3NE9|training|best_inference_ckpt|normal|--min-runtime 8h
+# o0a2rs0 01M83GGB0HWGK9X63WJ1DY3NE9: training finished (epoch 4 of max_epochs 4, ema_ckpt_0004 saved); jobs[-1] 01M83GGB4QJPMQ2SVF03GZW09X hung at process exit after training and was cancelled by hand (exitCode 1): accepted cancel, this job id only; results dataset 01M83GGB11V60H5HEDZKMAFNJF.
+# launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/coupled/jointpairs . --config-dir configs/experiments/SamudrACEv2/eval/coupled/paper
+# --config-dir configs/experiments/SamudrACEv2/eval/coupled/paper
+SamudrACEv2-jointpairs|o0a2rs0|01M83GGB0HWGK9X63WJ1DY3NE9|run_1pct-ic0001-130yr-paper|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-24-samudracev2-paper-eval/coupled/snwrez0y/1pct-ic0001-130yr-paper|01M83GGB11V60H5HEDZKMAFNJF
+SamudrACEv2-jointpairs|o0a2rs0|01M83GGB0HWGK9X63WJ1DY3NE9|run_piC-ic0151-200yr-paper|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-24-samudracev2-paper-eval/coupled/snwrez0y/piC-ic0151-200yr-paper|01M83GGB11V60H5HEDZKMAFNJF
+SamudrACEv2-jointpairs|o0a2rs0|01M83GGB0HWGK9X63WJ1DY3NE9|run_1pct-ic0001-40yr-paper|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-24-samudracev2-paper-eval/coupled/snwrez0y/1pct-ic0001-40yr-paper|01M83GGB11V60H5HEDZKMAFNJF
+SamudrACEv2-jointpairs|o0a2rs0|01M83GGB0HWGK9X63WJ1DY3NE9|run_piC-ic0244-40yr-paper|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-24-samudracev2-paper-eval/coupled/snwrez0y/piC-ic0244-40yr-paper|01M83GGB11V60H5HEDZKMAFNJF
