@@ -5,10 +5,18 @@ checkpoint_path: samudrACE_CM4_piControl_ckpt.tar
 data_writer:
   ocean:
     save_prediction_files: false
-    save_monthly_files: true
+    save_monthly_files: false
+    files:
+      - label: monthly_mean
+        time_coarsen:
+          method: monthly_mean
   atmosphere:
     save_prediction_files: false
-    save_monthly_files: true
+    save_monthly_files: false
+    files:
+      - label: monthly_mean
+        time_coarsen:
+          method: monthly_mean
 forcing_loader:
   atmosphere:
     dataset:

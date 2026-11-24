@@ -19,7 +19,7 @@ from ..predictors import (
     DenoisingMoEPredictor,
     PatchPredictionConfig,
     PatchPredictor,
-    check_input_shape_supported,
+    get_generation_model,
 )
 from .output import DownscalingOutput, EventConfig, TimeRangeConfig
 from .work_items import LoadedSliceWorkItem
@@ -62,11 +62,11 @@ class Downscaler:
     ) -> DiffusionModel | DenoisingMoEPredictor | PatchPredictor:
         """
         Set up the model for inference: roll coordinates to match the coarse lon
-        convention, then wrap with PatchPredictor if needed.  While models are
-        probably capable of generating any domain size, we haven't tested for domains
-        smaller than the model patch size, so we raise an error in that case, and prompt
-        the user to use patching for larger domains because that provides better
-        generations.
+        convention, then wrap with PatchPredictor if patch prediction is configured.
+        While models are probably capable of generating any domain size, we haven't
+        tested for domains smaller than the model patch size, so we raise an error in
+        that case. Models using upsampling with align_corners=True require
+        patch prediction for domains larger than the model patch size.
 
         The coarse coordinates covering the output's full extent live on
         ``output.data`` (fixed at build time, independent of the per-batch work-item
@@ -77,19 +77,11 @@ class Downscaler:
         input_shape = (len(coarse_coords.lat), len(coarse_coords.lon))
         # No-op when coarse_lon does not cross the prime meridian.
         base_model = self.model.with_rolled_lon(coarse_coords.lon)
-        check_input_shape_supported(
-            base_model.coarse_shape,
+        return get_generation_model(
+            base_model,
             input_shape,
             output.patch,
             name=f"output {output.name}",
-        )
-        if base_model.coarse_shape == input_shape:
-            return base_model
-
-        logging.info(f"Using PatchPredictor for output: {output.name}")
-        return PatchPredictor(
-            model=base_model,
-            coarse_horizontal_overlap=output.patch.coarse_horizontal_overlap,
         )
 
     def _on_device_generator(self, loader):

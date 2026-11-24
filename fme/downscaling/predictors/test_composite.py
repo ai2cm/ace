@@ -9,13 +9,21 @@ from fme.downscaling.aggregators.shape_helpers import upsample_tensor
 from fme.downscaling.data import BatchData, PairedBatchData
 from fme.downscaling.data.patching import get_patches
 from fme.downscaling.data.utils import BatchedLatLonCoordinates
-from fme.downscaling.models import ModelOutputs
+from fme.downscaling.models import ModelOutputs, UpsamplingConfig
+from fme.downscaling.modules.diffusion_registry import DiffusionModuleRegistrySelector
 from fme.downscaling.predictors.composite import (
     PatchPredictionConfig,
     PatchPredictor,
     check_input_shape_supported,
     composite_patch_predictions,
+    get_generation_model,
 )
+from fme.downscaling.test_models import (
+    _get_diffusion_model,
+    make_batch_data,
+    make_static_inputs,
+)
+from fme.downscaling.test_utils import cell_centered_coordinate
 
 
 def test_composite_predictions():
@@ -64,35 +72,71 @@ _COMPOSITE_PATCH = PatchPredictionConfig(
 _NO_PATCH = PatchPredictionConfig()
 
 
-def test_check_input_shape_supported_exact_match():
+@pytest.mark.parametrize("requires_training_patch_shape", [True, False])
+def test_check_input_shape_supported_exact_match(requires_training_patch_shape):
     """Exact match is supported regardless of patch config (does not raise)."""
-    check_input_shape_supported((16, 16), (16, 16), _NO_PATCH)
+    check_input_shape_supported(
+        (16, 16), (16, 16), _NO_PATCH, requires_training_patch_shape
+    )
 
 
-def test_check_input_shape_supported_larger_with_composite():
+@pytest.mark.parametrize("requires_training_patch_shape", [True, False])
+def test_check_input_shape_supported_larger_with_composite(
+    requires_training_patch_shape,
+):
     """A larger extent is supported when composite patch prediction is configured."""
-    check_input_shape_supported((16, 16), (32, 32), _COMPOSITE_PATCH)
+    check_input_shape_supported(
+        (16, 16), (32, 32), _COMPOSITE_PATCH, requires_training_patch_shape
+    )
 
 
-@pytest.mark.parametrize("input_shape", [(8, 16), (16, 8), (8, 8)])
-def test_check_input_shape_supported_raises_when_too_small(input_shape):
+@pytest.mark.parametrize("requires_training_patch_shape", [True, False])
+@pytest.mark.parametrize("patch", [_NO_PATCH, _COMPOSITE_PATCH])
+@pytest.mark.parametrize("input_shape", [(8, 16), (16, 8), (8, 8), (8, 32)])
+def test_check_input_shape_supported_raises_when_too_small(
+    input_shape, patch, requires_training_patch_shape
+):
     """Raise when the input is smaller than the model patch in any dimension."""
     with pytest.raises(ValueError, match="smaller spatial extent"):
-        check_input_shape_supported((16, 16), input_shape, _COMPOSITE_PATCH)
+        check_input_shape_supported(
+            (16, 16), input_shape, patch, requires_training_patch_shape
+        )
 
 
-def test_check_input_shape_supported_raises_when_larger_without_patching():
-    """Raise when the extent differs from the patch but patching isn't configured."""
-    with pytest.raises(ValueError, match="requires patch prediction"):
-        check_input_shape_supported((16, 16), (32, 32), _NO_PATCH)
+def test_check_input_shape_supported_legacy_raises_when_larger_without_patching():
+    """
+    Raise when a model with align_corners=True upsampling gets a larger extent but
+    patching isn't configured.
+    """
+    with pytest.raises(ValueError, match="require patch prediction"):
+        check_input_shape_supported(
+            (16, 16), (32, 32), _NO_PATCH, requires_training_patch_shape=True
+        )
+
+
+def test_check_input_shape_supported_larger_without_patching():
+    """
+    A larger extent without patching is supported when the model does not
+    require the training patch shape.
+    """
+    check_input_shape_supported(
+        (16, 16), (32, 32), _NO_PATCH, requires_training_patch_shape=False
+    )
 
 
 class DummyModel:
-    def __init__(self, coarse_shape, downscale_factor):
+    def __init__(
+        self, coarse_shape, downscale_factor, requires_training_patch_shape=True
+    ):
         self.coarse_shape = coarse_shape
         self.downscale_factor = downscale_factor
+        self.requires_training_patch_shape = requires_training_patch_shape
         self.modules = []
         self.out_packer = Packer(["x"])
+        self.validated_input_shapes: list[tuple[int, int]] = []
+
+    def validate_input_shape(self, input_shape):
+        self.validated_input_shapes.append(input_shape)
 
     def generate_on_batch(self, batch: PairedBatchData, n_samples=1):
         prediction_data = {
@@ -112,6 +156,143 @@ class DummyModel:
             for k, v in batch.data.items()
         }
         return prediction_data
+
+
+@pytest.mark.parametrize("patch", [_NO_PATCH, _COMPOSITE_PATCH])
+def test_get_generation_model_returns_model_for_exact_match(patch):
+    model = DummyModel(coarse_shape=(16, 16), downscale_factor=2)
+    # DummyModel duck-types the model interface used by get_generation_model
+    assert get_generation_model(model, (16, 16), patch) is model  # type: ignore
+
+
+def test_get_generation_model_wraps_larger_input_with_patch_predictor():
+    model = DummyModel(coarse_shape=(16, 16), downscale_factor=2)
+    generation_model = get_generation_model(
+        model,  # type: ignore
+        (32, 32),
+        _COMPOSITE_PATCH,
+    )
+    assert isinstance(generation_model, PatchPredictor)
+    assert generation_model.model is model
+    assert generation_model.coarse_shape == (16, 16)
+    # the model generates on the patch extent, so that is what gets validated
+    assert model.validated_input_shapes == [(16, 16)]
+
+
+def test_get_generation_model_returns_model_for_larger_input_without_patching():
+    """
+    Models without align_corners=True upsampling generate on the full
+    larger extent.
+    """
+    model = DummyModel(
+        coarse_shape=(16, 16), downscale_factor=2, requires_training_patch_shape=False
+    )
+    generation_model = get_generation_model(
+        model,  # type: ignore
+        (32, 32),
+        _NO_PATCH,
+    )
+    assert generation_model is model
+    assert model.validated_input_shapes == [(32, 32)]
+
+
+def test_get_generation_model_legacy_raises_for_larger_input_without_patching():
+    model = DummyModel(
+        coarse_shape=(16, 16), downscale_factor=2, requires_training_patch_shape=True
+    )
+    with pytest.raises(ValueError, match="align_corners=True"):
+        get_generation_model(model, (32, 32), _NO_PATCH)  # type: ignore
+
+
+_DOWNSCALE_FACTOR = 2
+
+
+def _get_diffusion_model_for_generation(
+    upsampling: UpsamplingConfig,
+    module: DiffusionModuleRegistrySelector | None = None,
+):
+    """
+    A model trained on (8, 16) coarse patches whose fine domain covers the
+    larger coarse inputs used in the get_generation_model tests.
+    """
+    static_inputs = make_static_inputs((48, 64))
+    return _get_diffusion_model(
+        coarse_shape=(8, 16),
+        downscale_factor=_DOWNSCALE_FACTOR,
+        full_fine_coords=static_inputs.coords,
+        use_fine_topography=True,
+        static_inputs=static_inputs,
+        upsampling=upsampling,
+        module=module,
+    )
+
+
+def _make_coarse_batch(input_shape: tuple[int, int], batch_size: int = 2):
+    n_lat, n_lon = input_shape
+    return make_batch_data(
+        (batch_size, n_lat, n_lon),
+        cell_centered_coordinate(0.0, n_lat * _DOWNSCALE_FACTOR, n=n_lat),
+        cell_centered_coordinate(0.0, n_lon * _DOWNSCALE_FACTOR, n=n_lon),
+    )
+
+
+@pytest.mark.parametrize(
+    "upsampling",
+    [
+        UpsamplingConfig(mode="bicubic", align_corners=False),
+        UpsamplingConfig(mode="bilinear", align_corners=False),
+        UpsamplingConfig(mode="nearest"),
+    ],
+)
+def test_get_generation_model_diffusion_model_generates_full_extent(upsampling):
+    """
+    A diffusion model without align_corners=True upsampling generates on an
+    input larger than its training patch in one pass, without patching.
+    """
+    model = _get_diffusion_model_for_generation(upsampling)
+    input_shape = (12, 24)
+    generation_model = get_generation_model(model, input_shape, _NO_PATCH)
+    assert generation_model is model
+    n_samples = 2
+    prediction = generation_model.generate_on_batch_no_target(
+        _make_coarse_batch(input_shape), n_samples=n_samples
+    )
+    assert prediction["x"].shape == (2, n_samples, 24, 48)
+
+
+def test_get_generation_model_diffusion_model_align_corners_requires_patching():
+    model = _get_diffusion_model_for_generation(
+        UpsamplingConfig(mode="bicubic", align_corners=True)
+    )
+    input_shape = (12, 24)
+    with pytest.raises(ValueError, match="align_corners=True"):
+        get_generation_model(model, input_shape, _NO_PATCH)
+    generation_model = get_generation_model(model, input_shape, _COMPOSITE_PATCH)
+    assert isinstance(generation_model, PatchPredictor)
+    n_samples = 2
+    prediction = generation_model.generate_on_batch_no_target(
+        _make_coarse_batch(input_shape), n_samples=n_samples
+    )
+    assert prediction["x"].shape == (2, n_samples, 24, 48)
+
+
+def test_get_generation_model_raises_for_shape_incompatible_with_unet_depth():
+    """
+    Generating on the full extent raises early when the fine extent can't be
+    halved once per U-Net level, while patching on a compatible patch extent
+    (here, the training patch size) is still supported.
+    """
+    module = DiffusionModuleRegistrySelector(
+        "unet_diffusion_song",
+        {"model_channels": 4, "channel_mult": [1, 1, 1, 1], "attn_resolutions": []},
+    )
+    model = _get_diffusion_model_for_generation(UpsamplingConfig(), module=module)
+    # fine extent (18, 32): 18 is not divisible by 2**3 for a 4-level U-Net
+    input_shape = (9, 16)
+    with pytest.raises(ValueError, match="not compatible with the model architecture"):
+        get_generation_model(model, input_shape, _NO_PATCH)
+    generation_model = get_generation_model(model, input_shape, _COMPOSITE_PATCH)
+    assert isinstance(generation_model, PatchPredictor)
 
 
 def get_paired_test_data(

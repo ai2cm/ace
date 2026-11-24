@@ -28,8 +28,7 @@ from fme.downscaling.predictors import (
     DenoisingMoEConfig,
     DenoisingMoEPredictor,
     PatchPredictionConfig,
-    PatchPredictor,
-    check_input_shape_supported,
+    get_generation_model,
 )
 from fme.downscaling.requirements import DataRequirements
 from fme.downscaling.typing_ import FineResCoarseResPair
@@ -115,17 +114,11 @@ class EventDownscaler:
         coarse_lon = self.data.coarse_extent_latlon_coords.lon
         # No-op when coarse_lon does not cross the prime meridian.
         base_model = self.model.with_rolled_lon(coarse_lon)
-        check_input_shape_supported(
-            base_model.coarse_shape,
+        return get_generation_model(
+            base_model,
             self.data.shape,
             self.patch,
             name=f"event {self.event_name}",
-        )
-        if base_model.coarse_shape == self.data.shape:
-            return base_model
-        return PatchPredictor(
-            base_model,
-            coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
         )
 
     def run(self):
@@ -194,18 +187,12 @@ class Downscaler:
         coarse_lon = self.data.coarse_extent_latlon_coords.lon
         # No-op when coarse_lon does not cross the prime meridian.
         base_model = self.model.with_rolled_lon(coarse_lon)
-        check_input_shape_supported(
-            base_model.coarse_shape,
+        return get_generation_model(
+            base_model,
             self.data.shape,
             self.patch,
             name="downscaler output",
         )
-        if self.patch.needs_patch_predictor:
-            return PatchPredictor(
-                model=base_model,
-                coarse_horizontal_overlap=self.patch.coarse_horizontal_overlap,
-            )
-        return base_model
 
     def save_netcdf_data(self, ds: xr.Dataset):
         if self.dist.is_root():
