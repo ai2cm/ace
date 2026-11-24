@@ -216,9 +216,11 @@ def test_evaluator_rolls_for_seam_crossing(tmp_path):
     assert (experiment_dir / "evaluator_maps_and_metrics.nc").exists()
 
 
-def test_evaluator_raises_when_larger_without_patching(tmp_path):
-    """The default evaluator refuses a region larger than the model patch when
-    patch prediction is not configured.
+@pytest.mark.parametrize("requires_training_patch_shape", [True, False])
+def test_evaluator_larger_without_patching(tmp_path, requires_training_patch_shape):
+    """For a model with align_corners=True upsampling, the default evaluator refuses
+    a region larger than the model patch when patch prediction is not configured;
+    otherwise it evaluates the model on the full region.
 
     The model and data are mocked so the shape check in ``_build_default_evaluator``
     is exercised without building a real model or dataset. The lower-level check is
@@ -227,6 +229,7 @@ def test_evaluator_raises_when_larger_without_patching(tmp_path):
     model_config = unittest.mock.MagicMock()
     built_model = model_config.build.return_value
     built_model.coarse_shape = (4, 4)
+    built_model.requires_training_patch_shape = requires_training_patch_shape
     built_model.with_rolled_lon.return_value = built_model  # same model, no roll
 
     data_config = unittest.mock.MagicMock()
@@ -240,8 +243,11 @@ def test_evaluator_raises_when_larger_without_patching(tmp_path):
         logging=LoggingConfig(),
         n_samples=2,
     )
-    with pytest.raises(ValueError, match="requires patch prediction"):
-        config._build_default_evaluator(built_model)
+    if requires_training_patch_shape:
+        with pytest.raises(ValueError, match="require patch prediction"):
+            config._build_default_evaluator(built_model)
+    else:
+        assert config._build_default_evaluator(built_model).model is built_model
 
 
 def test_evaluator_build_shares_one_model_across_events(tmp_path):

@@ -214,13 +214,15 @@ def _get_diffusion_model(
     use_fine_topography=True,
     static_inputs: StaticInputs | None = None,
     upsampling: UpsamplingConfig | None = None,
+    module: DiffusionModuleRegistrySelector | None = None,
 ):
     normalizer = PairedNormalizationConfig(
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
         NormalizationConfig(means={"x": 0.0}, stds={"x": 1.0}),
     )
     return DiffusionModelConfig(
-        module=DiffusionModuleRegistrySelector(
+        module=module
+        or DiffusionModuleRegistrySelector(
             "unet_diffusion_song", {"model_channels": 4}
         ),
         loss=LossConfig(type="MSE"),
@@ -949,6 +951,21 @@ def test_upsampling_backwards_compatibility(tmp_path):
     torch.save({"model": state}, checkpoint_path)
     loaded = CheckpointModelConfig(checkpoint_path=str(checkpoint_path)).build()
     assert loaded.config.upsampling == legacy
+    assert loaded.requires_training_patch_shape
+
+
+@pytest.mark.parametrize(
+    "upsampling, expected",
+    [
+        (UpsamplingConfig(mode="bicubic", align_corners=True), True),
+        (UpsamplingConfig(mode="bicubic", align_corners=False), False),
+        (UpsamplingConfig(mode="bilinear", align_corners=True), True),
+        (UpsamplingConfig(mode="bilinear", align_corners=False), False),
+        (UpsamplingConfig(mode="nearest"), False),
+    ],
+)
+def test_upsampling_config_requires_training_patch_shape(upsampling, expected):
+    assert upsampling.requires_training_patch_shape is expected
 
 
 @pytest.mark.parametrize("key", ["module", "upsampling"])
