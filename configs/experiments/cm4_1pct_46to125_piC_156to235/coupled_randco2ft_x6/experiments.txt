@@ -21,14 +21,18 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # Run 1: ./job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_randco2ft_x6 . --config-dir configs/experiments/cm4_eval/coupled/paper
 
 # MJO lag regression, out-of-sample piControl 0330-0350, daily tropics
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|run_piC-ic0330-21yr-mjo|best_inference_ckpt|high|--min-runtime 2h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-24-coupled-ft-enso-randco2-paper-eval/coupled/1a5waenz/piC-ic0330-21yr-mjo|01M7RXG2MMXQZF5ZWNR1Z9G29Q
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_piC-ic0330-21yr-mjo|best_inference_ckpt|high|--min-runtime 2h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-24-coupled-ft-enso-randco2-paper-eval/coupled/1a5waenz/piC-ic0330-21yr-mjo|01M7RXG2MMXQZF5ZWNR1Z9G29Q
 
 # TC wake statistics, out-of-sample piControl 0302-0350, 6-h tracker inputs + 5-day sst, |lat| <= 60
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|run_piC-ic0302-48yr-tc|best_inference_ckpt|high|--min-runtime 4h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-24-coupled-ft-enso-randco2-paper-eval/coupled/1a5waenz/piC-ic0302-48yr-tc|01M7RXG2MMXQZF5ZWNR1Z9G29Q
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_piC-ic0302-48yr-tc|best_inference_ckpt|high|--min-runtime 4h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-24-coupled-ft-enso-randco2-paper-eval/coupled/1a5waenz/piC-ic0302-48yr-tc|01M7RXG2MMXQZF5ZWNR1Z9G29Q
 
 # Paper evals, same configs, IC, length and stores as coupled_p7czybxj_paper
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|run_1pct-ic0001-130yr-paper|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-24-coupled-ft-enso-randco2-paper-eval/coupled/1a5waenz/1pct-ic0001-130yr-paper|01M7RXG2MMXQZF5ZWNR1Z9G29Q
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|run_piC-ic0151-200yr-paper|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-24-coupled-ft-enso-randco2-paper-eval/coupled/1a5waenz/piC-ic0151-200yr-paper|01M7RXG2MMXQZF5ZWNR1Z9G29Q
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|run_1pct-ic0001-40yr-paper|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-24-coupled-ft-enso-randco2-paper-eval/coupled/1a5waenz/1pct-ic0001-40yr-paper|01M7RXG2MMXQZF5ZWNR1Z9G29Q
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|run_piC-ic0244-40yr-paper|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-24-coupled-ft-enso-randco2-paper-eval/coupled/1a5waenz/piC-ic0244-40yr-paper|01M7RXG2MMXQZF5ZWNR1Z9G29Q
-# U79 end
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_1pct-ic0001-130yr-paper|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-24-coupled-ft-enso-randco2-paper-eval/coupled/1a5waenz/1pct-ic0001-130yr-paper|01M7RXG2MMXQZF5ZWNR1Z9G29Q
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_piC-ic0151-200yr-paper|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-24-coupled-ft-enso-randco2-paper-eval/coupled/1a5waenz/piC-ic0151-200yr-paper|01M7RXG2MMXQZF5ZWNR1Z9G29Q
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_1pct-ic0001-40yr-paper|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-24-coupled-ft-enso-randco2-paper-eval/coupled/1a5waenz/1pct-ic0001-40yr-paper|01M7RXG2MMXQZF5ZWNR1Z9G29Q
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_piC-ic0244-40yr-paper|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-24-coupled-ft-enso-randco2-paper-eval/coupled/1a5waenz/piC-ic0244-40yr-paper|01M7RXG2MMXQZF5ZWNR1Z9G29Q
+
+# Run 2: ./job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_randco2ft_x6 . --config-dir configs/experiments/cm4_eval/atmos/paper --lift-coupled-atmosphere
+
+# MJO lag regression, out-of-sample piControl 0330-0350, daily tropics, sst-blended -coupled-atmosphere.zarr forcing
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|run_piC-ic0330-21yr-mjo-sstblend|best_inference_ckpt|high|--min-runtime 2h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-24-coupled-ft-enso-randco2-paper-eval/atmos-lifted/1a5waenz/piC-ic0330-21yr-mjo-sstblend|01M7RXG2MMXQZF5ZWNR1Z9G29Q
