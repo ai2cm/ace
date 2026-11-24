@@ -272,10 +272,25 @@ def get_horizontal_coordinates(
     """Return the horizontal coordinate class and dimension names."""
     min_ndim = 3 if spatial_dimensions == "latlon" else 4
     coords: HorizontalCoordinates
+    dims: list[str] | None = None
     for da in ds.data_vars.values():
         if da.ndim >= min_ndim:
-            dims = list(da.dims)
+            dims = [str(d) for d in da.dims]
             break
+    if dims is None:
+        # No time-dependent spatial variable: take the horizontal dimensions
+        # from a time-invariant spatial variable (e.g. a statics-only dataset).
+        for da in ds.data_vars.values():
+            if da.ndim == min_ndim - 1 and "time" not in da.dims:
+                dims = [str(d) for d in da.dims]
+                break
+    if dims is None:
+        var_dims = {str(k): v.dims for k, v in ds.data_vars.items()}
+        raise ValueError(
+            f"Could not determine the {spatial_dimensions} horizontal dimensions: "
+            f"no data variable has at least {min_ndim - 1} non-time dimensions. "
+            f"Data variables and their dimensions: {var_dims}."
+        )
     if spatial_dimensions == "latlon":
         lat_name, lon_name = dims[-2:]
         coords = LatLonCoordinates(
