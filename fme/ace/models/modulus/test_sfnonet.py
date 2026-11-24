@@ -1,5 +1,6 @@
 import os
 
+import pytest
 import torch
 
 from fme.core.device import get_device
@@ -34,3 +35,39 @@ def test_sfnonet_output_is_unchanged():
         output,
         os.path.join(DIR, "testdata/test_sfnonet_output_is_unchanged.pt"),
     )
+
+
+@pytest.mark.parametrize("checkpointing", [1, 2, 3])
+def test_checkpointing_preserves_encoder_gradients(checkpointing):
+    """Checkpointed SFNO keeps encoder gradients when inputs do not require them."""
+    torch.manual_seed(0)
+    model_args = {
+        "params": None,
+        "img_shape": (8, 16),
+        "embed_dim": 8,
+        "num_layers": 1,
+        "in_chans": 2,
+        "out_chans": 2,
+        "use_mlp": True,
+        "pos_embed": False,
+        "big_skip": False,
+        "spectral_layers": 1,
+    }
+    reference = SphericalFourierNeuralOperatorNet(**model_args, checkpointing=0)
+    torch.manual_seed(0)
+    checkpointed = SphericalFourierNeuralOperatorNet(
+        **model_args, checkpointing=checkpointing
+    )
+    x = torch.randn(1, 2, *model_args["img_shape"])
+
+    reference(x).square().mean().backward()
+    checkpointed(x).square().mean().backward()
+
+    for reference_parameter, checkpointed_parameter in zip(
+        reference.encoder.parameters(), checkpointed.encoder.parameters()
+    ):
+        assert reference_parameter.grad is not None
+        assert checkpointed_parameter.grad is not None
+        torch.testing.assert_close(
+            checkpointed_parameter.grad, reference_parameter.grad
+        )
