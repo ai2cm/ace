@@ -12,7 +12,7 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
 EXPER_ID=01TESTTRAININGEXPERIMENT
-HEADER="group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus"
+HEADER="group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus|segments"
 FAILURES=0
 
 fail() {
@@ -121,7 +121,7 @@ check_pushed() {
 }
 
 TRAINING_ROW_TAIL="${EXPER_ID}|training|best_inference_ckpt|normal|--min-runtime 8h"
-WAIT_ROW_TAIL="|best_inference_ckpt|high|--min-runtime 8h||||||||1"
+WAIT_ROW_TAIL="|best_inference_ckpt|high|--min-runtime 8h||||||||1|"
 
 # Without --eval-config-dir: one training row per submitted run, as before the flag existed
 REPO=$(new_repo uncoupled-plain)
