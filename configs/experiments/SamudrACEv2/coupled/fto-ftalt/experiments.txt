@@ -1,1 +1,3 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
+
+SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|training|best_inference_ckpt|normal|--min-runtime 8h
