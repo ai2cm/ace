@@ -331,7 +331,7 @@ is protected from preemption before it can be interrupted.
 
 ### `n_gpus` Field (Optional, `experiments.txt`)
 
-The last `EXPERIMENTS_COLUMNS` column sets how many GPUs `evaluate.sh` and
+The `n_gpus` column sets how many GPUs `evaluate.sh` and
 `inference.sh` request (`gantry run --gpus`) and how the fme module starts.
 
 | `n_gpus` | launch |
@@ -347,6 +347,29 @@ The last `EXPERIMENTS_COLUMNS` column sets how many GPUs `evaluate.sh` and
   which does not shard initial conditions across GPUs (ai2cm/ace#1635).
   Coupled `evaluate.sh` rows are allowed.
 - A blank `shared_mem` scales with `N` (`default_shared_mem`).
+
+### `segments` Field (Optional, `experiments.txt`)
+
+The last `EXPERIMENTS_COLUMNS` column runs an `inference.sh` row as a
+segmented, preemption-resumable inference (`--segments`, ai2cm/ace#1368):
+`N` segments of `n_coupled_steps` (coupled) or `n_forward_steps` (atmosphere)
+each, written to per-segment subdirectories of `experiment_dir`. A segment
+whose restart files exist is skipped on rerun.
+
+| `segments` | `inference.sh` |
+| --- | --- |
+| blank (or column absent) | no `--segments`; gantry `--no-auto-resume` |
+| `N` (positive integer) | `<module> <config> --segments N --override ...`; gantry auto-resume kept |
+| anything else | the script exits before submitting |
+
+- `--segments` reaches only the inference command, never `validate_config`.
+- With auto-resume, beaker restarts a preempted job, which finds the finished
+  segments under `experiment_dir` (the `/results` that training's auto-resume
+  reloads its checkpoints from) and resumes at the first unfinished one.
+- `n_ensemble_per_ic` must be 1; fme raises at job start, not at
+  `validate_config`.
+- `evaluate.sh` exits on a non-blank `segments`: the evaluators have no
+  `--segments` flag.
 
 ### TAG Field (Optional)
 
