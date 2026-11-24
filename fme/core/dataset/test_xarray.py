@@ -1452,3 +1452,29 @@ def test_dataset_without_spatial_variables_raises_clear_error(tmp_path):
     config = XarrayDataConfig(data_path=str(tmp_path))
     with pytest.raises(ValueError, match="horizontal dimensions"):
         xarray_dataset_constructor(config, ["co2"], 2)
+
+
+def test_statics_only_dataset_ignores_unrequested_auxiliary_variables(tmp_path):
+    # A 2D auxiliary variable such as lat_bnds(lat, bnds) listed before the
+    # requested statics must not be taken as the horizontal grid.
+    n_lat, n_lon, n_times, n_timesteps = 4, 8, 6, 2
+    lat = np.linspace(-45, 45, n_lat)
+    deptho = np.arange(n_lat * n_lon, dtype=np.float32).reshape(n_lat, n_lon)
+    time = xr.date_range(
+        "2000-01-01", periods=n_times, freq="5D", calendar="noleap", use_cftime=True
+    )
+    ds = xr.Dataset(
+        {
+            "lat_bnds": (("lat", "bnds"), np.stack([lat - 1, lat + 1], axis=-1)),
+            "deptho": (("lat", "lon"), deptho),
+        },
+        coords={"time": time, "lat": lat, "lon": np.linspace(0, 315, n_lon)},
+    )
+    ds.to_netcdf(tmp_path / "static.nc")
+    config = XarrayDataConfig(data_path=str(tmp_path), file_pattern="static.nc")
+    dataset = xarray_dataset_constructor(config, ["deptho"], n_timesteps)
+    assert dataset.dims[-2:] == ["lat", "lon"]
+    data, _, _, _, _ = dataset[0]
+    np.testing.assert_array_equal(
+        data["deptho"].numpy(), np.broadcast_to(deptho, (n_timesteps, n_lat, n_lon))
+    )
