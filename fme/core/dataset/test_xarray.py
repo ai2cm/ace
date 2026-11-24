@@ -1358,3 +1358,97 @@ def test_allow_missing_variables_false_raises_on_missing(mock_monthly_netcdfs):
             IntSchedule.from_constant(2),
             allow_missing_variables=False,
         )
+
+
+def _write_statics_only_netcdf(
+    path, n_times: int, extra_vars: dict[str, xr.DataArray] | None = None
+) -> dict[str, np.ndarray]:
+    """Write a netCDF with a time coordinate but only 2D (lat, lon) variables.
+
+    Returns the stored 2D arrays by name.
+    """
+    n_lat, n_lon = 4, 8
+    rng = np.random.default_rng(0)
+    deptho = rng.random((n_lat, n_lon)).astype(np.float32)
+    deptho[0, :] = np.nan  # e.g. land points
+    hfgeou = rng.random((n_lat, n_lon)).astype(np.float32)
+    time = xr.date_range(
+        "2000-01-01", periods=n_times, freq="5D", calendar="noleap", use_cftime=True
+    )
+    ds = xr.Dataset(
+        {
+            "deptho": (("lat", "lon"), deptho),
+            "hfgeou": (("lat", "lon"), hfgeou),
+            **(extra_vars or {}),
+        },
+        coords={
+            "time": time,
+            "lat": np.linspace(-45, 45, n_lat),
+            "lon": np.linspace(0, 315, n_lon),
+        },
+    )
+    ds.to_netcdf(path)
+    return {"deptho": deptho, "hfgeou": hfgeou}
+
+
+def test_statics_only_dataset_broadcasts_over_time(tmp_path):
+    n_times, n_timesteps = 10, 3
+    stored = _write_statics_only_netcdf(tmp_path / "static.nc", n_times)
+    config = XarrayDataConfig(data_path=str(tmp_path), file_pattern="static.nc")
+    dataset = xarray_dataset_constructor(config, list(stored), n_timesteps)
+    assert len(dataset) == n_times - n_timesteps + 1
+    expected_times = xr.date_range(
+        "2000-01-01", periods=n_times, freq="5D", calendar="noleap", use_cftime=True
+    )
+    for idx in [0, len(dataset) - 1]:
+        data, time, _, _, _ = dataset[idx]
+        assert list(time.values) == list(expected_times[idx : idx + n_timesteps])
+        for name, array in stored.items():
+            assert data[name].shape == (n_timesteps, *array.shape)
+            np.testing.assert_array_equal(
+                data[name].numpy(),
+                np.broadcast_to(array, (n_timesteps, *array.shape)),
+            )
+
+
+def test_statics_only_dataset_merges_with_time_dependent_dataset(tmp_path):
+    n_times, n_timesteps = 10, 3
+    static_dir = tmp_path / "static"
+    dynamic_dir = tmp_path / "dynamic"
+    static_dir.mkdir()
+    dynamic_dir.mkdir()
+    stored = _write_statics_only_netcdf(static_dir / "static.nc", n_times)
+    sst = np.arange(n_times * 4 * 8, dtype=np.float32).reshape(n_times, 4, 8)
+    _write_statics_only_netcdf(
+        dynamic_dir / "dynamic.nc",
+        n_times,
+        extra_vars={"sst": xr.DataArray(sst, dims=("time", "lat", "lon"))},
+    )
+    static = xarray_dataset_constructor(
+        XarrayDataConfig(data_path=str(static_dir)), list(stored), n_timesteps
+    )
+    dynamic = xarray_dataset_constructor(
+        XarrayDataConfig(data_path=str(dynamic_dir)), ["sst"], n_timesteps
+    )
+    merged = MergedXarrayDataset(datasets=[dynamic, static])
+    assert len(merged) == len(dynamic)
+    data, time, _, _, _ = merged[1]
+    xr.testing.assert_equal(time, dynamic[1][1])
+    np.testing.assert_array_equal(data["sst"].numpy(), sst[1 : 1 + n_timesteps])
+    for name, array in stored.items():
+        np.testing.assert_array_equal(
+            data[name].numpy(), np.broadcast_to(array, (n_timesteps, *array.shape))
+        )
+
+
+def test_dataset_without_spatial_variables_raises_clear_error(tmp_path):
+    time = xr.date_range(
+        "2000-01-01", periods=5, freq="5D", calendar="noleap", use_cftime=True
+    )
+    ds = xr.Dataset(
+        {"co2": (("time",), np.ones(5, dtype=np.float32))}, coords={"time": time}
+    )
+    ds.to_netcdf(tmp_path / "data.nc")
+    config = XarrayDataConfig(data_path=str(tmp_path))
+    with pytest.raises(ValueError, match="horizontal dimensions"):
+        xarray_dataset_constructor(config, ["co2"], 2)
