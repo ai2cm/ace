@@ -151,8 +151,8 @@ submitted run, they append one `wait_<tag>` row per
 ```
 
 ```
-group|tag|experiment_id|status|checkpoint|priority|min_runtime|...|n_gpus
-G|rs0|<training experiment ID>|wait_<tag>|best_inference_ckpt|high|--min-runtime 8h|...|1
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|...|n_gpus|segments
+G|rs0|<training experiment ID>|wait_<tag>|best_inference_ckpt|high|--min-runtime 8h|...|1|
 ```
 
 - `<tag>` is the config filename minus `evaluator-config-` and `.yaml`, so
@@ -251,6 +251,7 @@ This is useful for:
 
 **Cluster and Job Configuration:**
 - `build_cluster_args()`: Construct `CLUSTER_ARGS` array for gantry
+- `build_inference_segments_args()`: Set `SEGMENTS_ARGS` to `--segments N` from the `segments` column (blank: none); exit on a non-positive-integer value
 - `default_shared_mem()`: Fill a blank `shared_mem` column from `node_caps.txt`:
   `SHARED_MEM_FRACTION` (default 0.8) x `n_gpus/gpus_per_node` x node memory
   limit, min over the alias's clusters; unknown clusters fall back to
@@ -331,7 +332,7 @@ is protected from preemption before it can be interrupted.
 
 ### `n_gpus` Field (Optional, `experiments.txt`)
 
-The last `EXPERIMENTS_COLUMNS` column sets how many GPUs `evaluate.sh` and
+The `n_gpus` column sets how many GPUs `evaluate.sh` and
 `inference.sh` request (`gantry run --gpus`) and how the fme module starts.
 
 | `n_gpus` | launch |
@@ -347,6 +348,31 @@ The last `EXPERIMENTS_COLUMNS` column sets how many GPUs `evaluate.sh` and
   which does not shard initial conditions across GPUs (ai2cm/ace#1635).
   Coupled `evaluate.sh` rows are allowed.
 - A blank `shared_mem` scales with `N` (`default_shared_mem`).
+
+### `segments` Field (Optional, `experiments.txt`)
+
+The last `EXPERIMENTS_COLUMNS` column runs an `inference.sh` row as a
+segmented, preemption-resumable inference (`--segments`, ai2cm/ace#1368):
+`N` segments of `n_coupled_steps` (coupled) or `n_forward_steps` (atmosphere)
+each, written to per-segment subdirectories of `experiment_dir`. A segment
+whose restart files exist is skipped on rerun.
+
+| `segments` | `inference.sh` |
+| --- | --- |
+| blank (or column absent) | no `--segments`; gantry `--no-auto-resume` |
+| `N` (positive integer) | `<module> <config> --segments N --override ...`; gantry auto-resume kept |
+| anything else | the script exits before submitting |
+
+- `--segments` reaches only the inference command, never `validate_config`.
+- With auto-resume, beaker restarts a preempted job, which finds the finished
+  segments under `experiment_dir` and resumes at the first unfinished one.
+  This needs `experiment_dir` to survive the restart: `/results` (where
+  training's auto-resume reloads its checkpoints from) or a `gs://` path. Any
+  other local path starts over at segment 0.
+- `n_ensemble_per_ic` must be 1; fme raises at job start, not at
+  `validate_config`.
+- `evaluate.sh` exits on a non-blank `segments`: the evaluators have no
+  `--segments` flag.
 
 ### TAG Field (Optional)
 
