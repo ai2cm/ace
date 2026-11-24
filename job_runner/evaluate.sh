@@ -24,7 +24,8 @@ if [[ "$#" -lt 2 ]]; then
   echo "      and must resolve inside it. experiments.txt is read from <experiment_dir>/<config_subdirectory>/ either way."
   echo "  - --lift-coupled-atmosphere: Each row's checkpoint is a coupled checkpoint; the job first lifts its"
   echo "      atmosphere (and its EMA weights, if any) with $LIFT_TOOL, then runs fme.ace.evaluator on the lifted file."
-  echo "      Atmosphere-only (non-coupled <experiment_dir>) only."
+  echo "      Any <experiment_dir>, coupled included. Applies to every run_<tag> row of experiments.txt,"
+  echo "      so a pending coupled row whose tag is also in --config-dir launches as a lifted-atmosphere eval."
   echo "Reads <experiment_dir>/<config_subdirectory>/experiments.txt, header:"
   echo "  $(input_header EXPERIMENTS_COLUMNS)"
   exit 1
@@ -52,8 +53,8 @@ done
 # Initialize script environment
 init_script_environment
 
-# Determine which fme module to use based on EXPERIMENT_DIR
-if is_coupled_experiment_dir "$EXPERIMENT_DIR"; then
+# Determine which fme module to use: fme.ace.* when lifting, else from EXPERIMENT_DIR
+if [[ "$LIFT_COUPLED_ATMOSPHERE" != "true" ]] && is_coupled_experiment_dir "$EXPERIMENT_DIR"; then
     FME_MODULE_VALIDATE="fme.coupled.validate_config"
     FME_MODULE_EVALUATOR="fme.coupled.evaluator"
 else
@@ -61,10 +62,6 @@ else
     FME_MODULE_EVALUATOR="fme.ace.evaluator"
 fi
 
-if [[ "$LIFT_COUPLED_ATMOSPHERE" == "true" ]] && [[ "$FME_MODULE_EVALUATOR" != "fme.ace.evaluator" ]]; then
-    echo "Error: --lift-coupled-atmosphere needs an atmosphere-only <experiment_dir> (got ${EXPERIMENT_DIR})" >&2
-    exit 1
-fi
 LIFT_OVERRIDE=()
 if [[ "$LIFT_COUPLED_ATMOSPHERE" == "true" ]]; then
     LIFT_OVERRIDE=("checkpoint_path=$LIFTED_ATMOSPHERE_CKPT")
