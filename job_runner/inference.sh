@@ -121,6 +121,7 @@ while read TRAIN_EXPER; do
 
     require_job_name_length "$JOB_NAME"
     require_eval_n_gpus "$JOB_NAME"
+    build_inference_segments_args "$JOB_NAME"
 
     if [[ "$FME_MODULE_INFERENCE" == fme.coupled.inference ]] && (( N_GPUS > 1 )); then
         echo >&2
@@ -171,10 +172,22 @@ while read TRAIN_EXPER; do
     build_cluster_args "$CLUSTER" "$WORKSPACE"
     build_fme_launch "$N_GPUS"
 
+    # A segmented run skips segments already in /results when beaker restarts it
+    # after a preemption, so keep gantry's default auto-resume for it; an
+    # unsegmented run would start over, so it opts out.
+    if (( ${#SEGMENTS_ARGS[@]} > 0 )); then
+        AUTO_RESUME_ARGS=()
+    else
+        AUTO_RESUME_ARGS=(--no-auto-resume)
+    fi
+
     # Print job info based on dry-run mode
     if [[ "$DRY_RUN" == "true" ]]; then
         if [[ "$FIRST_JOB_PRINTED" == "false" ]]; then
             print_detailed_job_info
+            echo "  Segments: ${SEGMENTS:-(none)}"
+            echo "  Auto-resume: $( (( ${#AUTO_RESUME_ARGS[@]} > 0 )) && echo off || echo on)"
+            echo
             FIRST_JOB_PRINTED=true
         else
             print_condensed_job_info "$JOB_NAME" "$CONFIG_PATH_REL" "$CLUSTER" "$N_GPUS" "$SHARED_MEM" "$PRIORITY"
@@ -192,6 +205,7 @@ while read TRAIN_EXPER; do
         echo " - Priority: ${PRIORITY}"
         echo " - ${MIN_RUNTIME}"
         echo " - --override args: ${OVERRIDE_ARGS}"
+        echo " - Segments: ${SEGMENTS:-(none)}"
 
         echo
     fi
@@ -203,6 +217,14 @@ while read TRAIN_EXPER; do
     eval "OVERRIDE_ARGV=($OVERRIDE_ARGS)"
     validate_config_once "$FME_MODULE_VALIDATE" inference "$CONFIG_PATH_REL" "${OVERRIDE_ARGV[@]}"
 
+    # --segments goes to the inference command only; validate_config rejects it.
+    JOB_COMMAND=("${FME_LAUNCH[@]}" "$FME_MODULE_INFERENCE" "$CONFIG_PATH_REL" "${SEGMENTS_ARGS[@]}" --override "${OVERRIDE_ARGV[@]}")
+    if [[ "$DRY_RUN" == "true" ]]; then
+        printf '    Job command:'
+        printf ' %q' "${JOB_COMMAND[@]}"
+        echo
+    fi
+
     # Run gantry command unless in dry-run mode
     if [[ "$DRY_RUN" != "true" ]]; then
         echo "$JOB_NAME"
@@ -212,7 +234,7 @@ while read TRAIN_EXPER; do
             --beaker-image "$(cat "$REPO_ROOT/latest_deps_only_image.txt")" \
             --priority "$PRIORITY" \
             $MIN_RUNTIME \
-            --no-auto-resume \
+            "${AUTO_RESUME_ARGS[@]}" \
             "${CLUSTER_ARGS[@]}" \
             --weka climate-default:/climate-default \
             --env WANDB_USERNAME="$WANDB_USERNAME" \
@@ -228,7 +250,7 @@ while read TRAIN_EXPER; do
             --budget ai2/atec-climate \
             --system-python \
             --install "pip install --no-deps ." \
-            -- "${FME_LAUNCH[@]}" $FME_MODULE_INFERENCE "$CONFIG_PATH_REL" --override "${OVERRIDE_ARGV[@]}"
+            -- "${JOB_COMMAND[@]}"
         echo
     fi
 done <"$INPUT_PATH"

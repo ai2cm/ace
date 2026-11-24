@@ -28,6 +28,10 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - [FEAT] `evaluate.sh --lift-coupled-atmosphere`: score a coupled checkpoint's
   atmosphere with `fme.ace.evaluator`; the job first runs
   `bin/extract_component_from_coupled_ckpt.py --component atmosphere`
+- [FEAT] `experiments.txt` column `segments` (last; blank = unsegmented) runs
+  `inference.sh` jobs with `--segments N` and keeps gantry auto-resume, so a
+  preempted job resumes at the first unfinished segment; `evaluate.sh` rejects
+  it
 - [FEAT] `evaluate.sh --lift-coupled-atmosphere` accepts a coupled
   `<experiment_dir>` (it exited non-zero before): the flag selects `fme.ace.*`
   whatever the path, and applies to every `run_<tag>` row of the file;

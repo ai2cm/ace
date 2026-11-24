@@ -356,6 +356,22 @@ require_eval_n_gpus() {
     fi
 }
 
+# Set SEGMENTS_ARGS to `--segments N` for an experiments.txt row whose
+# segments column is N, or to nothing when it is blank (or the column is
+# absent); stop the submission loop unless N is a positive integer.
+# Args: JOB_NAME
+build_inference_segments_args() {
+    SEGMENTS_ARGS=()
+    [[ -n "${SEGMENTS:-}" ]] || return 0
+    if [[ ! "$SEGMENTS" =~ ^[1-9][0-9]*$ ]]; then
+        echo >&2
+        echo "Error: segments must be a positive integer or blank, got '${SEGMENTS}' for JOB_NAME: $1" >&2
+        echo "This job and any remaining jobs in the input file were not submitted." >&2
+        exit 1
+    fi
+    SEGMENTS_ARGS=(--segments "$SEGMENTS")
+}
+
 # Set FME_LAUNCH to the command prefix that runs an fme module on N_GPUS
 # processes: `python -I -m` for one, single-node torchrun for more.
 # Args: N_GPUS
@@ -708,7 +724,7 @@ EXPERIMENTS_COLUMNS=(
     results_dataset:EXISTING_RESULTS_DATASET workspace:WORKSPACE cluster:CLUSTER
     ocean_results_dataset:EXISTING_RESULTS_OCEAN_DATASET
     atmos_results_dataset:EXISTING_RESULTS_ATMOS_DATASET shared_mem:SHARED_MEM
-    n_gpus:N_GPUS
+    n_gpus:N_GPUS segments:SEGMENTS
 )
 
 # Print the header line for an input file

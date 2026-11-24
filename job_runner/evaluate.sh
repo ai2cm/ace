@@ -144,6 +144,14 @@ while read TRAIN_EXPER; do
     require_job_name_length "$JOB_NAME"
     require_eval_n_gpus "$JOB_NAME"
 
+    if [[ -n "$SEGMENTS" ]]; then
+        echo >&2
+        echo "Error: segments is '${SEGMENTS}' for JOB_NAME: ${JOB_NAME}, but ${FME_MODULE_EVALUATOR} has no" >&2
+        echo "--segments flag; only inference.sh (run_inf_* rows) uses it. Leave it blank." >&2
+        echo "This job and any remaining jobs in the input file were not submitted." >&2
+        exit 1
+    fi
+
     if [[ -z $PRIORITY ]]; then
         PRIORITY=normal
     fi
