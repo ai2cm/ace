@@ -1,0 +1,109 @@
+# job_runner/inference.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/cm4_eval/coupled/paper
+# Coupled 1deg abrupt-4xCO2 run: 150-year inference from CM4's own abrupt-4xCO2 simulation
+# at 0251-01-02T00:00:00, with CO2 held at 4x (1137.048 ppm). Initial conditions come from the
+# daily ocean and 6-hourly atmosphere initial-condition stores extracted from
+# CM4's CMIP6 abrupt-4xCO2 simulation, so the run starts from a 4xCO2 state
+# rather than branching from piControl.
+# The ocean's exogenous forcings (land_fraction, sea_surface_fraction, deptho,
+# hfgeou) are time-constant, so they come from a small file that repeats them on
+# a 5-day axis starting at the initial time, matching the 5-day ocean step
+# (configs/experiments/cm4_eval/coupled/make_static_ocean_forcing.py).
+# Both forcing datasets are repeated in time to cover 0251-0401:
+# - the piControl atmosphere stores end in 0350, so they are repeated once; the
+#   remaining atmosphere forcings are periodic in the noleap calendar and CO2 is
+#   overwritten with a constant, so the repeat introduces no discontinuity.
+# - the ocean's time-constant forcings file only spans 150 days on a 5-day
+#   axis, so it is tiled well past the times needed.
+# inference-config-cm4-abrupt4xCO2-ic1-100yr.yaml with the keys where the
+# SamudrACEv2-CM4 runs.yaml role samudrace2_abrupt4xco2_150yr config.yaml differs:
+# run length, initial condition, ocean static forcing file, and monthly-mean zarr
+# outputs of the variables listed under data_writer.
+# experiment_dir is not set here: each experiments.txt row must set a unique GCS
+# directory in its override column (space-separated key=value, passed to
+# --override), e.g.
+#   experiment_dir=gs://vcm-ml-experiments/jamesd/<YYYY-MM-DD>-<slug>-paper-eval/coupled/<training wandb run id>/cm4-cmip6-like-ic-abrupt4xCO2-0251-150yr
+n_coupled_steps: 10950  # 150 years of 5-day ocean steps
+coupled_steps_in_memory: 6
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+initial_condition:
+  ocean:
+    path: /climate-default/2026-11-17-cm4-cmip6-abrupt-4xCO2-initial-condition-1deg-ocean-1daily.zarr
+    engine: zarr
+  atmosphere:
+    path: /climate-default/2026-11-17-CM4-CMIP6-abrupt-4xCO2-initial-condition-atmosphere-land-1deg-8layer-2day.zarr
+    engine: zarr
+  start_indices:
+    times:
+      - "0251-01-02T00:00:00"
+forcing_loader:
+  num_data_workers: 1
+  ocean:
+    dataset:
+      data_path: /climate-default/2026-11-17-cm4-abrupt-4xCO2-1deg-static-ocean-forcing-0251
+      file_pattern: ic_0251-01-02.nc
+      n_repeats: 500
+  atmosphere:
+    dataset:
+      merge:
+        - data_path: /climate-default
+          file_pattern: 2026-07-15-om4-picontrol-1deg-coupled-atmosphere.zarr
+          engine: zarr
+          n_repeats: 2
+        - data_path: /climate-default
+          file_pattern: 2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+          engine: zarr
+          n_repeats: 2
+          overwrite:
+            constant:
+              carbon_dioxide: 1137.048
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+      - label: monthly_mean_predictions
+        save_reference: false
+        time_coarsen:
+          method: monthly_mean
+        format:
+          name: zarr
+        names:
+          - hfds_total_area
+          - thetao_0
+          - thetao_18
+          - ocean_sea_ice_fraction
+          - ocean_heat_content
+          - ocean_heat_content_tendency
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+      - label: monthly_mean_predictions
+        save_reference: false
+        time_coarsen:
+          method: monthly_mean
+        format:
+          name: zarr
+        names:
+          - air_temperature_0
+          - air_temperature_7
+          - LHTFLsfc
+          - SHTFLsfc
+          - DSWRFsfc
+          - USWRFsfc
+          - DLWRFsfc
+          - ULWRFsfc
+          - ULWRFtoa
+          - USWRFtoa
+          - surface_temperature
+          - total_frozen_precipitation_rate
+          - PRATEsfc
+          - net_energy_flux_toa_into_atmosphere
+          - TMP2m
