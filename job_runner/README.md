@@ -180,10 +180,17 @@ appended to the overrides. No beaker dataset is created for the lifted file.
     --config-dir configs/experiments/cm4_eval/atmos --lift-coupled-atmosphere --dry-run
 ```
 
-- Atmosphere-only `<experiment_dir>` only (no path component starting with
-  `coupled`); the script exits non-zero otherwise.
-- Applies to every row of the file, so keep coupled-checkpoint rows in their
-  own `experiments.txt`.
+- Any `<experiment_dir>`, coupled included: the flag selects
+  `fme.ace.validate_config` and `fme.ace.evaluator` whatever the path.
+- Applies to every `run_<tag>` row of the file. In a coupled
+  `experiments.txt`, a pending coupled-eval row whose tag also names an
+  atmosphere config in `--config-dir` (for example `run_1pct-ic0001-130yr`
+  when both `eval/atmos/` and `eval/coupled/` hold
+  `evaluator-config-1pct-ic0001-130yr.yaml`) launches as a lifted-atmosphere
+  eval: a valid job on the wrong config. Before a lift launch, flip or remove
+  such rows, or keep coupled-checkpoint atmosphere rows in their own
+  `experiments.txt`. Rows whose tag is absent from `--config-dir` print
+  `Config file not found ... Skipping`.
 - Any checkpoint file works. `ckpt.tar` holds raw weights plus EMA weights;
   the lifted file keeps the atmosphere's EMA weights and the evaluator uses
   them (`use_ema_if_available`, default true). `ema_ckpt_*.tar` and
