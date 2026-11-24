@@ -346,7 +346,7 @@ class OceanData:
 
     @property
     def sea_ice_volume(self) -> torch.Tensor:
-        """Returns the sea ice volume in the cell, in m**3.
+        """Returns the sea ice volume in the cell, in m^3.
 
         Stored ``sea_ice_volume`` if present; else
 

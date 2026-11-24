@@ -284,12 +284,12 @@ def HI(
     return data.sea_ice_thickness
 
 
-@register(VariableMetadata("m**3", "Sea ice volume"), exists_ok=True)
+@register(VariableMetadata("m^3", "Sea ice volume"), exists_ok=True)
 def sea_ice_volume(
     data: OceanData,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
-    """Sea ice volume in the cell, in m**3.
+    """Sea ice volume in the cell, in m^3.
 
     Stored sea_ice_volume if present, else, per cell:
 
