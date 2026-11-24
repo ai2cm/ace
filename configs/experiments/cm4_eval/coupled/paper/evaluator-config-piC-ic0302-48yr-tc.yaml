@@ -1,5 +1,5 @@
 # job_runner/evaluate.sh configs/experiments/<exper> . \
-#   --config-dir configs/experiments/cm4_eval/coupled
+#   --config-dir configs/experiments/cm4_eval/coupled/paper
 # Out-of-sample piControl (all training/validation dates < 0241-01-01), 6-h TC tracker
 # inputs and 5-day sst over |lat| <= 60 for TC wake statistics. Length and IC:
 # analysis/2026-11-11-1356-samudrace2-paper-figures/tc_eval_storage.py option (c)

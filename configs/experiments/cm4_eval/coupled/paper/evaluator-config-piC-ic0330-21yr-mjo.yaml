@@ -1,5 +1,5 @@
 # job_runner/evaluate.sh configs/experiments/<exper> . \
-#   --config-dir configs/experiments/cm4_eval/coupled
+#   --config-dir configs/experiments/cm4_eval/coupled/paper
 # Out-of-sample piControl (all training/validation dates < 0311-01-01), daily
 # tropical-band output for MJO lag regression. 1530 = largest multiple of
 # coupled_steps_in_memory that fits from 0330-01-06 to the stores' end.
