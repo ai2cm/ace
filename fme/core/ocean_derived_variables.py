@@ -270,11 +270,36 @@ def HI(
     data: OceanData,
     timestep: datetime.timedelta,
 ) -> torch.Tensor:
-    """Recover sea ice thickness (HI) in meters from sea ice volume in m^3.
+    """Sea ice thickness (HI) in meters, per unit sea ice area.
 
+    Stored HI if present, else, per cell:
+
+    HI = ocean_sea_ice_thickness_mean / ocean_sea_ice_fraction  (0 where the
+    fraction is 0), else
     HI = sea_ice_volume / (area_weights_m2 * sea_ice_frac)
+
+    where sea_ice_frac = ocean_sea_ice_fraction * sea_surface_fraction (per
+    cell area).
     """
     return data.sea_ice_thickness
+
+
+@register(VariableMetadata("m^3", "Sea ice volume"), exists_ok=True)
+def sea_ice_volume(
+    data: OceanData,
+    timestep: datetime.timedelta,
+) -> torch.Tensor:
+    """Sea ice volume in the cell, in m^3.
+
+    Stored sea_ice_volume if present, else, per cell:
+
+    sea_ice_volume = ocean_sea_ice_thickness_mean * area_weights_m2
+                     * sea_surface_fraction
+                   = HI * ocean_sea_ice_fraction * ocean area
+
+    0 where ocean_sea_ice_fraction is 0. Inverse of the volume path of HI.
+    """
+    return data.sea_ice_volume
 
 
 @register(VariableMetadata("W/m**2", "Surface ocean heat flux"), exists_ok=True)

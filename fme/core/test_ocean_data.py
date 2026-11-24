@@ -221,3 +221,144 @@ def test_getitem():
         AttributeError, match="object has no attribute 'nonexistent_field'"
     ):
         _ = ocean_data["nonexistent_field"]
+
+
+def _thickness_mean_data() -> dict[str, torch.Tensor]:
+    # cells: ice, ice-free ocean, land
+    return {
+        "ocean_sea_ice_thickness_mean": torch.tensor([1.5, 0.0, float("nan")]),
+        "ocean_sea_ice_fraction": torch.tensor([0.75, 0.0, float("nan")]),
+    }
+
+
+def test_sea_ice_thickness_from_thickness_mean():
+    thickness = OceanData(_thickness_mean_data()).sea_ice_thickness
+    torch.testing.assert_close(
+        thickness, torch.tensor([2.0, 0.0, float("nan")]), equal_nan=True
+    )
+
+
+def test_sea_ice_thickness_from_thickness_mean_has_finite_gradients():
+    data = _thickness_mean_data()
+    thickness_mean = data["ocean_sea_ice_thickness_mean"].requires_grad_()
+    frac = data["ocean_sea_ice_fraction"].requires_grad_()
+    thickness = OceanData(data).sea_ice_thickness
+    torch.nansum(thickness).backward()
+    assert thickness_mean.grad is not None and frac.grad is not None
+    assert torch.isfinite(thickness_mean.grad).all()
+    assert torch.isfinite(frac.grad).all()
+    torch.testing.assert_close(thickness_mean.grad, torch.tensor([1 / 0.75, 0, 0]))
+    torch.testing.assert_close(frac.grad, torch.tensor([-1.5 / 0.75**2, 0, 0]))
+
+
+def test_sea_ice_thickness_from_thickness_mean_nan_numerator_finite_gradients():
+    thickness_mean = torch.tensor([float("nan")], requires_grad=True)
+    frac = torch.tensor([0.5], requires_grad=True)
+    data = {
+        "ocean_sea_ice_thickness_mean": thickness_mean,
+        "ocean_sea_ice_fraction": frac,
+    }
+    thickness = OceanData(data).sea_ice_thickness
+    assert torch.isnan(thickness).all()
+    torch.nansum(thickness).backward()
+    assert frac.grad is not None and torch.isfinite(frac.grad).all()
+
+
+def test_sea_ice_thickness_stored_takes_precedence():
+    data = {**_thickness_mean_data(), "HI": torch.tensor([7.0, 8.0, 9.0])}
+    torch.testing.assert_close(OceanData(data).sea_ice_thickness, data["HI"])
+
+
+def test_sea_ice_thickness_mean_takes_precedence_over_volume():
+    # the volume path would raise: no cell area provider
+    data = {**_thickness_mean_data(), "sea_ice_volume": torch.ones(3)}
+    thickness = OceanData(data).sea_ice_thickness
+    torch.testing.assert_close(
+        thickness, torch.tensor([2.0, 0.0, float("nan")]), equal_nan=True
+    )
+
+
+def test_sea_ice_thickness_mean_without_ocean_fraction_uses_volume():
+    data = {
+        "ocean_sea_ice_thickness_mean": torch.ones(3),
+        "sea_ice_volume": torch.ones(3),
+        "sea_ice_fraction": torch.ones(3),
+        "land_fraction": torch.zeros(3),
+    }
+    with pytest.raises(ValueError, match="cell area provider"):
+        OceanData(data).sea_ice_thickness
+
+
+def test_sea_ice_thickness_missing_inputs():
+    with pytest.raises(KeyError):
+        OceanData({"ocean_sea_ice_thickness_mean": torch.ones(3)}).sea_ice_thickness
+
+
+class _CellArea:
+    def __init__(self, area_weights_m2: torch.Tensor):
+        self.area_weights_m2 = area_weights_m2
+
+
+def _volume_data() -> dict[str, torch.Tensor]:
+    # cells: ice, ice-free ocean with stray thickness mean, land
+    return {
+        "ocean_sea_ice_thickness_mean": torch.tensor([1.5, 0.25, float("nan")]),
+        "ocean_sea_ice_fraction": torch.tensor([0.75, 0.0, float("nan")]),
+        "sea_surface_fraction": torch.tensor([0.5, 1.0, 0.0]),
+    }
+
+
+_CELL_AREA = _CellArea(torch.tensor([4.0, 2.0, 3.0]))
+
+
+def test_sea_ice_volume_from_thickness_mean():
+    volume = OceanData(_volume_data(), cell_area_provider=_CELL_AREA).sea_ice_volume
+    torch.testing.assert_close(
+        volume, torch.tensor([1.5 * 4.0 * 0.5, 0.0, float("nan")]), equal_nan=True
+    )
+
+
+def test_sea_ice_volume_from_thickness_mean_has_finite_gradients():
+    data = _volume_data()
+    thickness_mean = data["ocean_sea_ice_thickness_mean"].requires_grad_()
+    sfrac = data["sea_surface_fraction"].requires_grad_()
+    volume = OceanData(data, cell_area_provider=_CELL_AREA).sea_ice_volume
+    torch.nansum(volume).backward()
+    for tensor in (thickness_mean, sfrac):
+        assert tensor.grad is not None and torch.isfinite(tensor.grad).all()
+    torch.testing.assert_close(thickness_mean.grad, torch.tensor([2.0, 0.0, 0.0]))
+    torch.testing.assert_close(sfrac.grad, torch.tensor([6.0, 0.0, 0.0]))
+
+
+def test_sea_ice_volume_stored_takes_precedence():
+    data = {**_volume_data(), "sea_ice_volume": torch.tensor([7.0, 8.0, 9.0])}
+    volume = OceanData(data, cell_area_provider=_CELL_AREA).sea_ice_volume
+    torch.testing.assert_close(volume, data["sea_ice_volume"])
+
+
+def test_sea_ice_thickness_and_volume_missing_inputs_no_recursion():
+    data = {
+        "ocean_sea_ice_fraction": torch.ones(3),
+        "sea_surface_fraction": torch.ones(3),
+    }
+    ocean_data = OceanData(data, cell_area_provider=_CELL_AREA)
+    with pytest.raises(KeyError):
+        ocean_data.sea_ice_volume
+    with pytest.raises(KeyError):
+        ocean_data.sea_ice_thickness
+
+
+def test_sea_ice_thickness_from_derived_volume_round_trip():
+    data = _volume_data()
+    from_mean = OceanData(data).sea_ice_thickness
+    volume = OceanData(data, cell_area_provider=_CELL_AREA).sea_ice_volume
+    volume_data = {
+        "sea_ice_volume": volume,
+        "ocean_sea_ice_fraction": data["ocean_sea_ice_fraction"],
+        "sea_surface_fraction": data["sea_surface_fraction"],
+    }
+    from_volume = OceanData(
+        volume_data, cell_area_provider=_CELL_AREA
+    ).sea_ice_thickness
+    has_ice = data["ocean_sea_ice_fraction"] > 0
+    torch.testing.assert_close(from_volume[has_ice], from_mean[has_ice])
