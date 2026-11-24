@@ -28,6 +28,11 @@ https://github.com/ai2cm/full-model/compare/job_runner
 - [FEAT] `evaluate.sh --lift-coupled-atmosphere`: score a coupled checkpoint's
   atmosphere with `fme.ace.evaluator`; the job first runs
   `bin/extract_component_from_coupled_ckpt.py --component atmosphere`
+- [FEAT] `evaluate.sh --lift-coupled-atmosphere` accepts a coupled
+  `<experiment_dir>` (it exited non-zero before): the flag selects `fme.ace.*`
+  whatever the path, and applies to every `run_<tag>` row of the file;
+  launches without the flag are unchanged;
+  `tests/test_evaluate_lift_coupled_atmosphere.sh`
 - [FEAT] `bin/extract_component_from_coupled_ckpt.py` (from troya's
   `extract_{atmosphere,ocean}_from_coupled_ckpt.py`): lifts the atmosphere or
   ocean of a coupled checkpoint; keeps that component's EMA weights,
