@@ -894,7 +894,7 @@ class XarrayDataset(DatasetABC):
         static_derived_data: StaticDerivedData
 
         horizontal_coordinates, dim_names = get_horizontal_coordinates(
-            first_dataset, self.spatial_dimensions, self.dtype
+            first_dataset, self.spatial_dimensions, self.dtype, names=self._names
         )
         static_derived_data = StaticDerivedData(horizontal_coordinates)
 
