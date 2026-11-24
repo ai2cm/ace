@@ -97,9 +97,14 @@ def test_accumulate_labels(
         ),
     ],
 )
-def test_get_horizontal_coordinates(spatial_dimensions, expected_coords):
+@pytest.mark.parametrize("statics_only", [False, True])
+def test_get_horizontal_coordinates(spatial_dimensions, expected_coords, statics_only):
     ds = create_reference_dataset(spatial_dims=expected_coords)
+    if statics_only:
+        # keeps the time coordinate but no time-dependent data variable
+        ds = ds.drop_vars(FULL_NAME)
     result, loaded_dim_names = get_horizontal_coordinates(ds, spatial_dimensions, None)
+    assert loaded_dim_names == expected_coords.dims
     assert expected_coords.dims == result.dims
     for name in expected_coords.dims:
         np.testing.assert_array_equal(expected_coords.coords[name], result.coords[name])
