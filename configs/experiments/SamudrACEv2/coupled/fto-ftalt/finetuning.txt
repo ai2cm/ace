@@ -1,6 +1,7 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
 
 # One row per FTO row of pretraining.txt (same tag). When that FTO run finishes: wandb_id = its wandb run id, then skip -> train.
+# launch: ./job_runner/coupled_finetune.sh configs/experiments/SamudrACEv2/coupled fto-ftalt --coupled_stats andrep/2026-11-13-om4-1pctco2-1deg-coupled-stats
 SamudrACEv2-ftalt|o0a0rs0|ace-samudra-coupled-cm4||best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0||8h
 SamudrACEv2-ftalt|o1a0rs0|ace-samudra-coupled-cm4||best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0||8h
 SamudrACEv2-ftalt|o2a0rs0|ace-samudra-coupled-cm4||best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0||8h
