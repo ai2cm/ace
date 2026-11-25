@@ -2,9 +2,9 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 # X6 (coupled_randco2ft_x6; training 01M7RXG2MDBGVVTRC7XZ3FMCRJ, results dataset 01M7RXG2MMXQZF5ZWNR1Z9G29Q,
 # wandb ai2cm/ace-samudra-coupled-cm4/1a5waenz): 200 yr piControl from 0151-01-06, then 140 yr 1%/yr CO2,
-# 17 segments x 20 yr. Forcing: configs/experiments/cm4_eval/coupled/x6_piC200_1pct140/make_forcing.py.
+# 17 segments x 20 yr (beaker 01M8A1HVVTWHYRGDWETK9Q22AZ). Forcing: configs/experiments/cm4_eval/coupled/x6_piC200_1pct140/make_forcing.py.
 # launch: WANDB_USERNAME=elynnwu ./job_runner/inference.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_randco2ft_x6_piC200_1pct140 . --config-dir configs/experiments/cm4_eval/coupled/x6_piC200_1pct140
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|run_inf_piC200-1pct140|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/elynnwu/2026-11-24-x6-piC200-1pct140|01M7RXG2MMXQZF5ZWNR1Z9G29Q||jupiter+titan||||1|17
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_inf_piC200-1pct140|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/elynnwu/2026-11-24-x6-piC200-1pct140|01M7RXG2MMXQZF5ZWNR1Z9G29Q||jupiter+titan||||1|17
 
 # smoke test (beaker 01M8827N7261SRF6313HR6HY82): 2 segments x 72 steps (~1 yr each) to a scratch dir. Failed: all-NaN
 # from step 1, because coupled inference never derives insolation and read the store's NaN DSWRFtoa placeholder.
