@@ -11,6 +11,11 @@ from run_configs/ft/, create_fm_v2_finetune_jobs.py; sfno-v2-ft-e32,
 sfno-v2-ft-e128, swin-v2.2-v2-ft-e32 and swin-v2.2-v2-ft-e128: its 32- and
 128-epoch long fine-tunes, 9 runs each, read from run_configs/ft-e32/ and
 run_configs/ft-e128/; sfno-v3: the 18 November 18 per-cell normalization runs;
+sfno-v3-grid and swin-v2.2-v3-grid: the 2026-11-25 5-source v3 grid runs,
+and sfno-v3-c96amip, swin-v2.2-v3-c96amip, sfno-v3-era5-1979 and
+swin-v2.2-v3-era5-1979 its single-source runs (_inference_common
+.V3_GRID_ARCHS, V3_SINGLE_SOURCE_ARCHS; checkpoints recorded on Weka in
+fm_v3_grid_jobs.json, and fm_v3_jobs.json for the grid's sfno-v3 cells);
 _inference_common.ARCHS and inference_run_names; no diagnostics) whose Beaker
 experiment succeeded. The cm4xshield and cm4-1pct families skip runs not
 trained on CM4 and X-SHiELD (the v2 fm-era5 arms), and use the arch's
@@ -170,6 +175,10 @@ from _inference_common import (
     OLD_RUNS,
     SINGLE_SOURCE_ARCH_ARMS,
     V3_ARCH,
+    V3_GRID_ARCHS,
+    V3_GRID_RECORD_PATH,
+    V3_RECORD_PATH,
+    V3_SINGLE_SOURCE_ARCHS,
     WANDB_PROJECT,
     arch_checkpoints,
     checkpoint_path,
@@ -194,15 +203,19 @@ from generate_inference_configs import (
 )
 from submit_fm_c96amip_jobs import RECORD_PATH as C96AMIP_RECORD_PATH
 from submit_fm_jobs import WANDB_PREFIX, add_default_beaker_args
-from submit_fm_v3_jobs import RECORD_PATH as V3_RECORD_PATH
 
 HERE = pathlib.Path(__file__).parent
 EXP_DIR = HERE.parent  # experiment root (configs, records); scripts live in scripts/
 RUN_SCRIPT = HERE / "run-ace-inference-job.sh"
 CONFIGS_DIRNAME = INFERENCE_CONFIGS_DIR.name
+# Arch -> the submit scripts' records of its runs' Weka checkpoints, the first
+# record naming a run winning. The grid archs' sfno-v3 fm-e3sm-balanced
+# maskoff cells are in fm_v3_jobs.json.
 WEKA_RECORDS = {
-    V3_ARCH: V3_RECORD_PATH,
-    **dict.fromkeys(SINGLE_SOURCE_ARCH_ARMS, C96AMIP_RECORD_PATH),
+    V3_ARCH: (V3_RECORD_PATH,),
+    **dict.fromkeys(SINGLE_SOURCE_ARCH_ARMS, (C96AMIP_RECORD_PATH,)),
+    **dict.fromkeys(V3_GRID_ARCHS, (V3_GRID_RECORD_PATH, V3_RECORD_PATH)),
+    **dict.fromkeys(V3_SINGLE_SOURCE_ARCHS, (V3_GRID_RECORD_PATH,)),
 }
 
 WANDB_GROUPS = {
@@ -442,8 +455,12 @@ def resolve_runs(
 def _resolve_weka_runs(
     runs: list[str], workspace: str, arch: str
 ) -> tuple[dict[str, TrainingOutput], dict[str, str]]:
-    record_path = WEKA_RECORDS[arch]
-    records = json.loads(record_path.read_text())
+    record_paths = WEKA_RECORDS[arch]
+    records: dict[str, dict] = {}
+    for record_path in reversed(record_paths):
+        if record_path.exists():
+            records.update(json.loads(record_path.read_text()))
+    record_names = " / ".join(path.name for path in record_paths)
     text = listing_text(arch)
     print(f"Listing experiments in {workspace} matching {text}...")
     by_id = {exp["id"]: exp for exp in list_experiments(workspace, text)}
@@ -452,7 +469,7 @@ def _resolve_weka_runs(
     for run in runs:
         record = records.get(run)
         if record is None:
-            skipped[run] = f"not in {record_path.name}"
+            skipped[run] = f"not in {record_names}"
             continue
         exp_id = record["id"]
         if exp_id not in by_id:
@@ -591,7 +608,8 @@ def main() -> None:
     add_default_beaker_args(parser)
     args = parser.parse_args()
     if args.arch in WEKA_RECORDS and args.use_map:
-        parser.error(f"{args.arch} uses {WEKA_RECORDS[args.arch].name} for checkpoints")
+        records = " / ".join(path.name for path in WEKA_RECORDS[args.arch])
+        parser.error(f"{args.arch} uses {records} for checkpoints")
     if args.old_runs and (args.ckpt != ["lastema"] or args.family != ["eval"]):
         raise SystemExit("--old-runs needs --ckpt lastema and --family eval")
     if args.old_runs and args.arch not in OLD_RUNS:

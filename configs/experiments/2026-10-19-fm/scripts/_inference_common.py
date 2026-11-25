@@ -10,7 +10,10 @@ have finished, and which Beaker result dataset holds their checkpoints, is
 read from Beaker (_beaker_listing), not from wandb. The November 18 sfno-v3
 runs, the C96 AMIP-only runs and their ERA5-1979 counterparts store their
 checkpoints on Weka and record the paths in fm_v3_jobs.json and
-fm_c96amip_jobs.json (both of the latter), respectively.
+fm_c96amip_jobs.json (both of the latter), respectively. So do the
+2026-11-25 v3 grid runs (V3_GRID_ARCHS, V3_SINGLE_SOURCE_ARCHS), recorded in
+fm_v3_grid_jobs.json, except the three cells of the grid that are sfno-v3 runs
+(fm_v3_jobs.json).
 """
 
 import pathlib
@@ -23,6 +26,7 @@ from create_fm_c96amip_jobs import ERA5_ARM as ERA5_1979_ARM
 from create_fm_c96amip_jobs import MAX_EPOCHS as C96AMIP_MAX_EPOCHS
 from create_fm_c96amip_jobs import runs as c96amip_runs
 from create_fm_v3_jobs import MAX_EPOCHS as V3_MAX_EPOCHS
+from create_fm_v3_jobs import runs as v3_runs
 from submit_fm_jobs import (
     CONFIG_PREFIX,
     RUN_CONFIGS_DIR,
@@ -35,6 +39,10 @@ EXP_DIR = HERE.parent  # experiment root (configs, records); scripts live in scr
 INFERENCE_CONFIGS_DIR = EXP_DIR / "inference_configs"
 BEAKER_MAP_PATH = EXP_DIR / "records" / "wandb_to_beaker_map.json"
 V3_ARCH = "sfno-v3"
+# Weka checkpoint records of the v3 runs (submit_fm_v3_jobs.py): the 18
+# sfno-v3 runs, and the 2026-11-25 grid runs.
+V3_RECORD_PATH = EXP_DIR / "records" / "fm_v3_jobs.json"
+V3_GRID_RECORD_PATH = EXP_DIR / "records" / "fm_v3_grid_jobs.json"
 
 
 def _arm_archs(arm: str) -> dict[str, str]:
@@ -52,12 +60,78 @@ def _arm_archs(arm: str) -> dict[str, str]:
 # label c96) and ERA5 over the same years (fm-era5-1979, label era5).
 C96AMIP_ARCHS = _arm_archs(C96AMIP_ARM)
 ERA5_1979_ARCHS = _arm_archs(ERA5_1979_ARM)
-# Arch -> arm of both cohorts, for what they share: 120 epochs, checkpoints
-# recorded in fm_c96amip_jobs.json, a single training label given to every
-# inference dataset, and the CM4/X-SHiELD suites run out of sample.
+
+# The 2026-11-25 v3 grid runs (wandb group ace2-fm-v3-grid-2026-11-25), SFNO v3
+# and Swin v2.2 v3 (inference arch base -> run-config token), in two cohorts,
+# 3 seeds per cell:
+# - 5-source (V3_GRID_ARCHS, sfno-v3-grid and swin-v2.2-v3-grid): arms
+#   fm-e3sm-balanced and fm-e3sm-temperature, c2-cellloss, masking on and
+#   off. The sfno fm-e3sm-balanced maskoff cells are three of the 18 sfno-v3
+#   runs (fm_v3_jobs.json), counted in both archs so the grid is complete.
+# - single-source (V3_SINGLE_SOURCE_ARCHS, e.g. sfno-v3-c96amip): arms
+#   fm-c96amip and fm-era5-1979 (as create_fm_c96amip_jobs.py), c1-cellloss,
+#   masking off.
+# The runs are listed explicitly (EXPLICIT_RUNS), not globbed: the sfno ones
+# share V3_ARCH's nc-sfno-v3-fm- token, and their configs may not exist yet.
+V3_GRID_TRAIN_ARCHS = {"sfno-v3": "nc-sfno-v3", "swin-v2.2-v3": "nc-swin-v2.2-v3"}
+V3_GRID_ARMS = ("fm-e3sm-balanced", "fm-e3sm-temperature")
+V3_GRID_MASKS = ("maskon", "maskoff")
+V3_GRID_VARIANT = "c2-cellloss"
+V3_SINGLE_SOURCE_VARIANT = "c1-cellloss"
+V3_GRID_SEEDS = (0, 1, 2)
+V3_GRID_DATE = "2026-11-25"
+
+
+def v3_grid_run_names(
+    token: str,
+    arms: tuple[str, ...] = V3_GRID_ARMS,
+    masks: tuple[str, ...] = V3_GRID_MASKS,
+    variant: str = V3_GRID_VARIANT,
+) -> list[str]:
+    """Job names of the v3 grid runs of run-config token `token` (e.g.
+    nc-swin-v2.2-v3) in `arms` x `masks`, all seeds, e.g.
+    ace2-fm-nc-swin-v2.2-v3-fm-e3sm-balanced-c2-cellloss-s0-maskon.
+    """
+    return [
+        f"{WANDB_PREFIX}{token}-{arm}-{variant}-s{seed}-{mask}"
+        for arm in arms
+        for mask in masks
+        for seed in V3_GRID_SEEDS
+    ]
+
+
+V3_GRID_ARCHS = {f"{base}-grid": token for base, token in V3_GRID_TRAIN_ARCHS.items()}
+# Arch -> (run-config token, arm).
+V3_SINGLE_SOURCE_ARCHS = {
+    f"{base}-{arm.removeprefix('fm-')}": (token, arm)
+    for arm in (C96AMIP_ARM, ERA5_1979_ARM)
+    for base, token in V3_GRID_TRAIN_ARCHS.items()
+}
+# Archs whose runs are listed here rather than globbed from run_configs/
+# (inference_run_names): sfno-v3 (its 18 runs only, not the grid runs that
+# share its token) and the grid archs.
+EXPLICIT_RUNS: dict[str, list[str]] = {
+    V3_ARCH: [run.job_name for run in v3_runs()],
+    **{arch: v3_grid_run_names(token) for arch, token in V3_GRID_ARCHS.items()},
+    **{
+        arch: v3_grid_run_names(token, (arm,), ("maskoff",), V3_SINGLE_SOURCE_VARIANT)
+        for arch, (token, arm) in V3_SINGLE_SOURCE_ARCHS.items()
+    },
+}
+# Archs all of whose runs train on the CM4_XSHIELD_LABELS datasets (so get
+# in-sample cm4xshield / cm4-1pct jobs) without reading their configs: the
+# sfno-v3 runs (whose C3 runs relabel those datasets) and the 5-source grid
+# runs (whose configs may not exist yet when the tables run).
+CM4_XSHIELD_ARCHS = (V3_ARCH, *V3_GRID_ARCHS)
+
+# Arch -> arm of the single-source cohorts, for what they share: 120 epochs,
+# checkpoints recorded on Weka (fm_c96amip_jobs.json; the v3 ones in
+# fm_v3_grid_jobs.json), a single training label given to every inference
+# dataset, and the CM4/X-SHiELD suites run out of sample.
 SINGLE_SOURCE_ARCH_ARMS = {
     **dict.fromkeys(C96AMIP_ARCHS, C96AMIP_ARM),
     **dict.fromkeys(ERA5_1979_ARCHS, ERA5_1979_ARM),
+    **{arch: arm for arch, (_, arm) in V3_SINGLE_SOURCE_ARCHS.items()},
 }
 
 WANDB_ENTITY = "ai2cm"
@@ -87,6 +161,7 @@ LAST_EMA_EPOCHS = {
     "swin-v2.2-v2": 50,
     V3_ARCH: V3_MAX_EPOCHS,
     **dict.fromkeys(SINGLE_SOURCE_ARCH_ARMS, C96AMIP_MAX_EPOCHS),
+    **dict.fromkeys([*V3_GRID_ARCHS, *V3_SINGLE_SOURCE_ARCHS], V3_MAX_EPOCHS),
 }
 # Per-epoch EMA checkpoints, further --ckpt choices of the archs in
 # EPOCH_CHECKPOINT_ARCHS (the ft archs, _add_ft_archs) for the families in
@@ -117,6 +192,8 @@ ARCHS = {
     V3_ARCH: "nc-sfno-v3",
     **C96AMIP_ARCHS,
     **ERA5_1979_ARCHS,
+    **V3_GRID_ARCHS,
+    **{arch: token for arch, (token, _) in V3_SINGLE_SOURCE_ARCHS.items()},
 }
 DEFAULT_ARCH = "sfno"
 # Subdirectory of run_configs/ holding the run configs of an arch whose
@@ -139,6 +216,11 @@ GROUP_DATES = {
     V3_ARCH: "2026-11-18",
     **dict.fromkeys(C96AMIP_ARCHS, "c96amip-2026-11-18"),
     **dict.fromkeys(ERA5_1979_ARCHS, "era5-1979-2026-11-18"),
+    **dict.fromkeys(V3_GRID_ARCHS, f"v3-grid-{V3_GRID_DATE}"),
+    **{
+        arch: f"v3-{arm.removeprefix('fm-')}-{V3_GRID_DATE}"
+        for arch, (_, arm) in V3_SINGLE_SOURCE_ARCHS.items()
+    },
 }
 DEFAULT_GROUP_DATE = "2026-10-19"
 # Config variant of the CM4/X-SHiELD suites (cm4xshield, cm4-1pct) per arch
@@ -146,7 +228,13 @@ DEFAULT_GROUP_DATE = "2026-10-19"
 # HGTsfc spherical-harmonic roundtripped on every cm4/xshield dataset, so
 # their suites read those datasets the same way. The swin-v2.2-v2 runs share
 # the sfno-v2 runs' data config (check_shared_sources), so they share the suite.
-CM4_XSHIELD_VARIANT = {"sfno-v2": "v2", "swin-v2.2-v2": "v2"}
+# The v3 grid runs derive from the v2 data config too (sfno-v3 and the
+# single-source archs pick theirs in generate_inference_configs).
+CM4_XSHIELD_VARIANT = {
+    "sfno-v2": "v2",
+    "swin-v2.2-v2": "v2",
+    **dict.fromkeys(V3_GRID_ARCHS, "v2"),
+}
 
 
 def _add_followup_archs() -> None:
@@ -298,6 +386,8 @@ def inference_run_names(arch: str = DEFAULT_ARCH) -> list[str]:
     """Job names of the training runs of `arch` (ARCHS) that get inference
     jobs.
     """
+    if arch in EXPLICIT_RUNS:
+        return list(EXPLICIT_RUNS[arch])
     if arch in SINGLE_SOURCE_ARCH_ARMS:
         return [
             run.job_name

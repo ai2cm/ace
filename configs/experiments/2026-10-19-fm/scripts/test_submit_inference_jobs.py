@@ -6,7 +6,10 @@ from _inference_common import (
     INFERENCE_CONFIGS_DIR,
     SINGLE_SOURCE_ARCH_ARMS,
     V3_ARCH,
+    V3_GRID_ARCHS,
+    V3_GRID_RECORD_PATH,
     inference_run_names,
+    run_config_path,
     run_train_labels,
 )
 from create_fm_c96amip_jobs import LABELS as C96AMIP_LABELS
@@ -127,10 +130,16 @@ def test_single_source_suites_use_the_trained_label():
         "swin-v2.2-v2-c96amip": "c96",
         "sfno-v2-era5-1979": "era5",
         "swin-v2.2-v2-era5-1979": "era5",
+        "sfno-v3-c96amip": "c96",
+        "swin-v2.2-v3-c96amip": "c96",
+        "sfno-v3-era5-1979": "era5",
+        "swin-v2.2-v3-era5-1979": "era5",
     }
     for arch, label in labels.items():
         run = inference_run_names(arch)[0]
-        assert run_train_labels(run) == {label}
+        # The v3 grid's configs may not be written yet.
+        if run_config_path(run).exists():
+            assert run_train_labels(run) == {label}
         for family in ("eval", "cm4xshield", "cm4-1pct"):
             [(name, filename)] = submit.family_jobs(family, run, arch=arch)
             suite = load_suite(
@@ -148,3 +157,54 @@ def test_era5_1979_jobs_have_their_own_wandb_groups():
             for group in submit.wandb_groups(ckpt, arch).values():
                 assert "era5-1979-2026-11-18" in group
                 assert "c96amip" not in group
+
+
+def test_v3_grid_archs_resolve_their_runs_from_both_records(monkeypatch, tmp_path):
+    v3_runs = set(inference_run_names(V3_ARCH))
+    assert len(v3_runs) == 18
+    for arch in V3_GRID_ARCHS:
+        runs = inference_run_names(arch)
+        assert len(runs) == 12
+        # All 5-source runs get the in-sample CM4/X-SHiELD suites (v2 variant).
+        jobs = submit.select_jobs(["cm4xshield"], runs, "bestinf", arch)
+        assert {config for *_, config in jobs} == {
+            "ace-eval-suite-config-4deg-cm4-xshield-v2.yaml"
+        }
+        assert len(jobs) == 12
+        for ckpt in ("bestinf", "lastema"):
+            for group in submit.wandb_groups(ckpt, arch).values():
+                assert "v3-grid-2026-11-25" in group
+    sfno_grid = inference_run_names("sfno-v3-grid")
+    shared = [run for run in sfno_grid if run in v3_runs]
+    assert shared == [
+        f"ace2-fm-nc-sfno-v3-fm-e3sm-balanced-c2-cellloss-s{seed}-maskoff"
+        for seed in range(3)
+    ]
+    assert submit.WEKA_RECORDS["sfno-v3-grid"] == (V3_GRID_RECORD_PATH, V3_RECORD_PATH)
+
+    grid_record = tmp_path / "grid.json"
+    v3_record = tmp_path / "v3.json"
+    new = sfno_grid[0]
+
+    def entry(exp_id):
+        return {
+            "id": exp_id,
+            "best_inference_ckpt": f"/w/{exp_id}/best.tar",
+            "ema_ckpt_pattern": f"/w/{exp_id}/ema_{{epoch:04d}}.tar",
+        }
+
+    grid_record.write_text(json.dumps({new: entry("N")}))
+    v3_record.write_text(json.dumps({shared[0]: entry("S")}))
+    monkeypatch.setitem(submit.WEKA_RECORDS, "sfno-v3-grid", (grid_record, v3_record))
+    succeeded = {"jobs": [{"status": {"exited": "t", "exitCode": 0}}]}
+    monkeypatch.setattr(
+        submit,
+        "list_experiments",
+        lambda workspace, text: [{"id": "N", **succeeded}, {"id": "S", **succeeded}],
+    )
+    ready, skipped = submit._resolve_weka_runs(sfno_grid, "ai2/ace", "sfno-v3-grid")
+    assert set(ready) == {new, shared[0]}
+    assert ready[shared[0]].checkpoint("lastema", "sfno-v3-grid") == "/w/S/ema_0120.tar"
+    assert skipped == {
+        run: "not in grid.json / v3.json" for run in sfno_grid if run not in ready
+    }

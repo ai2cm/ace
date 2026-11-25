@@ -1,5 +1,6 @@
 """Status tables for the post-training inference jobs of the six C96 AMIP-only
-runs and, separately, of the six ERA5-1979 runs.
+runs, separately of the six ERA5-1979 runs, and of the 2026-11-25 v3 grid
+runs (its 24 5-source runs, then its 12 single-source runs).
 
 The expected jobs are those submit_inference_jobs.py submits for every
 inference run of the architecture (_inference_common.inference_run_names),
@@ -11,9 +12,9 @@ family of the ft archs, their per-epoch ones: ema1 .. ema7 for sfno-v2-ft and
 swin-v2.2-v2-ft, ema2, ema4, ema8, ema16 for their -e32 long fine-tunes and
 ema8, ema16, ema32, ema64 for the -e128 ones), one row per family and
 checkpoint. By default, one table per cohort (COHORTS): the C96 AMIP-only
-architectures, then the ERA5-1979 ones, at bestinf and the epoch-120 lastema
-checkpoint. Use --arch for a single
-architecture. Beaker state comes from a listing per architecture;
+architectures, then the ERA5-1979 ones, then the v3 grid's 5-source and
+single-source ones, at bestinf and the epoch-120 lastema checkpoint. Use
+--arch for a single architecture. Beaker state comes from a listing per architecture;
 no logs are read. As in fm_table.py, the newest experiment of each job name
 counts, and preemption retries resolve to that experiment's latest status
 (_beaker_listing.experiment_status).
@@ -42,6 +43,8 @@ from _inference_common import (  # noqa: E402
     CHECKPOINTS,
     EPOCH_CHECKPOINTS,
     ERA5_1979_ARCHS,
+    V3_GRID_ARCHS,
+    V3_SINGLE_SOURCE_ARCHS,
     arch_checkpoints,
     inference_run_names,
 )
@@ -58,6 +61,10 @@ MISSING = "missing"
 COHORTS = {
     "C96 AMIP-only SFNO v2 and Swin v2.2 v2": list(C96AMIP_ARCHS),
     "ERA5-1979 SFNO v2 and Swin v2.2 v2": list(ERA5_1979_ARCHS),
+    "v3 grid 5-source SFNO v3 and Swin v2.2 v3": list(V3_GRID_ARCHS),
+    "v3 grid single-source (C96 AMIP-only, ERA5-1979) SFNO v3 and Swin v2.2 v3": (
+        list(V3_SINGLE_SOURCE_ARCHS)
+    ),
 }
 COLUMNS = (
     "Family",

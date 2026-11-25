@@ -1,18 +1,28 @@
-"""Progress table for the six C96 AMIP-only FM training runs and the six
-ERA5-1979 runs trained on ERA5 over the same years (a separate cohort).
+"""Progress table for the FM training runs currently tracked (ROWS), three
+seeds and 120 epochs per run:
+- The six C96 AMIP-only FM runs and the six ERA5-1979 runs trained on ERA5
+  over the same years (a separate cohort; create_fm_c96amip_jobs.py), one row
+  per cohort and architecture (SFNO v2 and Swin v2.2 v2).
+- The 2026-11-25 v3 grid (wandb group ace2-fm-v3-grid-2026-11-25), SFNO v3 and
+  Swin v2.2 v3 (_inference_common.V3_GRID_TRAIN_ARCHS): its 5-source cohort,
+  one row per architecture x arm (fm-e3sm-balanced, fm-e3sm-temperature) x
+  masking (on, off), all c2-cellloss, whose sfno balanced maskoff row is three
+  of the 2026-11-18 sfno-v3 runs (records/fm_v3_jobs.json); and its
+  single-source cohort, one row per architecture x arm (fm-c96amip,
+  fm-era5-1979), c1-cellloss, masking off.
 
-One row per cohort and architecture (SFNO v2 and Swin v2.2 v2), with three
-seeds each
-and 120 epochs per run. See create_fm_c96amip_jobs.py for their configs.
-
-Two backends, chosen by whether the `beaker` CLI is on PATH:
-- beaker: one `beaker workspace experiments` listing per row prefix
-  (_beaker_listing) and `beaker job logs` of every job (preemption retry) of
-  each experiment, as before.
-- gantry (agent VMs, which have no beaker CLI): the gantry shim
+Two backends:
+- beaker (where the real `beaker` CLI is on PATH): one `beaker workspace
+  experiments` listing per row prefix (_beaker_listing) and `beaker job logs`
+  of every job (preemption retry) of each experiment, as before.
+- gantry (agent VMs, recognized by AGENT_VM_MARKER; their `beaker` is a
+  read-only shim whose listings are capped at 100 experiments, in another
+  format, and which has no `beaker job logs`): the gantry shim
   (/usr/local/bin/gantry), which sees only jobs submitted from this VM. Job
-  name -> Beaker id comes from records/fm_c96amip_jobs.json (written by
-  submit_fm_c96amip_jobs.py), else from `gantry list --all` (experiment names are
+  name -> Beaker id comes from the submit scripts' RECORDS
+  (records/fm_c96amip_jobs.json, fm_v3_grid_jobs.json, fm_v3_jobs.json; a
+  recorded id `gantry list` does not show is looked up with `gantry status`),
+  else from `gantry list --all` (experiment names are
   agent-alexeyy-<job name>-<suffix>; the newest wins); status from `gantry
   list --all` (a job it calls running counts as queued until `gantry status`
   gives it a start time). `gantry logs <id>` holds only the experiment's
@@ -57,6 +67,9 @@ a run of the row has finished one. All values are measured.
 "Preemptions" sums, over the row's experiments, the jobs Beaker canceled
 because a higher-priority job preempted them (gantry backend: the restarts).
 
+Runs in no record and not listed (not submitted yet) count as "Not
+submitted".
+
 Usage (from the repo root):
     PYTHONPATH=$PWD python configs/experiments/2026-10-19-fm/scripts/fm_table.py
 """
@@ -85,12 +98,26 @@ from _beaker_listing import (  # noqa: E402
 from _inference_common import (  # noqa: E402
     C96AMIP_ARCHS,
     ERA5_1979_ARCHS,
+    V3_GRID_ARMS,
+    V3_GRID_MASKS,
+    V3_GRID_RECORD_PATH,
+    V3_GRID_TRAIN_ARCHS,
+    V3_RECORD_PATH,
+    V3_SINGLE_SOURCE_ARCHS,
     inference_run_names,
+    v3_grid_run_names,
 )
 from create_fm_c96amip_jobs import MAX_EPOCHS as MAX_EPOCHS_C96AMIP  # noqa: E402
+from create_fm_v3_jobs import MAX_EPOCHS as MAX_EPOCHS_V3  # noqa: E402
 from submit_fm_c96amip_jobs import RECORD_PATH as C96AMIP_RECORD  # noqa: E402
 
+# The submit scripts' records, each naming the latest submission of its jobs.
+RECORDS = (C96AMIP_RECORD, V3_GRID_RECORD_PATH, V3_RECORD_PATH)
 GANTRY = "/usr/local/bin/gantry"
+# Present on agent VMs only (the Beaker proxy's config, read by the gantry and
+# beaker shims): there `beaker` is the read-only shim, so the gantry backend
+# is used.
+AGENT_VM_MARKER = pathlib.Path("/etc/agent-sandbox/proxy.toml")
 AGENT_PREFIX = "agent-alexeyy-"
 GANTRY_LIST_LIMIT = 500
 # W&B (gantry backend): the runs' project, and where the jobs write
@@ -168,10 +195,25 @@ class Row:
     max_epochs: int
 
 
-ROWS = [
-    Row(arch, tuple(inference_run_names(arch)), MAX_EPOCHS_C96AMIP)
-    for arch in (*C96AMIP_ARCHS, *ERA5_1979_ARCHS)
-]
+def _rows() -> list[Row]:
+    rows = [
+        Row(arch, tuple(inference_run_names(arch)), MAX_EPOCHS_C96AMIP)
+        for arch in (*C96AMIP_ARCHS, *ERA5_1979_ARCHS)
+    ]
+    for base, token in V3_GRID_TRAIN_ARCHS.items():
+        for arm in V3_GRID_ARMS:
+            for mask in V3_GRID_MASKS:
+                label = f"{base}-{arm.removeprefix('fm-')}-{mask}"
+                names = tuple(v3_grid_run_names(token, (arm,), (mask,)))
+                rows.append(Row(label, names, MAX_EPOCHS_V3))
+    rows += [
+        Row(arch, tuple(inference_run_names(arch)), MAX_EPOCHS_V3)
+        for arch in V3_SINGLE_SOURCE_ARCHS
+    ]
+    return rows
+
+
+ROWS = _rows()
 
 
 @dataclass
@@ -461,7 +503,9 @@ def _gantry(*args: str) -> str:
 
 
 def _gantry_list() -> list[GantryJob]:
-    """`gantry list --all`: `<id>  <status>  <created>  <name>` per line."""
+    """`gantry list --all`: `<id>  <status>  [<priority>]  <created>  <name>`
+    per line.
+    """
     jobs = []
     out = _gantry("list", "--all", "--limit", str(GANTRY_LIST_LIMIT))
     for line in out.splitlines():
@@ -470,9 +514,25 @@ def _gantry_list() -> list[GantryJob]:
             continue
         rest = match["rest"].split()
         name = rest[-1]
-        created = rest[0] if len(rest) > 1 else ""
+        created = rest[-2] if len(rest) > 1 else ""
         jobs.append(GantryJob(match["id"], match["status"].lower(), created, name))
     return jobs
+
+
+def _gantry_job(job_id: str) -> GantryJob | None:
+    """A job `gantry list` did not show, from `gantry status`; None if gantry
+    does not know it.
+    """
+    try:
+        status = json.loads(_gantry("status", job_id))
+    except RuntimeError:
+        return None
+    return GantryJob(
+        status["id"],
+        (status.get("status") or "").lower(),
+        status.get("created") or "",
+        status.get("name") or "",
+    )
 
 
 def _gantry_started(job: GantryJob) -> bool:
@@ -611,11 +671,20 @@ def gantry_backend(rows: list[Row]) -> tuple[dict[str, Tracked], dict[str, Progr
             name not in newest or job.created > newest[name].created
         ):
             newest[name] = job
-    # The submit script's record names the latest submission of each job.
-    if C96AMIP_RECORD.exists():
-        for name, entry in json.loads(C96AMIP_RECORD.read_text()).items():
-            if name in names and entry.get("id") in by_id:
-                newest[name] = by_id[entry["id"]]
+    # The submit scripts' records name the latest submission of each job; the
+    # first record naming a job wins.
+    recorded: dict[str, str] = {}
+    for record in RECORDS:
+        if not record.exists():
+            continue
+        for name, entry in json.loads(record.read_text()).items():
+            if name in names and entry.get("id") and name not in recorded:
+                recorded[name] = entry["id"]
+    for name, job_id in recorded.items():
+        if job_id not in by_id and (looked_up := _gantry_job(job_id)) is not None:
+            by_id[job_id] = looked_up
+        if job_id in by_id:
+            newest[name] = by_id[job_id]
     # `gantry list` can report a job as running before its container has
     # started (it then shows up as queued again); only a job with a start time
     # in `gantry status` counts as running.
@@ -661,7 +730,7 @@ def gantry_backend(rows: list[Row]) -> tuple[dict[str, Tracked], dict[str, Progr
 
 
 def main() -> None:
-    use_beaker = shutil.which("beaker") is not None
+    use_beaker = shutil.which("beaker") is not None and not AGENT_VM_MARKER.exists()
     rows = ROWS
     if use_beaker:
         tracked, prog = beaker_backend(rows)
@@ -726,8 +795,9 @@ def main() -> None:
     if not use_beaker:
         print()
         print(
-            "Source: gantry shim (no beaker CLI here; it sees only jobs "
-            "submitted from this VM) and W&B (timings, train time, restarts)."
+            "Source: gantry shim (agent VM: its beaker CLI is a read-only shim; "
+            "gantry sees only jobs submitted from this VM) and W&B (timings, "
+            "train time, restarts)."
         )
 
 
