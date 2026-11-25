@@ -1,0 +1,14 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
+
+# Random-CO2 evals (prescribed SST + sea ice) of the atmosphere of coupled FTO o0a2rs0
+# (configs/experiments/SamudrACEv2/coupled/fto-ftalt, Beaker 01M85PVVQNMPSMZ189ERY03BDW, results dataset 01M85PVVQZV5Q18J5XZXJF5WFM).
+# Rows sit here, not in coupled/fto-ftalt/experiments.txt: --lift-coupled-atmosphere needs an experiment dir
+# with no path component starting with "coupled", and applies to every row of the file.
+# launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/atmos/fto-o0a2rs0-lifted . --config-dir configs/experiments/SamudrACEv2/eval/atmos --lift-coupled-atmosphere
+# --config-dir configs/experiments/SamudrACEv2/eval/atmos
+SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|run_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM
+SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|run_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM
+SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|run_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM
+SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|run_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM
+SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|run_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM
+SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|run_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM

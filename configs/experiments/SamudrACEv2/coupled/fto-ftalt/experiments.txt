@@ -1,5 +1,11 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
 
-SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|training|best_inference_ckpt|normal|--min-runtime 8h
+# SamudrACEv2-fto o0a2rs0 01M85PVVQNMPSMZ189ERY03BDW: training finished (jobs[-1] 01M85PVVVNYGHR1W4KDV62EYJJ: exit 0); results dataset 01M85PVVQZV5Q18J5XZXJF5WFM.
+# training row: SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|training|best_inference_ckpt|normal|--min-runtime 8h
+# launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/coupled/fto-ftalt . --config-dir configs/experiments/SamudrACEv2/eval/coupled
+# randCO2 evals of this checkpoint's atmosphere: configs/experiments/SamudrACEv2/atmos/fto-o0a2rs0-lifted/experiments.txt
+# --config-dir configs/experiments/SamudrACEv2/eval/coupled
+SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h||01M85PVVQZV5Q18J5XZXJF5WFM
+SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM
 
 SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|training|best_inference_ckpt|normal|--min-runtime 8h
