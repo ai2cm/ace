@@ -1,4 +1,5 @@
-"""Status table for the six C96 AMIP-only runs' post-training inference jobs.
+"""Status tables for the post-training inference jobs of the six C96 AMIP-only
+runs and, separately, of the six ERA5-1979 runs.
 
 The expected jobs are those submit_inference_jobs.py submits for every
 inference run of the architecture (_inference_common.inference_run_names),
@@ -9,8 +10,9 @@ _inference_common.arch_checkpoints, i.e. bestinf and lastema and, for the eval
 family of the ft archs, their per-epoch ones: ema1 .. ema7 for sfno-v2-ft and
 swin-v2.2-v2-ft, ema2, ema4, ema8, ema16 for their -e32 long fine-tunes and
 ema8, ema16, ema32, ema64 for the -e128 ones), one row per family and
-checkpoint. By default, the table tracks both C96 AMIP-only architectures at
-bestinf and the epoch-120 lastema checkpoint. Use --arch for a single
+checkpoint. By default, one table per cohort (COHORTS): the C96 AMIP-only
+architectures, then the ERA5-1979 ones, at bestinf and the epoch-120 lastema
+checkpoint. Use --arch for a single
 architecture. Beaker state comes from a listing per architecture;
 no logs are read. As in fm_table.py, the newest experiment of each job name
 counts, and preemption retries resolve to that experiment's latest status
@@ -39,6 +41,7 @@ from _inference_common import (  # noqa: E402
     C96AMIP_ARCHS,
     CHECKPOINTS,
     EPOCH_CHECKPOINTS,
+    ERA5_1979_ARCHS,
     arch_checkpoints,
     inference_run_names,
 )
@@ -51,6 +54,11 @@ from submit_inference_jobs import (  # noqa: E402
 )
 
 MISSING = "missing"
+# Title -> archs of each separately tracked cohort (the default tables).
+COHORTS = {
+    "C96 AMIP-only SFNO v2 and Swin v2.2 v2": list(C96AMIP_ARCHS),
+    "ERA5-1979 SFNO v2 and Swin v2.2 v2": list(ERA5_1979_ARCHS),
+}
 COLUMNS = (
     "Family",
     "Checkpoint",
@@ -106,7 +114,7 @@ def main() -> None:
     parser.add_argument(
         "--arch",
         choices=list(ARCHS),
-        help="Architecture to count (default: both C96 AMIP-only architectures).",
+        help="Architecture to count (default: one table per cohort, COHORTS).",
     )
     parser.add_argument(
         "--family",
@@ -123,14 +131,27 @@ def main() -> None:
         help="Checkpoints to count (default: all the architecture has).",
     )
     args = parser.parse_args()
-    arches = list(C96AMIP_ARCHS) if args.arch is None else [args.arch]
-    ckpts = args.ckpt or list(
+    if args.arch is None:
+        tables = {f"Inference jobs for {title}": a for title, a in COHORTS.items()}
+    else:
+        tables = {f"Inference jobs of {args.arch} ({ARCHS[args.arch]})": [args.arch]}
+    for i, (title, arches) in enumerate(tables.items()):
+        if i:
+            print()
+        _report(title, arches, args.family, args.ckpt)
+
+
+def _report(
+    title: str, arches: list[str], families: list[str], ckpt_args: list[str] | None
+) -> None:
+    """Print the status table of `arches`' jobs and list the failed ones."""
+    ckpts = ckpt_args or list(
         dict.fromkeys(ckpt for arch in arches for ckpt in arch_checkpoints(arch))
     )
     jobs = []
     by_name = {}
     for arch in arches:
-        arch_jobs = expected_jobs(arch, ckpts, args.family)
+        arch_jobs = expected_jobs(arch, ckpts, families)
         jobs.extend(arch_jobs)
         by_name.update(
             newest_by_name(listing_text(arch), {name for _, _, name in arch_jobs})
@@ -145,16 +166,13 @@ def main() -> None:
     }
     rows = []
     for ckpt in ckpts:
-        for family in args.family:
+        for family in families:
             cell = [status[n] for f, c, n in jobs if f == family and c == ckpt]
             if cell:
                 rows.append((family, ckpt, *_counts(cell)))
     rows.append(("Total", "", *_counts([status[n] for _, _, n in jobs])))
 
-    if args.arch is None:
-        print("Inference jobs for C96 AMIP-only SFNO v2 and Swin v2.2 v2")
-    else:
-        print(f"Inference jobs of {args.arch} ({ARCHS[args.arch]})")
+    print(title)
     print(f"As of {datetime.now(UTC):%Y-%m-%d %H:%M} UTC")
     print()
     _print_table(COLUMNS, rows)

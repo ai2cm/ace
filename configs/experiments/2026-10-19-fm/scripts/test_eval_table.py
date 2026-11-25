@@ -2,15 +2,21 @@ import sys
 
 import eval_table
 from _beaker_listing import RUNNING, NamedExperiment
-from _inference_common import C96AMIP_ARCHS, V3_ARCH, inference_run_names
+from _inference_common import (
+    C96AMIP_ARCHS,
+    ERA5_1979_ARCHS,
+    V3_ARCH,
+    inference_run_names,
+)
 from fm_table import ROWS
 
 
-def test_tables_track_the_six_c96amip_runs(monkeypatch, capsys):
+def test_tables_track_the_c96amip_and_era5_1979_cohorts(monkeypatch, capsys):
     listed_names = set()
+    listed_texts = []
 
     def list_jobs(text, names):
-        assert "-fm-c96amip-" in text
+        listed_texts.append(text)
         assert len(names) == 90
         assert all(name.startswith(text) for name in names)
         listed_names.update(names)
@@ -20,14 +26,22 @@ def test_tables_track_the_six_c96amip_runs(monkeypatch, capsys):
     monkeypatch.setattr(eval_table, "newest_by_name", list_jobs)
     eval_table.main()
 
-    assert {row.label for row in ROWS} == C96AMIP_ARCHS.keys()
+    assert listed_texts == [
+        f"ace2-fm-{arch}-{arm}-"
+        for arm in ("fm-c96amip", "fm-era5-1979")
+        for arch in ("nc-sfno-v2", "nc-swin-v2.2-v2")
+    ]
+    assert [row.label for row in ROWS] == [*C96AMIP_ARCHS, *ERA5_1979_ARCHS]
     training = {name for row in ROWS for name in row.names}
-    assert len(training) == 6
+    assert len(training) == 12
+    assert sum("-fm-era5-1979-" in name for name in training) == 6
     assert all(
         sum(name.startswith(run + "-") for name in listed_names) == 30
         for run in training
     )
-    assert "| Total |  | 0 | 0 | 0 | 0 | 180 | 180 |" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert out.count("| Total |  | 0 | 0 | 0 | 0 | 180 | 180 |") == 2
+    assert out.index("C96 AMIP-only") < out.index("ERA5-1979")
 
 
 def test_eval_table_with_v3_arch_tracks_all_families(monkeypatch, capsys):

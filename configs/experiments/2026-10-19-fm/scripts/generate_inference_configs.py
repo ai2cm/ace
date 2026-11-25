@@ -57,11 +57,11 @@ from collections.abc import Callable
 import yaml
 from _inference_common import (
     ARCHS,
-    C96AMIP_ARCHS,
     CM4_XSHIELD_LABELS,
     CM4_XSHIELD_VARIANT,
     INFERENCE_CONFIGS_DIR,
     MOUNTED_CHECKPOINT_PATH,
+    SINGLE_SOURCE_ARCH_ARMS,
     V3_ARCH,
     WANDB_ENTITY,
     WANDB_PROJECT,
@@ -138,7 +138,7 @@ def is_v3_c3(arch: str, run: str | None) -> bool:
 
 
 def _cm4_xshield_variant(arch: str, run: str | None) -> str:
-    if arch in C96AMIP_ARCHS:
+    if arch in SINGLE_SOURCE_ARCH_ARMS:
         return "v2"
     if arch == V3_ARCH:
         return "v3-c3" if is_v3_c3(arch, run) else "v2"

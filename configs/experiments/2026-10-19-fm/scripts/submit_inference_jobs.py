@@ -32,9 +32,11 @@ Weka. Evaluate both EMA checkpoints with:
 The remaining families use the same checkpoints and flags, with
 --family cm4xshield cm4-1pct sst paper-som paper-era5.
 
-The sfno-v2-c96amip and swin-v2.2-v2-c96amip cohorts also use recorded Weka
-checkpoints. Their full suite uses the trained c96 label for every dataset,
-including out-of-sample CM4/X-SHiELD evaluations.
+The sfno-v2-c96amip and swin-v2.2-v2-c96amip cohort (C96 AMIP-only) and the
+separate sfno-v2-era5-1979 and swin-v2.2-v2-era5-1979 cohort (ERA5 over the
+same years) also use recorded Weka checkpoints. Their full suite gives every
+dataset the run's only trained label (c96 or era5, respectively), including
+the out-of-sample CM4/X-SHiELD evaluations.
 
 Families (--family, default all):
 
@@ -124,7 +126,9 @@ Usage:
                                             sfno-v2-ft-e32,sfno-v2-ft-e128,
                                             swin-v2.2-v2-ft-e32,
                                             swin-v2.2-v2-ft-e128,
-                                            sfno-v2-c96amip,swin-v2.2-v2-c96amip}]
+                                            sfno-v2-c96amip,swin-v2.2-v2-c96amip,
+                                            sfno-v2-era5-1979,
+                                            swin-v2.2-v2-era5-1979}]
                                     [--family FAMILY ...] [--run RUN ...]
                                     [--kind KIND ...] [--sst-grid GRID ...]
                                     [--sst-level LEVEL ...] [--job-name NAME ...]
@@ -155,8 +159,6 @@ from _beaker_listing import (
 from _inference_common import (
     ARCHS,
     BEAKER_MAP_PATH,
-    C96AMIP_ARCHS,
-    C96AMIP_ARM,
     CHECKPOINTS,
     DEFAULT_ARCH,
     DEFAULT_GROUP_DATE,
@@ -166,6 +168,7 @@ from _inference_common import (
     INFERENCE_CONFIGS_DIR,
     LAST_EMA_EPOCHS,
     OLD_RUNS,
+    SINGLE_SOURCE_ARCH_ARMS,
     V3_ARCH,
     WANDB_PROJECT,
     arch_checkpoints,
@@ -199,7 +202,7 @@ RUN_SCRIPT = HERE / "run-ace-inference-job.sh"
 CONFIGS_DIRNAME = INFERENCE_CONFIGS_DIR.name
 WEKA_RECORDS = {
     V3_ARCH: V3_RECORD_PATH,
-    **dict.fromkeys(C96AMIP_ARCHS, C96AMIP_RECORD_PATH),
+    **dict.fromkeys(SINGLE_SOURCE_ARCH_ARMS, C96AMIP_RECORD_PATH),
 }
 
 WANDB_GROUPS = {
@@ -243,8 +246,8 @@ def listing_text(arch: str) -> str:
     the other archs keep the default, which also covers their --old-runs
     baselines.
     """
-    if arch in C96AMIP_ARCHS:
-        return f"{WANDB_PREFIX}{ARCHS[arch]}-{C96AMIP_ARM}-"
+    if arch in SINGLE_SOURCE_ARCH_ARMS:
+        return f"{WANDB_PREFIX}{ARCHS[arch]}-{SINGLE_SOURCE_ARCH_ARMS[arch]}-"
     if arch in GROUP_DATES:
         return f"{WANDB_PREFIX}{ARCHS[arch]}-fm-"
     return DEFAULT_TEXT
@@ -367,7 +370,8 @@ def select_jobs(
     """(family, run, job name, config filename) of every job of `families`
     on `runs` (sorted), family by family: family_jobs, without the
     CM4/X-SHiELD families on runs not in cm4_xshield_runs(arch), except for the
-    explicitly out-of-sample C96 AMIP-only evaluations. The job name
+    explicitly out-of-sample evaluations of the single-source runs (C96
+    AMIP-only and ERA5-1979). The job name
     is the wandb run name; beaker_job_name gives the Beaker experiment name.
     """
     cm4_xshield_ok = set(cm4_xshield_runs(arch))
@@ -376,7 +380,7 @@ def select_jobs(
         for family in families
         for run in sorted(runs)
         if family not in CM4_XSHIELD_FAMILIES
-        or arch in C96AMIP_ARCHS
+        or arch in SINGLE_SOURCE_ARCH_ARMS
         or run in cm4_xshield_ok
         for name, config in family_jobs(
             family, run, kinds, sst_grids, sst_levels, ckpt, arch
@@ -606,7 +610,7 @@ def main() -> None:
             print(f"  {run}  ({reason})")
     no_cm4_xshield = sorted(set(ready) - cm4_xshield_ok)
     if (
-        args.arch not in C96AMIP_ARCHS
+        args.arch not in SINGLE_SOURCE_ARCH_ARMS
         and no_cm4_xshield
         and set(args.family) & set(CM4_XSHIELD_FAMILIES)
     ):
@@ -674,7 +678,11 @@ def main() -> None:
         check_configs_at_head(
             [INFERENCE_CONFIGS_DIR / config for config in {c for _, c in needed}]
         )
-    dataset_label = C96AMIP_LABELS[C96AMIP_ARM] if args.arch in C96AMIP_ARCHS else None
+    dataset_label = (
+        C96AMIP_LABELS[SINGLE_SOURCE_ARCH_ARMS[args.arch]]
+        if args.arch in SINGLE_SOURCE_ARCH_ARMS
+        else None
+    )
     validate_configs(needed, dataset_label)
 
     for job in jobs:

@@ -1,6 +1,8 @@
-"""Progress table for the six C96 AMIP-only FM training runs.
+"""Progress table for the six C96 AMIP-only FM training runs and the six
+ERA5-1979 runs trained on ERA5 over the same years (a separate cohort).
 
-One row per architecture (SFNO v2 and Swin v2.2 v2), with three seeds each
+One row per cohort and architecture (SFNO v2 and Swin v2.2 v2), with three
+seeds each
 and 120 epochs per run. See create_fm_c96amip_jobs.py for their configs.
 
 Two backends, chosen by whether the `beaker` CLI is on PATH:
@@ -80,7 +82,11 @@ from _beaker_listing import (  # noqa: E402
     job_status,
     list_experiments,
 )
-from _inference_common import C96AMIP_ARCHS, inference_run_names  # noqa: E402
+from _inference_common import (  # noqa: E402
+    C96AMIP_ARCHS,
+    ERA5_1979_ARCHS,
+    inference_run_names,
+)
 from create_fm_c96amip_jobs import MAX_EPOCHS as MAX_EPOCHS_C96AMIP  # noqa: E402
 from submit_fm_c96amip_jobs import RECORD_PATH as C96AMIP_RECORD  # noqa: E402
 
@@ -164,7 +170,7 @@ class Row:
 
 ROWS = [
     Row(arch, tuple(inference_run_names(arch)), MAX_EPOCHS_C96AMIP)
-    for arch in C96AMIP_ARCHS
+    for arch in (*C96AMIP_ARCHS, *ERA5_1979_ARCHS)
 ]
 
 

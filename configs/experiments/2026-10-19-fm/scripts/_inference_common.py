@@ -8,8 +8,9 @@ RUN_CONFIG_SUBDIRS); its job
 name (and wandb name) comes from submit_fm_jobs.config_to_job_name. Which runs
 have finished, and which Beaker result dataset holds their checkpoints, is
 read from Beaker (_beaker_listing), not from wandb. The November 18 sfno-v3
-and C96 AMIP-only runs store their checkpoints on Weka and record the paths
-in fm_v3_jobs.json and fm_c96amip_jobs.json, respectively.
+runs, the C96 AMIP-only runs and their ERA5-1979 counterparts store their
+checkpoints on Weka and record the paths in fm_v3_jobs.json and
+fm_c96amip_jobs.json (both of the latter), respectively.
 """
 
 import pathlib
@@ -18,6 +19,7 @@ import yaml
 from _beaker_listing import OK, NamedExperiment, fetch_experiments_by_name
 from create_fm_c96amip_jobs import ARCHS as C96AMIP_TRAIN_ARCHS
 from create_fm_c96amip_jobs import ARM as C96AMIP_ARM
+from create_fm_c96amip_jobs import ERA5_ARM as ERA5_1979_ARM
 from create_fm_c96amip_jobs import MAX_EPOCHS as C96AMIP_MAX_EPOCHS
 from create_fm_c96amip_jobs import runs as c96amip_runs
 from create_fm_v3_jobs import MAX_EPOCHS as V3_MAX_EPOCHS
@@ -33,8 +35,29 @@ EXP_DIR = HERE.parent  # experiment root (configs, records); scripts live in scr
 INFERENCE_CONFIGS_DIR = EXP_DIR / "inference_configs"
 BEAKER_MAP_PATH = EXP_DIR / "records" / "wandb_to_beaker_map.json"
 V3_ARCH = "sfno-v3"
-C96AMIP_ARCHS = {
-    f"{arch.removeprefix('nc-')}-c96amip": arch for arch in C96AMIP_TRAIN_ARCHS
+
+
+def _arm_archs(arm: str) -> dict[str, str]:
+    """Inference arch -> run-config token of the create_fm_c96amip_jobs.py
+    runs of `arm`, e.g. sfno-v2-c96amip -> nc-sfno-v2 for fm-c96amip.
+    """
+    return {
+        f"{arch.removeprefix('nc-')}-{arm.removeprefix('fm-')}": arch
+        for arch in C96AMIP_TRAIN_ARCHS
+    }
+
+
+# The 2026-11-18 single-source runs (create_fm_c96amip_jobs.py), two separate
+# cohorts of SFNO v2 and Swin v2.2 v2 models: C96 AMIP-only (fm-c96amip,
+# label c96) and ERA5 over the same years (fm-era5-1979, label era5).
+C96AMIP_ARCHS = _arm_archs(C96AMIP_ARM)
+ERA5_1979_ARCHS = _arm_archs(ERA5_1979_ARM)
+# Arch -> arm of both cohorts, for what they share: 120 epochs, checkpoints
+# recorded in fm_c96amip_jobs.json, a single training label given to every
+# inference dataset, and the CM4/X-SHiELD suites run out of sample.
+SINGLE_SOURCE_ARCH_ARMS = {
+    **dict.fromkeys(C96AMIP_ARCHS, C96AMIP_ARM),
+    **dict.fromkeys(ERA5_1979_ARCHS, ERA5_1979_ARM),
 }
 
 WANDB_ENTITY = "ai2cm"
@@ -63,7 +86,7 @@ LAST_EMA_EPOCHS = {
     "sfno-v2": 50,
     "swin-v2.2-v2": 50,
     V3_ARCH: V3_MAX_EPOCHS,
-    **dict.fromkeys(C96AMIP_ARCHS, C96AMIP_MAX_EPOCHS),
+    **dict.fromkeys(SINGLE_SOURCE_ARCH_ARMS, C96AMIP_MAX_EPOCHS),
 }
 # Per-epoch EMA checkpoints, further --ckpt choices of the archs in
 # EPOCH_CHECKPOINT_ARCHS (the ft archs, _add_ft_archs) for the families in
@@ -93,6 +116,7 @@ ARCHS = {
     "swin-v2.2-v2": "nc-swin-v2.2-v2",
     V3_ARCH: "nc-sfno-v3",
     **C96AMIP_ARCHS,
+    **ERA5_1979_ARCHS,
 }
 DEFAULT_ARCH = "sfno"
 # Subdirectory of run_configs/ holding the run configs of an arch whose
@@ -101,8 +125,8 @@ RUN_CONFIG_SUBDIRS: dict[str, str] = {}
 EXCLUDED_TOKENS = ("-e3sm", "-diag", "-smoke")
 # Archs whose excluded tokens differ from EXCLUDED_TOKENS.
 EXCLUDED_TOKENS_BY_ARCH = {
-    "sfno-v2": ("-diag", "-smoke", "-fm-c96amip-"),
-    "swin-v2.2-v2": ("-diag", "-smoke", "-fm-c96amip-"),
+    "sfno-v2": ("-diag", "-smoke", "-fm-c96amip-", "-fm-era5-1979-"),
+    "swin-v2.2-v2": ("-diag", "-smoke", "-fm-c96amip-", "-fm-era5-1979-"),
     V3_ARCH: ("-diag", "-smoke"),
 }
 # Date of the training wandb group of each arch whose runs are not the
@@ -114,6 +138,7 @@ GROUP_DATES = {
     "swin-v2.2-v2": "2026-11-09",
     V3_ARCH: "2026-11-18",
     **dict.fromkeys(C96AMIP_ARCHS, "c96amip-2026-11-18"),
+    **dict.fromkeys(ERA5_1979_ARCHS, "era5-1979-2026-11-18"),
 }
 DEFAULT_GROUP_DATE = "2026-10-19"
 # Config variant of the CM4/X-SHiELD suites (cm4xshield, cm4-1pct) per arch
@@ -273,11 +298,11 @@ def inference_run_names(arch: str = DEFAULT_ARCH) -> list[str]:
     """Job names of the training runs of `arch` (ARCHS) that get inference
     jobs.
     """
-    if arch in C96AMIP_ARCHS:
+    if arch in SINGLE_SOURCE_ARCH_ARMS:
         return [
             run.job_name
-            for run in c96amip_runs((C96AMIP_ARM,))
-            if run.arch == C96AMIP_ARCHS[arch]
+            for run in c96amip_runs((SINGLE_SOURCE_ARCH_ARMS[arch],))
+            if run.arch == ARCHS[arch]
         ]
     prefix = f"{CONFIG_PREFIX}{ARCHS[arch]}-fm-"
     excluded = EXCLUDED_TOKENS_BY_ARCH.get(arch, EXCLUDED_TOKENS)

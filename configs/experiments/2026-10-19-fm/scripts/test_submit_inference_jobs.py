@@ -3,12 +3,13 @@ from collections import Counter
 
 import submit_inference_jobs as submit
 from _inference_common import (
-    C96AMIP_ARCHS,
     INFERENCE_CONFIGS_DIR,
+    SINGLE_SOURCE_ARCH_ARMS,
     V3_ARCH,
     inference_run_names,
     run_train_labels,
 )
+from create_fm_c96amip_jobs import LABELS as C96AMIP_LABELS
 from generate_inference_configs import (
     EVAL_SUITE_CONFIGS,
     FAMILIES,
@@ -117,15 +118,33 @@ def test_v3_resolve_runs_uses_succeeded_recorded_experiment(monkeypatch):
     ].format(epoch=120)
 
 
-def test_c96amip_suites_use_the_trained_label():
-    for arch in C96AMIP_ARCHS:
+def test_single_source_suites_use_the_trained_label():
+    labels = {
+        arch: C96AMIP_LABELS[arm] for arch, arm in SINGLE_SOURCE_ARCH_ARMS.items()
+    }
+    assert labels == {
+        "sfno-v2-c96amip": "c96",
+        "swin-v2.2-v2-c96amip": "c96",
+        "sfno-v2-era5-1979": "era5",
+        "swin-v2.2-v2-era5-1979": "era5",
+    }
+    for arch, label in labels.items():
         run = inference_run_names(arch)[0]
-        assert run_train_labels(run) == {"c96"}
+        assert run_train_labels(run) == {label}
         for family in ("eval", "cm4xshield", "cm4-1pct"):
             [(name, filename)] = submit.family_jobs(family, run, arch=arch)
             suite = load_suite(
-                str(INFERENCE_CONFIGS_DIR / filename), dataset_label="c96"
+                str(INFERENCE_CONFIGS_DIR / filename), dataset_label=label
             )
             for entry in suite.inferences:
-                assert entry.config.labels == ["c96"]
-                assert entry.config_data["loader"]["dataset"]["labels"] == ["c96"]
+                assert entry.config.labels == [label]
+                assert entry.config_data["loader"]["dataset"]["labels"] == [label]
+
+
+def test_era5_1979_jobs_have_their_own_wandb_groups():
+    for arch in ("sfno-v2-era5-1979", "swin-v2.2-v2-era5-1979"):
+        assert len(inference_run_names(arch)) == 3
+        for ckpt in ("bestinf", "lastema"):
+            for group in submit.wandb_groups(ckpt, arch).values():
+                assert "era5-1979-2026-11-18" in group
+                assert "c96amip" not in group
