@@ -58,3 +58,19 @@ for level in ["400ppm", "460ppm", "550ppm"]:
         + yaml.safe_dump(c, sort_keys=True, width=120)
     )
     print("wrote noec", level)
+
+# Uniform SST warming at constant CO2 (Troy 2026-11-25: the SST sensitivity of the
+# CM4-only, SHiELD-fine-tuned and ERA5-fine-tuned atmospheres): the 400 ppm run
+# with every ocean cell's surface temperature raised by 2 or 4 K in the forcing
+# and the initial condition. The control is ace2p5-fixedsst-co2-400ppm.yaml.
+for dk in [2, 4]:
+    c = yaml.safe_load((HERE / "ssp/ace2p5-fixedsst-co2-400ppm.yaml").read_text())
+    c["forcing_loader"]["perturbations"] = {
+        "sst": [{"type": "constant", "config": {"amplitude": float(dk)}}]
+    }
+    (HERE / f"ssp/ace2p5-fixedsst-co2-400ppm-p{dk}k.yaml").write_text(
+        f"# As ace2p5-fixedsst-co2-400ppm.yaml, with SST raised uniformly by {dk} K"
+        " (launch with CFG_SUFFIX=-p{dk}k LEVELS=400ppm).\n".replace("{dk}", str(dk))
+        + yaml.safe_dump(c, sort_keys=True, width=120)
+    )
+    print("wrote sst +", dk)

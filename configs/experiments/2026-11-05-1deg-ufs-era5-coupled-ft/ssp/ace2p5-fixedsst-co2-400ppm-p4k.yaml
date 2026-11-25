@@ -1,0 +1,63 @@
+# As ace2p5-fixedsst-co2-400ppm.yaml, with SST raised uniformly by 4 K (launch with CFG_SUFFIX=-p4k LEVELS=400ppm).
+aggregator:
+  log_global_mean_time_series: true
+allow_incompatible_dataset: true
+checkpoint_path: /ckpt.tar
+data_writer:
+  names:
+  - surface_temperature
+  - TMP2m
+  - PRESsfc
+  - PRATEsfc
+  - DSWRFsfc
+  - DLWRFsfc
+  - ULWRFsfc
+  - USWRFsfc
+  - LHTFLsfc
+  - SHTFLsfc
+  - DSWRFtoa
+  - ULWRFtoa
+  - USWRFtoa
+  - sea_ice_fraction
+  - ocean_fraction
+  - h500
+  - TMP850
+  - air_temperature_7
+  - air_temperature_0
+  save_monthly_files: true
+  save_prediction_files: false
+experiment_dir: /results
+forcing_loader:
+  dataset:
+    merge:
+    - data_path: /climate-default
+      engine: zarr
+      file_pattern: 2026-04-07-cm4-ssp245-ACE-forcing-dataset.zarr
+    - data_path: /ace2p5forcing
+      engine: zarr
+      file_pattern: ace2p5_ssp245_forcing.zarr
+      overwrite:
+        constant:
+          carbon_dioxide: 400.0
+  num_data_workers: 2
+  perturbations:
+    sst:
+    - config:
+        amplitude: 4.0
+      type: constant
+forward_steps_in_memory: 40
+initial_condition:
+  engine: zarr
+  path: /climate-default/2026-03-19-era5-1deg-8layer-1940-2025.zarr
+  start_indices:
+    times:
+    - '2015-01-20T18:00:00'
+logging:
+  entity: ai2cm
+  log_to_file: true
+  log_to_screen: true
+  log_to_wandb: true
+  project: ace-samudra-coupled-cm4
+n_forward_steps: 14600
+stepper_override:
+  derived_forcings: {}
