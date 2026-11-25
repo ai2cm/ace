@@ -345,7 +345,7 @@ class AtmosphereCorrectorConfig(CorrectorConfigABC):
         dataset_info: DatasetInfo,
     ) -> "AtmosphereCorrector":
         return self._build(
-            dataset_info.gridded_operations,
+            dataset_info.get_gridded_operations(use_area_weights_provider=False),
             dataset_info.atmosphere_vertical_coordinate,
             dataset_info.timestep,
         )

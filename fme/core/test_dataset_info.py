@@ -5,6 +5,11 @@ from typing import Any
 import pytest
 import torch
 
+from fme.core.area_weights_provider import (
+    AreaWeightsProvider,
+    AreaWeightsProviderABC,
+    NullAreaWeightsProvider,
+)
 from fme.core.coordinates import (
     DepthCoordinate,
     HybridSigmaPressureCoordinate,
@@ -471,3 +476,89 @@ class TestOceanVerticalCoordinate:
         info = DatasetInfo(vertical_coordinate=_make_hybrid_sigma_pressure_coordinate())
         with pytest.raises(RuntimeError, match="ocean vertical coordinate"):
             info.ocean_vertical_coordinate
+
+
+def _area_weights_dataset_info(
+    area_weights_provider: AreaWeightsProviderABC | None,
+) -> DatasetInfo:
+    return DatasetInfo(
+        horizontal_coordinates=LatLonCoordinates(
+            lat=torch.linspace(-60.0, 60.0, 4, device=get_device()),
+            lon=torch.arange(8, device=get_device()) * 45.0,
+        ),
+        timestep=datetime.timedelta(hours=1),
+        area_weights_provider=area_weights_provider,
+    )
+
+
+def _area_weights_provider(seed: int = 0) -> AreaWeightsProvider:
+    torch.manual_seed(seed)
+    return AreaWeightsProvider(torch.rand(4, 8, device=get_device()))
+
+
+def test_dataset_info_area_weights_provider_round_trip():
+    dataset_info = _area_weights_dataset_info(_area_weights_provider())
+    reloaded = DatasetInfo.from_state(dataset_info.get_state())
+    assert reloaded == dataset_info
+    assert reloaded != _area_weights_dataset_info(None)
+    x = torch.randn(2, 4, 8, device=get_device())
+    torch.testing.assert_close(
+        reloaded.gridded_operations.area_weighted_mean(x),
+        dataset_info.gridded_operations.area_weighted_mean(x),
+    )
+
+
+def test_dataset_info_state_without_area_weights_provider_loads_unchanged():
+    dataset_info = _area_weights_dataset_info(None)
+    state = dataset_info.get_state()
+    assert state["area_weights_provider"] is None
+    del state["area_weights_provider"]  # as in checkpoints from before the key
+    reloaded = DatasetInfo.from_state(state)
+    assert reloaded == dataset_info
+    assert reloaded.area_weights_provider is NullAreaWeightsProvider
+    x = torch.randn(2, 4, 8, device=get_device())
+    latitude_ops = reloaded.horizontal_coordinates.get_gridded_operations()
+    torch.testing.assert_close(
+        reloaded.gridded_operations.area_weighted_mean(x),
+        latitude_ops.area_weighted_mean(x),
+    )
+
+
+def test_dataset_info_null_area_weights_provider_stored_as_none():
+    assert _area_weights_dataset_info(
+        NullAreaWeightsProvider
+    ) == _area_weights_dataset_info(None)
+
+
+def test_get_gridded_operations_without_area_weights_provider():
+    dataset_info = _area_weights_dataset_info(_area_weights_provider())
+    x = torch.randn(2, 4, 8, device=get_device())
+    latitude_ops = dataset_info.horizontal_coordinates.get_gridded_operations()
+    latitude_mean = latitude_ops.area_weighted_mean(x)
+    torch.testing.assert_close(
+        dataset_info.get_gridded_operations(
+            use_area_weights_provider=False
+        ).area_weighted_mean(x),
+        latitude_mean,
+    )
+    assert not torch.allclose(
+        dataset_info.gridded_operations.area_weighted_mean(x), latitude_mean
+    )
+
+
+@pytest.mark.parametrize(
+    "a, b, compatible",
+    [
+        pytest.param(_area_weights_provider(0), _area_weights_provider(0), True),
+        pytest.param(_area_weights_provider(0), None, True),
+        pytest.param(None, _area_weights_provider(0), True),
+        pytest.param(_area_weights_provider(0), _area_weights_provider(1), False),
+    ],
+)
+def test_assert_compatible_with_area_weights_provider(a, b, compatible):
+    info_a, info_b = _area_weights_dataset_info(a), _area_weights_dataset_info(b)
+    if compatible:
+        info_a.assert_compatible_with(info_b)
+    else:
+        with pytest.raises(IncompatibleDatasetInfo, match="area_weights_provider"):
+            info_a.assert_compatible_with(info_b)

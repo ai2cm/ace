@@ -10,6 +10,10 @@ import numpy as np
 import torch
 
 from fme.core import metrics
+from fme.core.area_weights_provider import (
+    AreaWeightsProviderABC,
+    NullAreaWeightsProvider,
+)
 from fme.core.constants import EARTH_RADIUS, GRAVITY
 from fme.core.dataset_info_errors import MissingDatasetInfo
 from fme.core.derived_variables import compute_derived_quantities
@@ -564,7 +568,9 @@ class HorizontalCoordinates(abc.ABC):
 
     @abc.abstractmethod
     def get_gridded_operations(
-        self, spatial_mask_provider: SpatialMaskProviderABC = NullSpatialMaskProvider
+        self,
+        spatial_mask_provider: SpatialMaskProviderABC = NullSpatialMaskProvider,
+        area_weights_provider: AreaWeightsProviderABC = NullAreaWeightsProvider,
     ) -> GriddedOperations:
         pass
 
@@ -685,9 +691,15 @@ class LatLonCoordinates(HorizontalCoordinates):
             return "legendre-gauss"
 
     def get_gridded_operations(
-        self, spatial_mask_provider: SpatialMaskProviderABC = NullSpatialMaskProvider
+        self,
+        spatial_mask_provider: SpatialMaskProviderABC = NullSpatialMaskProvider,
+        area_weights_provider: AreaWeightsProviderABC = NullAreaWeightsProvider,
     ) -> LatLonOperations:
-        return LatLonOperations(self.area_weights, spatial_mask_provider)
+        return LatLonOperations(
+            self.area_weights,
+            spatial_mask_provider,
+            area_weights_provider=area_weights_provider,
+        )
 
     @property
     def meshgrid(self) -> tuple[torch.Tensor, torch.Tensor]:
@@ -823,7 +835,9 @@ class HEALPixCoordinates(HorizontalCoordinates):
         return None
 
     def get_gridded_operations(
-        self, spatial_mask_provider: SpatialMaskProviderABC = NullSpatialMaskProvider
+        self,
+        spatial_mask_provider: SpatialMaskProviderABC = NullSpatialMaskProvider,
+        area_weights_provider: AreaWeightsProviderABC = NullAreaWeightsProvider,
     ) -> HEALPixOperations:
         # this code is necessary because when no masks are in a given dataset, we return
         # an empty SpatialMaskProvider instead of the NullSpatialMaskProvider.
@@ -841,6 +855,10 @@ class HEALPixCoordinates(HorizontalCoordinates):
                 "HEALPixCoordinates does not support a mask provider. "
                 "Use NullSpatialMaskProvider when getting gridded operations "
                 "for HEALPixCoordinates."
+            )
+        if area_weights_provider.area_weights is not None:
+            raise NotImplementedError(
+                "HEALPixCoordinates does not support an area weights provider."
             )
         return HEALPixOperations(self.nside)
 

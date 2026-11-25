@@ -6,12 +6,17 @@ import pytest
 import torch
 
 from fme import get_device
+from fme.core.area_weights_provider import AreaWeightsProvider
 from fme.core.constants import (
     DENSITY_OF_SEA_WATER_CM4,
     EARTH_RADIUS,
     SPECIFIC_HEAT_OF_SEA_WATER_CM4,
 )
-from fme.core.coordinates import DepthCoordinate, LatLonCoordinates
+from fme.core.coordinates import (
+    DepthCoordinate,
+    LatLonCoordinates,
+    NullVerticalCoordinate,
+)
 from fme.core.corrector.ocean import (
     OceanCorrectorConfig,
     OceanHeatContentBudgetConfig,
@@ -727,7 +732,9 @@ def _salt_coordinates(nlat: int, nlon: int) -> LatLonCoordinates:
 
 
 def _salt_dataset_info(
-    ocean_mask: torch.Tensor, layer_thickness: tuple[float, float]
+    ocean_mask: torch.Tensor,
+    layer_thickness: tuple[float, float],
+    area_weights_provider: AreaWeightsProvider | None = None,
 ) -> DatasetInfo:
     """Lat-lon grid with non-uniform cell areas and a two-layer depth
     coordinate."""
@@ -744,6 +751,7 @@ def _salt_dataset_info(
         ),
         spatial_mask_provider=SpatialMaskProvider(masks),
         timestep=datetime.timedelta(seconds=5 * 24 * 3600),
+        area_weights_provider=area_weights_provider,
     )
 
 
@@ -1320,3 +1328,199 @@ def test_zos_global_mean_correction_config_round_trip():
         reference_global_mean=0.0
     )
     assert OceanCorrectorConfig.from_state({}).zos_global_mean_correction is None
+
+
+def _zos_dataset_info(
+    mask: torch.Tensor, area_weights_provider: AreaWeightsProvider | None
+) -> DatasetInfo:
+    nlat, nlon = mask.shape
+    return DatasetInfo(
+        horizontal_coordinates=_salt_coordinates(nlat, nlon),
+        vertical_coordinate=NullVerticalCoordinate(),
+        spatial_mask_provider=SpatialMaskProvider({"mask_2d": mask}),
+        timestep=datetime.timedelta(seconds=3600),
+        area_weights_provider=area_weights_provider,
+    )
+
+
+def _areacello_m2(nlat: int, nlon: int) -> torch.Tensor:
+    """Cell areas not uniform in longitude, so they differ from latitude
+    weights."""
+    return 1e10 * (0.5 + torch.rand(nlat, nlon, dtype=torch.float64))
+
+
+@pytest.mark.parametrize("reference_global_mean", [0.0, -0.0123])
+def test_zos_global_mean_correction_under_area_weights_provider(
+    reference_global_mean,
+):
+    # <z> = sum(a s m z) / sum(a s m) with a = areacello, not latitude weights
+    _, gen_data, forcing_data, _, s = _zos_setup(0.0)
+    mask = (s > 0).to(s.dtype)
+    areacello = _areacello_m2(*s.shape).to(DEVICE)
+    provider = AreaWeightsProvider.from_cell_area_and_fraction(
+        areacello, s.double()
+    ).to(DEVICE)
+    config = OceanCorrectorConfig(
+        zos_global_mean_correction=ZosGlobalMeanCorrectionConfig(
+            reference_global_mean=reference_global_mean
+        )
+    )
+    corrector = config.get_corrector(_zos_dataset_info(mask, provider))
+    zos = corrector({}, gen_data, forcing_data, None).corrected["zos"]
+    w = areacello * s * mask
+    mean = (w * zos).sum(dim=(-2, -1)) / w.sum()
+    torch.testing.assert_close(
+        mean, torch.full_like(mean, reference_global_mean), atol=1e-6, rtol=0
+    )
+
+
+@pytest.mark.parametrize("hfds_type", ["total_area", "gen", "input"])
+def test_ocean_heat_content_correction_under_area_weights_provider(hfds_type):
+    """With weights a s (a = areacello), the corrected state closes
+    sum(a s H_out) = sum(a s H_in) + sum(a F) dt, F per unit total cell area.
+    """
+    case = _partial_land_ohc_budget_case(hfds_type)
+    s = case.sea_surface_fraction
+    mask_2d = (s > 0).to(s.dtype)
+    areacello = _areacello_m2(*s.shape)
+    provider = AreaWeightsProvider.from_cell_area_and_fraction(areacello, s)
+    ocean_area_ops = LatLonOperations(
+        case.area,
+        SpatialMaskProvider({"mask_2d": mask_2d}),
+        area_weights_provider=provider,
+    )
+    dt = 5 * 86400.0
+    config = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature",
+        )
+    )
+    corrector = config._build(
+        case.ops,
+        case.depth_coordinate,
+        datetime.timedelta(seconds=dt),
+        ocean_area_operations=ocean_area_ops,
+    )
+    corrected = corrector(
+        case.input_data, case.gen_data, case.forcing_data, None
+    ).corrected
+
+    def integral(field: torch.Tensor) -> torch.Tensor:
+        return torch.nansum(areacello * field)
+
+    h_in = OceanData(case.input_data, case.depth_coordinate).ocean_heat_content
+    h_out = OceanData(corrected, case.depth_coordinate).ocean_heat_content
+    torch.testing.assert_close(
+        integral(s * h_out),
+        integral(s * h_in) + integral(case.net_energy_flux_total_area) * dt,
+        rtol=1e-10,
+        atol=0.0,
+    )
+
+
+def test_ocean_heat_content_hfds_total_area_gradient_finite_on_land():
+    # hfds_total_area / s is guarded where s = 0
+    case = _partial_land_ohc_budget_case("total_area")
+    s = case.sea_surface_fraction
+    provider = AreaWeightsProvider.from_cell_area_and_fraction(
+        _areacello_m2(*s.shape), s
+    )
+    ocean_area_ops = LatLonOperations(
+        case.area,
+        SpatialMaskProvider({"mask_2d": (s > 0).to(s.dtype)}),
+        area_weights_provider=provider,
+    )
+    config = OceanCorrectorConfig(
+        ocean_heat_content_correction=OceanHeatContentBudgetConfig(
+            method="scaled_temperature",
+        )
+    )
+    corrector = config._build(
+        case.ops,
+        case.depth_coordinate,
+        datetime.timedelta(seconds=86400.0),
+        ocean_area_operations=ocean_area_ops,
+    )
+    hfds_total_area = case.gen_data["hfds_total_area"].clone().requires_grad_(True)
+    gen_data = dict(case.gen_data, hfds_total_area=hfds_total_area)
+    corrected = corrector(case.input_data, gen_data, case.forcing_data, None)
+    corrected.corrected["thetao_0"].sum().backward()
+    assert hfds_total_area.grad is not None
+    assert torch.isfinite(hfds_total_area.grad).all()
+
+
+def test_ocean_salt_content_correction_under_area_weights_provider():
+    # constant term and sea surface height budget, both over sum(a s) with
+    # a = areacello; the salt sums scale by SPHERE_AREA_M2 to a true total
+    torch.manual_seed(0)
+    ocean_mask = _salt_ocean_mask()
+    nlat, nlon = ocean_mask.shape
+    layer_thickness = (10.0, 20.0)
+    s = torch.rand(nlat, nlon, dtype=torch.float64) * ocean_mask
+    s[0, :] = 1.0
+    areacello = _areacello_m2(nlat, nlon)
+    provider = AreaWeightsProvider.from_cell_area_and_fraction(areacello, s).to(DEVICE)
+    dataset_info = _salt_dataset_info(ocean_mask, layer_thickness, provider)
+    constant, reference_salinity = 3e-9, 34.5
+    config = OceanCorrectorConfig(
+        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
+            method="scaled_salinity",
+            budget_config=SeaSurfaceHeightSaltBudgetConfig(
+                reference_salinity_psu=reference_salinity
+            ),
+            constant_unaccounted_salting=constant,
+        )
+    )
+    corrector = config.get_corrector(dataset_info)
+    input_ssh = 0.5 * torch.randn(nlat, nlon, dtype=torch.float64)
+    gen_ssh = input_ssh + 1e-3 * torch.randn(nlat, nlon, dtype=torch.float64)
+    input_data, gen_data = _ssh_salt_states(ocean_mask, input_ssh, gen_ssh)
+    forcing_data = {"sea_surface_fraction": s.to(DEVICE)}
+    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
+
+    ocean_area = (areacello * s).to(DEVICE)
+    ssh_change = (gen_data["SSH"] - input_data["SSH"]).nan_to_num()
+    dt = dataset_info.timestep.total_seconds()
+    constant_change = constant * dt * float(ocean_area.sum())
+    ssh_budget_change = -reference_salinity * float((ssh_change * ocean_area).sum())
+    expected_change = constant_change + ssh_budget_change
+    torch.testing.assert_close(
+        _total_salt_content(corrected, ocean_area, layer_thickness),
+        _total_salt_content(input_data, ocean_area, layer_thickness) + expected_change,
+        rtol=1e-12,
+        atol=0.0,
+    )
+
+
+def test_unweighted_salt_correction_ignores_area_weights_provider():
+    # the provider's weights hold s, which weight_by_sea_surface_fraction=False
+    # leaves out, so that path keeps latitude weights
+    torch.manual_seed(0)
+    ocean_mask = _salt_ocean_mask()
+    nlat, nlon = ocean_mask.shape
+    layer_thickness = (10.0, 20.0)
+    s = torch.rand(nlat, nlon, dtype=torch.float64) * ocean_mask
+    provider = AreaWeightsProvider.from_cell_area_and_fraction(
+        _areacello_m2(nlat, nlon), s
+    ).to(DEVICE)
+    config = OceanCorrectorConfig(
+        ocean_salt_content_correction=OceanSaltContentBudgetConfig(
+            method="scaled_salinity",
+            constant_unaccounted_salting=3e-9,
+            weight_by_sea_surface_fraction=False,
+        )
+    )
+    input_data, gen_data = _ssh_salt_states(
+        ocean_mask, torch.zeros(nlat, nlon), torch.zeros(nlat, nlon)
+    )
+    forcing_data = {"sea_surface_fraction": s.to(DEVICE)}
+
+    def corrected_so_0(info: DatasetInfo) -> torch.Tensor:
+        corrector = config.get_corrector(info)
+        return corrector(input_data, gen_data, forcing_data, None).corrected["so_0"]
+
+    torch.testing.assert_close(
+        corrected_so_0(_salt_dataset_info(ocean_mask, layer_thickness, provider)),
+        corrected_so_0(_salt_dataset_info(ocean_mask, layer_thickness)),
+        equal_nan=True,
+    )

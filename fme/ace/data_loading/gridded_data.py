@@ -89,6 +89,7 @@ class GriddedData(GriddedDataABC[BatchData]):
             horizontal_coordinates=self._global_properties.horizontal_coordinates,
             vertical_coordinate=self._global_properties.vertical_coordinate,
             spatial_mask_provider=self._global_properties.spatial_mask_provider,
+            area_weights_provider=self._global_properties.area_weights_provider,
             timestep=self._timestep,
             variable_metadata=self._global_properties.variable_metadata,
             all_labels=self._global_properties.all_labels,
@@ -207,6 +208,7 @@ class InferenceGriddedData(InferenceDataABC[PrognosticState, BatchData]):
             horizontal_coordinates=self._global_properties.horizontal_coordinates,
             vertical_coordinate=self._global_properties.vertical_coordinate,
             spatial_mask_provider=self._global_properties.spatial_mask_provider,
+            area_weights_provider=self._global_properties.area_weights_provider,
             timestep=self.timestep,
             all_labels=self._global_properties.all_labels,
         )

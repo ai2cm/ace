@@ -14,6 +14,8 @@ import torch
 import xarray as xr
 from xarray.coding.times import CFDatetimeCoder
 
+from fme.core.area_weights_provider import NullAreaWeightsProvider
+from fme.core.constants import SPHERE_AREA_M2
 from fme.core.coordinates import (
     DepthCoordinate,
     HybridSigmaPressureCoordinate,
@@ -22,6 +24,7 @@ from fme.core.coordinates import (
 )
 from fme.core.dataset.concat import XarrayConcat, get_dataset
 from fme.core.dataset.merged import MergedXarrayDataset
+from fme.core.dataset.properties import DatasetProperties
 from fme.core.dataset.schedule import IntSchedule
 from fme.core.dataset.time import RepeatedInterval, TimeSlice
 from fme.core.dataset.utils import FillNaNsConfig
@@ -31,6 +34,7 @@ from fme.core.dataset.xarray import (
     XarrayDataConfig,
     XarrayDataset,
     XarraySubset,
+    _get_area_weights_provider,
     _get_cumulative_timesteps,
     _get_file_local_index,
     _get_raw_times,
@@ -1358,3 +1362,93 @@ def test_allow_missing_variables_false_raises_on_missing(mock_monthly_netcdfs):
             IntSchedule.from_constant(2),
             allow_missing_variables=False,
         )
+
+
+def _area_weights_statics(n_lat: int = 4, n_lon: int = 8) -> xr.Dataset:
+    rng = np.random.default_rng(0)
+    areacello = 1e12 * (1.0 + rng.random((n_lat, n_lon)))
+    sea_surface_fraction = rng.random((n_lat, n_lon))
+    sea_surface_fraction[0, 0] = 0.0
+    return xr.Dataset(
+        {
+            "areacello": (("lat", "lon"), areacello),
+            "sea_surface_fraction": (("lat", "lon"), sea_surface_fraction),
+        }
+    )
+
+
+def test_dataset_properties_area_weights_provider(tmp_path):
+    statics = _area_weights_statics()
+    n_lat, n_lon = statics["areacello"].shape
+    time = xr.date_range("2000-01-01", periods=4, freq="5D", use_cftime=True)
+    ds = statics.assign(
+        foo=(("time", "lat", "lon"), np.random.randn(4, n_lat, n_lon)),
+    ).assign_coords(
+        time=time,
+        lat=np.linspace(-60.0, 60.0, n_lat),
+        lon=np.arange(n_lon) * 45.0,
+    )
+    ds.to_netcdf(tmp_path / "data.nc")
+    config = XarrayDataConfig(data_path=str(tmp_path))
+    dataset = xarray_dataset_constructor(config, ["foo"], 2)
+    area_weights = dataset.properties.area_weights_provider.area_weights
+    assert area_weights is not None
+    expected = statics["areacello"] * statics["sea_surface_fraction"] / SPHERE_AREA_M2
+    np.testing.assert_allclose(area_weights.cpu().numpy(), expected.values, rtol=1e-6)
+
+
+def test_dataset_properties_no_area_weights_provider(mock_monthly_netcdfs):
+    mock_data: MockData = mock_monthly_netcdfs
+    config = XarrayDataConfig(data_path=mock_data.tmpdir)
+    dataset = xarray_dataset_constructor(config, mock_data.var_names.all_names, 2)
+    assert dataset.properties.area_weights_provider is NullAreaWeightsProvider
+
+
+def test__get_area_weights_provider_needs_both_names():
+    statics = _area_weights_statics()
+    for name in ("areacello", "sea_surface_fraction"):
+        provider = _get_area_weights_provider(statics.drop_vars(name), None, (4, 8))
+        assert provider is NullAreaWeightsProvider
+
+
+@pytest.mark.parametrize("problem", ["time", "shape", "nan"])
+def test__get_area_weights_provider_raises(problem):
+    statics = _area_weights_statics()
+    shape: tuple[int, ...] = (4, 8)
+    if problem == "time":
+        statics["areacello"] = statics["areacello"].expand_dims(time=2)
+    elif problem == "shape":
+        shape = (4, 9)
+    else:
+        statics["sea_surface_fraction"][1, 1] = np.nan
+    with pytest.raises(ValueError):
+        _get_area_weights_provider(statics, torch.float32, shape)
+
+
+@pytest.mark.parametrize("strict", [True, False])
+def test_dataset_properties_update_requires_equal_area_weights_providers(strict):
+    statics = _area_weights_statics()
+    other_statics = statics.copy(deep=True)
+    other_statics["areacello"] = 2.0 * other_statics["areacello"]
+
+    def properties(ds: xr.Dataset) -> DatasetProperties:
+        return DatasetProperties(
+            variable_metadata={},
+            vertical_coordinate=NullVerticalCoordinate(),
+            horizontal_coordinates=LatLonCoordinates(
+                lat=torch.linspace(-60.0, 60.0, 4), lon=torch.arange(8) * 45.0
+            ),
+            spatial_mask_provider=SpatialMaskProvider(),
+            timestep=datetime.timedelta(days=5),
+            is_remote=False,
+            all_labels=None,
+            area_weights_provider=_get_area_weights_provider(ds, None, (4, 8)),
+        )
+
+    properties(statics).update(properties(statics), strict=strict)
+    if strict:
+        with pytest.raises(ValueError, match="area weights"):
+            properties(statics).update(properties(other_statics), strict=strict)
+    else:
+        with pytest.warns(UserWarning, match="area weights"):
+            properties(statics).update(properties(other_statics), strict=strict)
