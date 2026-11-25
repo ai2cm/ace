@@ -35,6 +35,13 @@ seeds; the launch scripts pass `seed=<seed>` as an override. All stage-1 configs
 inline rollout runs before the first iteration and a data problem fails a job within its first
 hour; it does not change training beyond shifting the random-number stream.
 
+Stage 2 stops early on a plateau: a fine-tune is stopped once its inline inference error (the
+metric that selects `best_inference_ckpt.tar`) has gone 5 epochs without a new best, counted
+across preemptions; `max_epochs` (45 or 50) is only a backstop. Replayed on the four 2026-10-06
+fine-tunes, this stops them after epochs 6, 7, 9 and 11, and the selected checkpoint's error is
+within 4% of the full run's best (epoch-to-epoch swings are 10-20%).
+`stop_plateaued_finetunes.py` applies the rule to a list of stage-2 experiments.
+
 ## Data
 
 | member | weka (`/climate-default`) | used for |
@@ -84,5 +91,20 @@ job names `ace2s-snowfix-<arm>-daily-{1-step-pretrain,multi-step-finetune}-rs<se
 
 ## Launches
 
+Launched 2026-11-22 from commit `434357756`. The checkpoint dataset is a stage-1 or stage-2 job's
+result (filled in as jobs finish) or, for an evaluation, the checkpoint it reads.
+
 | job | Beaker experiment | checkpoint dataset |
 |---|---|---|
+| `ace2s-snowfix-cm4-control-pic-1pct-randco2-daily-1-step-pretrain-rs0` | `01M83GR3FP6PY4SVF720DEKBZC` |  |
+| `ace2s-snowfix-cm4-control-pic-1pct-randco2-daily-1-step-pretrain-rs1` | `01M83GR95BQV7VZBD1GXW1DDZP` |  |
+| `ace2s-snowfix-cm4-masked-naive-pic-1pct-randco2-daily-1-step-pretrain-rs0` | `01M83GREVV9WVY7WV8K37GC2DC` |  |
+| `ace2s-snowfix-cm4-masked-naive-pic-1pct-randco2-daily-1-step-pretrain-rs1` | `01M83GRMGE1Y2BK66XR4X7J0B0` |  |
+| `ace2s-snowfix-cm4-control-pic-1pct-daily-1-step-pretrain-rs1` | `01M83GRTDJ767PEWMA5X2395YD` |  |
+| `ace2s-snowfix-cm4-masked-naive-pic-1pct-daily-1-step-pretrain-rs1` | `01M83GS09Y2RKK1SW40Z6W7Z70` |  |
+| `ace2s-snowfix-cm4-control-pic-1pct-randco2-1xco2-eval` | `01M83H9SB1R4KXF15PMQTHJWY1` | `01M4RE0QHT2DE8V0QRCEWM43VA` (input) |
+| `ace2s-snowfix-cm4-control-pic-1pct-randco2-2xco2-eval` | `01M83H9Z5YXXXHZAXHHX7YZSX3` | `01M4RE0QHT2DE8V0QRCEWM43VA` (input) |
+| `ace2s-snowfix-cm4-control-pic-1pct-randco2-4xco2-eval` | `01M83HA4WTYC8QSNM5Q3H53ENR` | `01M4RE0QHT2DE8V0QRCEWM43VA` (input) |
+| `ace2s-snowfix-cm4-masked-naive-pic-1pct-randco2-1xco2-eval` | `01M83HAB54XN2NZFSKFGCEW3M8` | `01M4J32EDGBPFNG7W8PSANBFQN` (input) |
+| `ace2s-snowfix-cm4-masked-naive-pic-1pct-randco2-2xco2-eval` | `01M83HAHA26Z093VJ5D5P30MQS` | `01M4J32EDGBPFNG7W8PSANBFQN` (input) |
+| `ace2s-snowfix-cm4-masked-naive-pic-1pct-randco2-4xco2-eval` | `01M83HAQAH5N2G9XJFTPEBK7WK` | `01M4J32EDGBPFNG7W8PSANBFQN` (input) |
