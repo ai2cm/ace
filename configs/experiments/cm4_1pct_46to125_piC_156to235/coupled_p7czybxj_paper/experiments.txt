@@ -10,3 +10,13 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_piC-ic0151-200yr-paper|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-23-coupled-ft-enso-randco2-paper-eval/coupled/p7czybxj/piC-ic0151-200yr-paper|01M79M8QMQV6PFG839CAWKBZHN
 1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_1pct-ic0001-40yr-paper|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-23-coupled-ft-enso-randco2-paper-eval/coupled/p7czybxj/1pct-ic0001-40yr-paper|01M79M8QMQV6PFG839CAWKBZHN
 1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_piC-ic0244-40yr-paper|best_inference_ckpt|urgent|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-23-coupled-ft-enso-randco2-paper-eval/coupled/p7czybxj/piC-ic0244-40yr-paper|01M79M8QMQV6PFG839CAWKBZHN
+
+# Run 1: ./job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_p7czybxj_paper . --config-dir configs/experiments/cm4_eval/coupled/paper
+
+# MJO lag regression, out-of-sample piControl 0330-0350, daily tropics
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_piC-ic0330-21yr-mjo|best_inference_ckpt|high|--min-runtime 2h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-23-coupled-ft-enso-randco2-paper-eval/coupled/p7czybxj/piC-ic0330-21yr-mjo|01M79M8QMQV6PFG839CAWKBZHN
+
+# Run 2: ./job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_p7czybxj_paper . --config-dir configs/experiments/cm4_eval/atmos/paper --lift-coupled-atmosphere
+
+# MJO lag regression, out-of-sample piControl 0330-0350, daily tropics, sst-blended -coupled-atmosphere.zarr forcing
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|run_piC-ic0330-21yr-mjo-sstblend|best_inference_ckpt|high|--min-runtime 2h|experiment_dir=gs://vcm-ml-experiments/jamesd/2026-11-23-coupled-ft-enso-randco2-paper-eval/atmos-lifted/p7czybxj/piC-ic0330-21yr-mjo-sstblend|01M79M8QMQV6PFG839CAWKBZHN
