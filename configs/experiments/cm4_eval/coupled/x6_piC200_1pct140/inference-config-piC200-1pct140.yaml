@@ -1,0 +1,105 @@
+# job_runner/inference.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_randco2ft_x6_piC200_1pct140 . \
+#   --config-dir configs/experiments/cm4_eval/coupled/x6_piC200_1pct140
+# Coupled 1deg X6 run: 200 years of piControl from CM4's piControl state at
+# 0151-01-06, then 140 years of 1%/yr CO2 growth from the model's own state,
+# with model time continuous to 0491-01-06. Run as 17 segments of 20 years
+# (experiments.txt `segments` column, ace #1664); segment 10's restart is the
+# year-200 (0351-01-06) state.
+# Initial conditions come from the daily piControl ocean store and the 6-hourly
+# atmosphere store, as in ../paper/inference-config-cm4-piControl-ic1-150yr.yaml.
+# All forcing comes from gs://vcm-ml-intermediate/2026-11-24-x6-piC200-1pct140-forcing,
+# built by make_forcing.py: carbon_dioxide(time) (CM4 piControl to 0351-01-01T00,
+# CM4 1pctCO2 shifted +350 years, then 1%/yr growth), and time-invariant (lat, lon)
+# statics with only a time coordinate (ace #1663). The atmosphere derives DSWRFtoa
+# (insolation) and overwrites the loaded field; the store's DSWRFtoa is an all-NaN
+# placeholder because the coupled forcing loader still requires the variable.
+# The ocean surface fields come from the coupling. The store is read from gs://
+# (zarr), since job_runner mounts only weka /climate-default.
+# No seed: run_segmented_inference reuses this config for every segment, so a
+# seed would repeat the same noise sequence in each segment.
+# data_writer is ../paper/evaluator-config-1pct-ic0001-130yr-paper.yaml's.
+# experiment_dir is not set here: the experiments.txt row's override sets it to
+# a gs:// directory, so segments survive preemption and auto-resume.
+n_coupled_steps: 1460  # 20 years of 5-day ocean steps per segment
+coupled_steps_in_memory: 4
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: false
+  project: ace-samudra-coupled-cm4
+  entity: ai2cm
+initial_condition:
+  ocean:
+    path: /climate-default/2026-09-02-cm4-piControl-1deg-ocean-1daily.zarr
+    engine: zarr
+  atmosphere:
+    path: /climate-default/2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr
+    engine: zarr
+  start_indices:
+    times:
+    - '0151-01-06T00:00:00'
+forcing_loader:
+  num_data_workers: 1
+  ocean:
+    dataset:
+      data_path: gs://vcm-ml-intermediate/2026-11-24-x6-piC200-1pct140-forcing
+      file_pattern: ocean.zarr
+      engine: zarr
+  atmosphere:
+    dataset:
+      data_path: gs://vcm-ml-intermediate/2026-11-24-x6-piC200-1pct140-forcing
+      file_pattern: atmosphere.zarr
+      engine: zarr
+aggregator:
+  step_diagnostics:
+    correction_maps: true
+data_writer:
+  ocean:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+      - label: ocean_maps_monthly
+        names: [sst, hfds_total_area, ocean_heat_content, sea_ice_volume, ocean_sea_ice_fraction, thetao_0, thetao_1, thetao_2, thetao_3, thetao_4, thetao_5, thetao_6, thetao_7, thetao_8, thetao_9, thetao_10, thetao_11, thetao_12, thetao_13, thetao_14, thetao_15, thetao_16, thetao_17, thetao_18]
+        time_coarsen:
+          method: monthly_mean
+        save_reference: false
+        format:
+          name: zarr
+      - label: amoc_26n_5daily
+        names: [vo_0, vo_1, vo_2, vo_3, vo_4, vo_5, vo_6, vo_7, vo_8, vo_9,
+                vo_10, vo_11, vo_12, vo_13, vo_14, vo_15, vo_16, vo_17, vo_18]
+        lat_extent: [26.0, 27.0]  # one 1-degree row, centre nearest RAPID 26.5N
+        lon_extent: [255.0, 355.0]  # Gulf of Mexico to Africa; land at both ends, no lon-0 wrap
+        save_reference: false
+        format:
+          name: zarr
+  atmosphere:
+    save_prediction_files: false
+    save_monthly_files: false
+    files:
+    - label: tropical_pacific_monthly
+      names:
+      - eastward_surface_wind_stress
+      - northward_surface_wind_stress
+      - DSWRFsfc
+      - USWRFsfc
+      - DLWRFsfc
+      - ULWRFsfc
+      - LHTFLsfc
+      - SHTFLsfc
+      - PRATEsfc
+      lat_extent: [-20.0, 20.0]
+      lon_extent: [120.0, 290.0]
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+      format:
+        name: zarr
+    - label: t2m_precip_monthly
+      names: [TMP2m, PRATEsfc]
+      time_coarsen:
+        method: monthly_mean
+      save_reference: false
+      format:
+        name: zarr
