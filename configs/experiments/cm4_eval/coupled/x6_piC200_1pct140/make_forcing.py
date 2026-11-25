@@ -19,8 +19,10 @@ CO2 growth, with model time continuous to 0491-01-06. Writes three zarr stores:
   training and inference; CM4's DSWRFtoa is bit-identical every year in both
   the piControl and 1pctCO2 stores (checked here on sampled steps).
 - ocean.zarr: a 5-day time coordinate from 0151-01-06 to END and the
-  time-invariant land_fraction, sea_surface_fraction, deptho and hfgeou as
-  (lat, lon) arrays. Statics-only stores need ace #1663.
+  time-invariant land_fraction, sea_surface_fraction, deptho, hfgeou and
+  areacello as (lat, lon) arrays. areacello with sea_surface_fraction gives the
+  ocean area weights for global-mean diagnostics, as in the paper evals.
+  Statics-only stores need ace #1663.
 
 Both are zarr because the forcing is read from gs:// (job_runner mounts only
 weka /climate-default), and XarrayDataset opens remote files only with the
@@ -50,7 +52,7 @@ import numpy as np
 import xarray as xr
 
 BUCKET = "vcm-ml-intermediate"
-DST = f"{BUCKET}/2026-11-25-x6-piC200-1pct140-forcing"
+DST = f"{BUCKET}/2026-11-25-x6-piC200-1pct140-forcing-v2"
 ATMOS_PIC = (
     f"gs://{BUCKET}/2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr"
 )
@@ -80,7 +82,13 @@ OCEAN_TRAINING_5DAILY = [
 ]
 ATMOS_STATICS = ["land_fraction", "lake_fraction", "HGTsfc"]
 INSOLATION_NAME = "DSWRFtoa"
-OCEAN_STATICS = ["land_fraction", "sea_surface_fraction", "deptho", "hfgeou"]
+OCEAN_STATICS = [
+    "land_fraction",
+    "sea_surface_fraction",
+    "deptho",
+    "hfgeou",
+    "areacello",
+]
 
 IC_TIME = cftime.DatetimeNoLeap(151, 1, 6)
 SPLICE_TIME = cftime.DatetimeNoLeap(351, 1, 1)
@@ -235,6 +243,18 @@ def _ocean_statics():
     arrays["hfgeou"] = _static(oc, "hfgeou")
     attrs = {n: (oc if n == "hfgeou" else co)[n].attrs for n in arrays}
     training = [xr.open_zarr(p) for p in OCEAN_TRAINING_5DAILY]
+    # areacello: with sea_surface_fraction, ace's XarrayDataset builds the ocean
+    # area weights the inference aggregator uses for global means; without it,
+    # the weights fall back to cos(lat) and the ocean global means differ from
+    # the paper evals'. Taken from the 5-daily store that supplies the weights
+    # in those evals; ace requires it static and finite.
+    a5 = next(s for s in training if "areacello" in s)
+    arrays["areacello"] = _static(a5, "areacello")
+    attrs["areacello"] = a5["areacello"].attrs
+    for n in ["areacello", "sea_surface_fraction"]:
+        finite = bool(np.isfinite(arrays[n]).all())
+        print(f"  ocean {n}: finite everywhere (needed for area weights): {finite}")
+        assert finite, n
     for n, a in arrays.items():
         src = next(s for s in training if n in s)
         same = _same(a, _static(src, n))

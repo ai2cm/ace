@@ -7,10 +7,11 @@
 # year-200 (0351-01-06) state.
 # Initial conditions come from the daily piControl ocean store and the 6-hourly
 # atmosphere store, as in ../paper/inference-config-cm4-piControl-ic1-150yr.yaml.
-# All forcing comes from gs://vcm-ml-intermediate/2026-11-25-x6-piC200-1pct140-forcing,
+# All forcing comes from gs://vcm-ml-intermediate/2026-11-25-x6-piC200-1pct140-forcing-v2,
 # built by make_forcing.py: carbon_dioxide(time) (CM4 piControl to 0351-01-01T00,
 # CM4 1pctCO2 shifted +350 years, then 1%/yr growth), and time-invariant (lat, lon)
-# statics with only a time coordinate (ace #1663). DSWRFtoa is CM4's, which is
+# statics with only a time coordinate (ace #1663). ocean.zarr carries areacello so
+# ocean global means use areacello x sea_surface_fraction weights, as in the paper evals. DSWRFtoa is CM4's, which is
 # identical every year: dswrf.zarr holds one year (0151) and n_repeats: 341 spans
 # atmosphere.zarr's 341-year axis. Coupled steppers never apply derived_forcings,
 # so X6 reads DSWRFtoa from data, as in training.
@@ -44,16 +45,16 @@ forcing_loader:
   num_data_workers: 1
   ocean:
     dataset:
-      data_path: gs://vcm-ml-intermediate/2026-11-25-x6-piC200-1pct140-forcing
+      data_path: gs://vcm-ml-intermediate/2026-11-25-x6-piC200-1pct140-forcing-v2
       file_pattern: ocean.zarr
       engine: zarr
   atmosphere:
     dataset:
       merge:
-        - data_path: gs://vcm-ml-intermediate/2026-11-25-x6-piC200-1pct140-forcing
+        - data_path: gs://vcm-ml-intermediate/2026-11-25-x6-piC200-1pct140-forcing-v2
           file_pattern: atmosphere.zarr
           engine: zarr
-        - data_path: gs://vcm-ml-intermediate/2026-11-25-x6-piC200-1pct140-forcing
+        - data_path: gs://vcm-ml-intermediate/2026-11-25-x6-piC200-1pct140-forcing-v2
           file_pattern: dswrf.zarr
           engine: zarr
           n_repeats: 341
