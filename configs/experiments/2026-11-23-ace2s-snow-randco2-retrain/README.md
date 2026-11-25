@@ -43,6 +43,13 @@ epochs without a new best; `stop_plateaued_finetunes.py`) was planned and stoppe
 4); it was then dropped so that the new fine-tunes reach the old ones' maturity, and those two
 were resumed from their latest checkpoints.
 
+`snapshot_finetune_checkpoints.py` keeps fixed-maturity checkpoints for evaluation: at target epochs
+(default 20, 30, 36) it copies each fine-tune's `best_ckpt.tar` (EMA weights, lowest validation
+loss, rewritten at every epoch that improves it) into a dataset
+`<date>-<experiment name>-epoch<E>-best-ckpt`, E being the first improving epoch at or after the
+target. It runs unattended (on the GCP VM) until every target is copied. A first test copied control
+randco2 rs1 at epoch 8: `01M8AC8VVE1DF7HM2G7V6YA7PD`.
+
 ## Data
 
 | member | weka (`/climate-default`) | used for |
