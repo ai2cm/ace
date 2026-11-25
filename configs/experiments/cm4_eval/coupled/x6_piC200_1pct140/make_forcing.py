@@ -3,19 +3,21 @@
 
 inference-config-piC200-1pct140.yaml runs 17 segments of 20 years from the
 piControl state at 0151-01-06: 200 years at fixed CO2, then 140 years of 1%/yr
-CO2 growth, with model time continuous to 0491-01-06. Writes two zarr stores:
+CO2 growth, with model time continuous to 0491-01-06. Writes three zarr stores:
 
 - atmosphere.zarr: carbon_dioxide(time) on a 6-hourly noleap axis with the CM4
   atmosphere stores' phase (first time 0151-01-01T06): the piControl store's
   values through 0351-01-01T00, the 1pctCO2 store's values shifted +350 years
-  (0351-01-01T06 to 0491-01-01T00), then 1%/yr compounded growth to END. Plus
-  the time-invariant land_fraction, lake_fraction and HGTsfc as (lat, lon)
-  arrays, each from the store X6's training merge took it from (see
-  ATMOS_TRAINING). DSWRFtoa is an all-NaN (lat, lon) placeholder: the X6
-  atmosphere derives it (stepper.derived_forcings.insolation) and overwrites
-  the loaded field before use, but the coupled forcing loader still requires
-  the variable (CoupledStepperConfig.get_forcing_window_data_requirements does
-  not drop derived forcings). NaN makes any read of the placeholder visible.
+  (0351-01-01T06 to 0491-01-01T00), then 1%/yr compounded growth to
+  ATMOS_END, so the axis is exactly N_REPEATS years. Plus the time-invariant
+  land_fraction, lake_fraction and HGTsfc as (lat, lon) arrays, each from the
+  store X6's training merge took it from (see ATMOS_TRAINING).
+- dswrf.zarr: CM4's DSWRFtoa for one year (0151-01-01T06 to 0152-01-01T00).
+  The config merges it into atmosphere.zarr with n_repeats: N_REPEATS, which
+  shifts each repeat by 365 days, so the two time axes are identical. Coupled
+  steppers never apply derived_forcings, so X6 reads DSWRFtoa from data in
+  training and inference; CM4's DSWRFtoa is bit-identical every year in both
+  the piControl and 1pctCO2 stores (checked here on sampled steps).
 - ocean.zarr: a 5-day time coordinate from 0151-01-06 to END and the
   time-invariant land_fraction, sea_surface_fraction, deptho and hfgeou as
   (lat, lon) arrays. Statics-only stores need ace #1663.
@@ -28,6 +30,7 @@ Before writing, checks that
 - the statics equal those of the stores X6 trained on (NaN pattern included);
 - the initial-condition stores contain 0151-01-06T00;
 - the CO2 time axis is strictly 6-hourly and the 0351 splice jumps < 0.01 ppm;
+- DSWRFtoa repeats exactly across sampled years of both CM4 stores;
 - with --checkpoint, the checkpoint's ocean vertical coordinate carries deptho
   equal to the store's.
 
@@ -47,7 +50,7 @@ import numpy as np
 import xarray as xr
 
 BUCKET = "vcm-ml-intermediate"
-DST = f"{BUCKET}/2026-11-24-x6-piC200-1pct140-forcing"
+DST = f"{BUCKET}/2026-11-25-x6-piC200-1pct140-forcing"
 ATMOS_PIC = (
     f"gs://{BUCKET}/2026-06-19-CM4-piControl-atmosphere-land-1deg-8layer-200yr.zarr"
 )
@@ -85,6 +88,10 @@ SHIFT_YEARS = 350
 # 340 years of 5-day steps from IC_TIME end at 0491-01-06; END leaves margin.
 RUN_END = cftime.DatetimeNoLeap(491, 1, 6)
 END = cftime.DatetimeNoLeap(491, 1, 31)
+# atmosphere.zarr's axis spans exactly N_REPEATS years of dswrf.zarr.
+N_REPEATS = 341
+ATMOS_END = cftime.DatetimeNoLeap(151 + N_REPEATS, 1, 1)
+STEPS_PER_YEAR = 1460
 SIX_HOURS = datetime.timedelta(hours=6)
 FIVE_DAYS = datetime.timedelta(days=5)
 SPLICE_TOLERANCE_PPM = 0.01
@@ -149,7 +156,7 @@ def _co2():
     one_v = one["carbon_dioxide"].values.astype(np.float64)
     assert pic_t[-1] == SPLICE_TIME, pic_t[-1]
     assert one_t[0] == SPLICE_TIME + SIX_HOURS, one_t[0]
-    n_ext = int((END - one_t[-1]) / SIX_HOURS)
+    n_ext = int((ATMOS_END - one_t[-1]) / SIX_HOURS)
     ext_t = [one_t[-1] + (i + 1) * SIX_HOURS for i in range(n_ext)]
     # 1%/yr compounded at each 6-hour step (1460 steps per noleap year).
     ext_v = one_v[-1] * 1.01 ** (np.arange(1, n_ext + 1) / 1460.0)
@@ -170,6 +177,31 @@ def _co2():
     attrs = dict(pic["carbon_dioxide"].attrs)
     attrs.pop("_FillValue", None)
     return times, values.astype(np.float32), attrs
+
+
+def _dswrf():
+    """Return one year of CM4 DSWRFtoa after checking it repeats every year."""
+    pic = xr.open_zarr(ATMOS_PIC, use_cftime=True, chunks=None)[INSOLATION_NAME]
+    one = xr.open_zarr(ATMOS_1PCT, use_cftime=True, chunks=None)[INSOLATION_NAME]
+    year = pic.isel(time=slice(0, STEPS_PER_YEAR)).load()
+    t = list(year.time.values)
+    assert t[0] == cftime.DatetimeNoLeap(151, 1, 1, 6), t[0]
+    assert t[-1] == cftime.DatetimeNoLeap(152, 1, 1), t[-1]
+    _check_axis(t, SIX_HOURS, INSOLATION_NAME)
+    steps = list(range(0, STEPS_PER_YEAR, 73))
+    checks = [(pic, y) for y in (1, 49, 99, 199)] + [(one, y) for y in (0, 69, 139)]
+    for da, y in checks:
+        other = da.isel(time=[y * STEPS_PER_YEAR + k for k in steps]).load()
+        same = np.array_equal(year.values[steps], other.values)
+        ot = other.time.values
+        print(f"  {INSOLATION_NAME} {ot[0]}..{ot[-1]} ({len(steps)} steps) == 0151: {same}")
+        assert same and all(
+            (a.month, a.day, a.hour) == (b.month, b.day, b.hour)
+            for a, b in zip(ot, year.time.values[steps])
+        )
+    attrs = dict(year.attrs)
+    attrs.pop("_FillValue", None)
+    return t, year.values.astype(np.float32), attrs
 
 
 def _atmos_statics():
@@ -238,11 +270,6 @@ def check_checkpoint(path, deptho):
         "dataset_info.ocean": stepper["dataset_info"]["ocean"],
         "ocean_state.dataset_info": stepper["ocean_state"]["dataset_info"],
     }
-    insolation = stepper["config"]["atmosphere"]["stepper"]["derived_forcings"][
-        "insolation"
-    ]
-    print(f"  checkpoint derives {insolation['insolation_name']} (insolation)")
-    assert insolation["insolation_name"] == INSOLATION_NAME, insolation
     st = np.asarray(deptho, dtype=np.float64)
     for where, info in infos.items():
         vc = info["vertical_coordinate"]
@@ -262,6 +289,9 @@ def build(out, checkpoint=None):
     _check_ic()
     print("Building carbon_dioxide:")
     co2_t, co2_v, co2_attrs = _co2()
+    assert len(co2_t) == N_REPEATS * STEPS_PER_YEAR, len(co2_t)
+    print("Building DSWRFtoa:")
+    sw_t, sw_v, sw_attrs = _dswrf()
     pic = xr.open_zarr(ATMOS_PIC)
     print("Checking atmosphere statics:")
     a_arrays, a_attrs = _atmos_statics()
@@ -270,12 +300,11 @@ def build(out, checkpoint=None):
     print("Checking lat/lon:")
     _check_coords(pic, co)
     if checkpoint is not None:
-        print("Checking the checkpoint's deptho and derived insolation:")
+        print("Checking the checkpoint's deptho:")
         check_checkpoint(checkpoint, o_arrays["deptho"])
     else:
         print(
-            "WARNING: no --checkpoint; checkpoint deptho and derived insolation "
-            "not checked"
+            "WARNING: no --checkpoint; checkpoint deptho not checked"
         )
 
     atmos = xr.Dataset(
@@ -285,14 +314,6 @@ def build(out, checkpoint=None):
                 n: (("lat", "lon"), a.astype("float32"), a_attrs[n])
                 for n, a in a_arrays.items()
             },
-            INSOLATION_NAME: (
-                ("lat", "lon"),
-                np.full(a_arrays["land_fraction"].shape, np.nan, dtype="float32"),
-                {
-                    "long_name": "placeholder, never read: the X6 atmosphere "
-                    "derives DSWRFtoa (derived_forcings.insolation)"
-                },
-            ),
         },
         coords={"time": co2_t, "lat": pic.lat.values, "lon": pic.lon.values},
     )
@@ -312,23 +333,34 @@ def build(out, checkpoint=None):
         },
         coords={"time": ocean_t, "lat": co.lat.values, "lon": co.lon.values},
     )
+    sw = xr.Dataset(
+        {INSOLATION_NAME: (("time", "lat", "lon"), sw_v, sw_attrs)},
+        coords={"time": sw_t, "lat": pic.lat.values, "lon": pic.lon.values},
+    )
+    sw.attrs["description"] = (
+        "One year of CM4 piControl DSWRFtoa (identical every year in the CM4 "
+        f"piControl and 1pctCO2 stores), read with n_repeats: {N_REPEATS}. Built by "
+        "configs/experiments/cm4_eval/coupled/x6_piC200_1pct140/make_forcing.py."
+    )
     ocean.attrs["description"] = (
         "Time-invariant ocean forcing (CM4 piControl 1deg daily stores) on a 5-day "
         f"axis from {IC_TIME} to {END} for the X6 340-year run. Built by "
         "configs/experiments/cm4_eval/coupled/x6_piC200_1pct140/make_forcing.py."
     )
     time_encoding = {"units": "hours since 0151-01-01 00:00:00", "dtype": "int64"}
-    for ds in (atmos, ocean):
+    for ds in (atmos, sw, ocean):
         for v in ds.variables.values():
             v.encoding = {}
         ds["time"].encoding.update(time_encoding, calendar="noleap")
     atmos["carbon_dioxide"].encoding["chunks"] = (1460 * 20,)
+    sw[INSOLATION_NAME].encoding["chunks"] = (1, *sw_v.shape[1:])
     atmos.to_zarr(os.path.join(out, "atmosphere.zarr"), mode="w-")
+    sw.to_zarr(os.path.join(out, "dswrf.zarr"), mode="w-")
     ocean.to_zarr(os.path.join(out, "ocean.zarr"), mode="w-")
-    verify(out, co2_t, co2_v, a_arrays, ocean_t, o_arrays)
+    verify(out, co2_t, co2_v, a_arrays, ocean_t, o_arrays, sw_t, sw_v)
 
 
-def verify(out, co2_t, co2_v, a_arrays, ocean_t, o_arrays):
+def verify(out, co2_t, co2_v, a_arrays, ocean_t, o_arrays, sw_t, sw_v):
     a = xr.open_zarr(os.path.join(out, "atmosphere.zarr"), use_cftime=True)
     o = xr.open_zarr(os.path.join(out, "ocean.zarr"), use_cftime=True)
     assert list(a.time.values) == list(co2_t)
@@ -337,7 +369,11 @@ def verify(out, co2_t, co2_v, a_arrays, ocean_t, o_arrays):
     _check_axis(list(o.time.values), FIVE_DAYS, "ocean time")
     for n, x in a_arrays.items():
         assert _same(a[n].values, x.astype("float32")), n
-    assert np.isnan(a[INSOLATION_NAME].values).all()
+    assert INSOLATION_NAME not in a
+    sw = xr.open_zarr(os.path.join(out, "dswrf.zarr"), use_cftime=True)
+    assert list(sw.time.values) == list(sw_t)
+    assert np.array_equal(sw[INSOLATION_NAME].values, sw_v)
+    assert list(sw.time.values) == list(a.time.values[:STEPS_PER_YEAR])
     for n, x in o_arrays.items():
         assert _same(o[n].values, x.astype("float32")), n
     co2 = a.carbon_dioxide
