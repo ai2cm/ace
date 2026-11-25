@@ -10,5 +10,5 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # from step 1, because coupled inference never derives insolation and read the store's NaN DSWRFtoa placeholder.
 1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju|smoke|01M7RXG2MDBGVVTRC7XZ3FMCRJ|failed_inf_piC200-1pct140|best_inference_ckpt|high|--min-runtime 2h|experiment_dir=gs://vcm-ml-experiments/elynnwu/2026-11-24-x6-piC200-1pct140-smoke n_coupled_steps=72|01M7RXG2MMXQZF5ZWNR1Z9G29Q||jupiter+titan||||1|2
 
-# smoke2: as smoke, with CM4's DSWRFtoa (one year, n_repeats: 341) from the 2026-11-25 forcing store; checks no NaNs, restart hop, GCS writers
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju|smoke2|01M7RXG2MDBGVVTRC7XZ3FMCRJ|run_inf_piC200-1pct140|best_inference_ckpt|high|--min-runtime 2h|experiment_dir=gs://vcm-ml-experiments/elynnwu/2026-11-25-x6-piC200-1pct140-smoke2 n_coupled_steps=72|01M7RXG2MMXQZF5ZWNR1Z9G29Q||jupiter+titan||||1|2
+# smoke2 (beaker 01M89ZKW6XEYXNV2XNJR7TBKQ8): as smoke, with CM4's DSWRFtoa (one year, n_repeats: 341) from the 2026-11-25 forcing store; checks no NaNs, restart hop, GCS writers
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju|smoke2|01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_inf_piC200-1pct140|best_inference_ckpt|high|--min-runtime 2h|experiment_dir=gs://vcm-ml-experiments/elynnwu/2026-11-25-x6-piC200-1pct140-smoke2 n_coupled_steps=72|01M7RXG2MMXQZF5ZWNR1Z9G29Q||jupiter+titan||||1|2
