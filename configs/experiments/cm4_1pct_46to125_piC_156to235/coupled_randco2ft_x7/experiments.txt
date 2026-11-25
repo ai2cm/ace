@@ -1,3 +1,19 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
 
-1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|training|best_inference_ckpt|normal|--min-runtime 8h
+# U10 begin X7
+# X7 01M84ZPPZXBJDS9JETTWQ5MQ4F: training finished (jobs[-1] 01M84ZPQ3H3TC8H2BBWG8VJJD9: accepted cancel: maintainer ruling 2026-11-24 (PRD U91), this job id only); results dataset 01M84ZPQ04DEV983PRYKP9K9QJ.
+# training row: 1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|training|best_inference_ckpt|normal|--min-runtime 8h
+# Rows written by analysis/2026-11-15-2110-coupled-ft-enso-randco2-training/scripts/U10_eval_rows.py;
+# deferred_upload_* rows wait for the results dataset to be committed with their EMA file (rerun the script);
+# running_/ran_/failed_* rows are already launched (queue_evals.py mark prefixes).
+# launch: ./job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_randco2ft_x7 . --config-dir configs/experiments/cm4_eval/coupled
+# --config-dir configs/experiments/cm4_eval/coupled
+1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|run_1pct-ic0001-130yr|ema_ckpt_0001|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
+1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|run_piC-ic0151-200yr|ema_ckpt_0001|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
+1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|run_1pct-ic0001-130yr|ema_ckpt_0002|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
+1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|run_piC-ic0151-200yr|ema_ckpt_0002|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
+1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|run_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
+1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|run_piC-ic0151-200yr|ema_ckpt_0003|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
+1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|run_1pct-ic0001-130yr|ema_ckpt_0004|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
+1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|run_piC-ic0151-200yr|ema_ckpt_0004|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
+# U10 end X7
