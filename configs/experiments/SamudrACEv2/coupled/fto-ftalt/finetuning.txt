@@ -7,6 +7,6 @@ SamudrACEv2-ftalt|o2a0rs0|ace-samudra-coupled-cm4||best_inference_ckpt|skip|urge
 SamudrACEv2-ftalt|o0a1rs0|ace-samudra-coupled-cm4||best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0||8h
 SamudrACEv2-ftalt|o1a1rs0|ace-samudra-coupled-cm4||best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0||8h
 SamudrACEv2-ftalt|o2a1rs0|ace-samudra-coupled-cm4||best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0||8h
-SamudrACEv2-ftalt|o0a2rs0|ace-samudra-coupled-cm4||best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0||8h
+SamudrACEv2-ftalt|o0a2rs0|ace-samudra-coupled-cm4|liiys4zr|best_inference_ckpt|train|urgent|titan|8||3|ai2/ace|seed=0||8h
 SamudrACEv2-ftalt|o1a2rs0|ace-samudra-coupled-cm4||best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0||8h
 SamudrACEv2-ftalt|o2a2rs0|ace-samudra-coupled-cm4||best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0||8h

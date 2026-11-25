@@ -6,6 +6,6 @@ SamudrACEv2-fto|o2a0rs0|ace-samudra-cm4|widzeq0u|best_inference_ckpt|ace2-cm4-at
 SamudrACEv2-fto|o0a1rs0|ace-samudra-cm4|bcugx12o|best_inference_ckpt|ace2-cm4-atmos-noLSM|55cv4eg4|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
 SamudrACEv2-fto|o1a1rs0|ace-samudra-cm4|t720yuti|best_inference_ckpt|ace2-cm4-atmos-noLSM|55cv4eg4|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
 SamudrACEv2-fto|o2a1rs0|ace-samudra-cm4|widzeq0u|best_inference_ckpt|ace2-cm4-atmos-noLSM|55cv4eg4|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
-SamudrACEv2-fto|o0a2rs0|ace-samudra-cm4|bcugx12o|best_inference_ckpt|ace2-cm4-atmos-noLSM|huw1tpxt|best_inference_ckpt|train|urgent|titan|8||3|ai2/ace|seed=0|8h||
+SamudrACEv2-fto|o0a2rs0|ace-samudra-cm4|bcugx12o|best_inference_ckpt|ace2-cm4-atmos-noLSM|huw1tpxt|best_inference_ckpt|trained|urgent|titan|8||3|ai2/ace|seed=0|8h||
 SamudrACEv2-fto|o1a2rs0|ace-samudra-cm4|t720yuti|best_inference_ckpt|ace2-cm4-atmos-noLSM|huw1tpxt|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
 SamudrACEv2-fto|o2a2rs0|ace-samudra-cm4|widzeq0u|best_inference_ckpt|ace2-cm4-atmos-noLSM|huw1tpxt|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
