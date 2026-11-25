@@ -1,0 +1,3 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
+
+1deg-hybridsstdiag-randco2ft-x13-pclr-replay-jointpairs-no228urh||01M88XR6M9NDR1DYY17MC993HG|training|best_inference_ckpt|normal|--min-runtime 8h
