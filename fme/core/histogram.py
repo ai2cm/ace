@@ -1,7 +1,6 @@
-import collections
 import math
 from collections import namedtuple
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import Literal
 
 import matplotlib.figure
@@ -17,6 +16,8 @@ EPSILON = 1.0e-6
 _OVERFLOW_SCALE = 2.0**-4
 
 _Histogram = namedtuple("_Histogram", ["counts", "bin_edges"])
+
+_SOURCES: tuple[Literal["target", "prediction"], ...] = ("target", "prediction")
 
 
 def _add_trailing_slash(s):
@@ -57,17 +58,20 @@ def trim_zero_bins(
     Trim bins with zero counts from the edges of the histogram.
 
     Args:
-        counts: 1D array of counts for each bin
+        counts: array of counts for each bin, with bins as the last dimension.
+            When there are leading dimensions, only bins which have zero counts
+            across all of them are trimmed, so that the trimmed histograms
+            continue to share their bins.
         bin_edges: 1D array of bin edges
 
     Returns:
         counts, bin_edges: trimmed arrays
     """
-    mask = counts > 0
+    mask = np.any(counts.reshape(-1, counts.shape[-1]) > 0, axis=0)
     first_nonzero = np.argmax(mask)
     last_nonzero = len(mask) - np.argmax(mask[::-1])
     return (
-        counts[first_nonzero:last_nonzero],
+        counts[..., first_nonzero:last_nonzero],
         bin_edges[first_nonzero : last_nonzero + 1],
     )
 
@@ -238,60 +242,57 @@ class DynamicHistogram:
         return self.bin_edges
 
 
+def _get_nan_masks(data: TensorMapping) -> dict[str, torch.Tensor | None]:
+    # assume the final two dimensions are the spatial dimensions and the
+    # spatial pattern of NaNs is the same for all samples & time, but
+    # can vary by variable
+    ndim = next(iter(data.values())).ndim
+    index = (slice(0, 1),) * (ndim - 2) + (slice(None), slice(None))
+    return {
+        k: v[index].isnan() if torch.any(v[index].isnan()) else None
+        for k, v in data.items()
+    }
+
+
+def _select_unmasked(
+    value: torch.Tensor, nan_mask: torch.Tensor | None
+) -> torch.Tensor:
+    """
+    Flatten the values to one dimension, removing any which are masked.
+    """
+    if nan_mask is None:
+        return value.flatten()
+    mask = ~nan_mask.to(value.device).expand(*value.shape)
+    return torch.masked_select(value, mask)
+
+
 class DynamicHistogramAggregator:
     def __init__(
         self,
         n_bins: int,
         percentiles: list[float] | None = None,
-        nan_masks: Mapping[str, torch.Tensor] | None = None,
     ) -> None:
         self.n_bins = n_bins
         self.percentiles = [99.9999] if percentiles is None else percentiles
-        self.histograms: Mapping[str, DynamicHistogram] | None = None
-        self.nan_masks = nan_masks
-
-    def set_nan_masks(self, data: TensorMapping):
-        if self.nan_masks is None:
-            # assume the final two dimensions are the spatial dimensions and the
-            # spatial pattern of NaNs is the same for all samples & time, but
-            # can vary by variable
-            ndim = next(iter(data.values())).ndim
-            index = (slice(0, 1),) * (ndim - 2) + (slice(None), slice(None))
-            self.nan_masks = {
-                k: v[index].isnan() if torch.any(v[index].isnan()) else None
-                for k, v in data.items()
-            }
-
-    def _remove_nans(self, key: str, value: torch.Tensor):
-        if self.nan_masks is None:
-            raise ValueError(
-                "record_batch must be called at least once before removing NaNs"
-            )
-        nan_mask = self.nan_masks[key]
-        if nan_mask is not None:
-            mask = ~nan_mask.to(value.device).expand(*value.shape)
-            value = torch.masked_select(value, mask)
-        else:
-            value = value.flatten()
-        return value
+        self._histograms: dict[str, DynamicHistogram] | None = None
+        self._nan_masks: dict[str, torch.Tensor | None] | None = None
 
     @torch.no_grad()
     def record_batch(self, data: TensorMapping):
-        self.set_nan_masks(data)
-        if self.histograms is None:
-            self.histograms = {
-                k: DynamicHistogram(n_series=1, n_bins=self.n_bins) for k in data.keys()
+        if self._histograms is None or self._nan_masks is None:
+            self._nan_masks = _get_nan_masks(data)
+            self._histograms = {
+                k: DynamicHistogram(n_series=1, n_bins=self.n_bins) for k in data
             }
         for k in data:
             # no matter what data shape is given, combine it all into one histogram
-            value = self._remove_nans(k, data[k])
-            self.histograms[k].add([value])
+            self._histograms[k].add([_select_unmasked(data[k], self._nan_masks[k])])
 
     def get_histograms(self) -> dict[str, _Histogram]:
-        if self.histograms is None:
+        if self._histograms is None:
             raise ValueError("No data has been added to the histogram")
         return_dict: dict[str, _Histogram] = {}
-        for k, histogram in self.histograms.items():
+        for k, histogram in self._histograms.items():
             counts, bin_edges = trim_zero_bins(
                 histogram.counts[0, :], histogram.get_bin_edges()
             )
@@ -299,10 +300,10 @@ class DynamicHistogramAggregator:
         return return_dict
 
     def get_dataset(self) -> xr.Dataset:
-        if self.histograms is None:
+        if self._histograms is None:
             raise ValueError("No data has been added to the histogram")
         data = {}
-        for var_name, histogram in self.histograms.items():
+        for var_name, histogram in self._histograms.items():
             data[var_name] = xr.DataArray(
                 histogram.counts[0, :],
                 dims=("bin",),
@@ -345,8 +346,9 @@ class DynamicHistogramAggregator:
 
 
 class ComparedDynamicHistograms:
-    """Wrapper of DynamicHistogram for multiple histograms, two histograms per
-    variable plotted on the same axis.
+    """Histograms of target and prediction for multiple variables, plotted on
+    the same axis for each variable. The target and prediction histograms of
+    a variable use the same bins.
     """
 
     def __init__(
@@ -358,9 +360,8 @@ class ComparedDynamicHistograms:
         self.n_bins = n_bins
         percentiles = [99.9999] if percentiles is None else percentiles
         self.percentiles = [p for p in percentiles]
-        self.target_aggregator: DynamicHistogramAggregator | None = None
-        self.prediction_aggregator: DynamicHistogramAggregator | None = None
-        self._nan_masks: Mapping[str, torch.Tensor] | None = None
+        self._histograms: dict[str, DynamicHistogram] | None = None
+        self._nan_masks: dict[str, torch.Tensor | None] | None = None
         self._variables: set[str] = set()
         self._compute_percentile_frac = compute_percentile_frac
 
@@ -381,49 +382,42 @@ class ComparedDynamicHistograms:
                 f"current: {current_variables}"
             )
 
-    def _initialize_histogram_aggs(self, target_data: TensorMapping):
-        if self._variables is None:
-            raise RuntimeError(
-                "_check_overlapping_keys must be called to get variable set "
-                "before initializing histograms."
-            )
-        if self.target_aggregator is None:
-            self.target_aggregator = DynamicHistogramAggregator(
-                n_bins=self.n_bins, percentiles=self.percentiles
-            )
-            self.target_aggregator.set_nan_masks(target_data)
-        if self.prediction_aggregator is None:
-            self.prediction_aggregator = DynamicHistogramAggregator(
-                n_bins=self.n_bins,
-                percentiles=self.percentiles,
-                # nan_masks are defined using the target data
-                nan_masks=self.target_aggregator.nan_masks,
-            )
-
     @torch.no_grad()
     def record_batch(self, target: TensorMapping, prediction: TensorMapping):
         self._check_overlapping_keys(target, prediction)
         target = {k: v for k, v in target.items() if k in self._variables}
-        prediction = {k: v for k, v in prediction.items() if k in self._variables}
-        self._initialize_histogram_aggs(target_data=target)
-        assert self.target_aggregator is not None
-        self.target_aggregator.record_batch(target)
-        assert self.prediction_aggregator is not None
-        self.prediction_aggregator.record_batch(prediction)
+        if self._histograms is None or self._nan_masks is None:
+            # nan_masks are defined using the target data
+            self._nan_masks = _get_nan_masks(target)
+            self._histograms = {
+                k: DynamicHistogram(n_series=len(_SOURCES), n_bins=self.n_bins)
+                for k in target
+            }
+        for k in target:
+            # no matter what data shape is given, combine it all into one
+            # histogram for each of the target and prediction
+            self._histograms[k].add(
+                [
+                    _select_unmasked(target[k], self._nan_masks[k]),
+                    _select_unmasked(prediction[k], self._nan_masks[k]),
+                ]
+            )
 
     def _get_histograms(
         self,
     ) -> dict[str, dict[Literal["target", "prediction"], _Histogram]]:
-        if self.target_aggregator is None or self.prediction_aggregator is None:
+        if self._histograms is None:
             raise ValueError("No data has been added to the histogram")
-        return_dict: dict[str, dict[Literal["target", "prediction"], _Histogram]] = (
-            collections.defaultdict(dict)
-        )
-        target_histograms = self.target_aggregator.get_histograms()
-        prediction_histograms = self.prediction_aggregator.get_histograms()
-        for k in self._variables:
-            return_dict[k]["target"] = target_histograms[k]
-            return_dict[k]["prediction"] = prediction_histograms[k]
+        return_dict: dict[str, dict[Literal["target", "prediction"], _Histogram]] = {}
+        for k, histogram in self._histograms.items():
+            # trimmed together, so target and prediction keep the same bins
+            counts, bin_edges = trim_zero_bins(
+                histogram.counts, histogram.get_bin_edges()
+            )
+            return_dict[k] = {
+                source: _Histogram(counts[i_source], bin_edges)
+                for i_source, source in enumerate(_SOURCES)
+            }
         return return_dict
 
     def _plot_histogram(
@@ -485,35 +479,19 @@ class ComparedDynamicHistograms:
         return return_dict
 
     def get_dataset(self) -> xr.Dataset:
-        if self.target_aggregator is None or self.prediction_aggregator is None:
+        if self._histograms is None:
             raise ValueError("No data has been added to the histogram")
-        target_dataset = self.target_aggregator.get_dataset()
-        prediction_dataset = self.prediction_aggregator.get_dataset()
-        for missing_target_name in set(prediction_dataset.data_vars) - set(
-            target_dataset.data_vars
-        ):
-            if not missing_target_name.endswith("_bin_edges"):
-                target_dataset[missing_target_name] = xr.DataArray(
-                    np.zeros_like(prediction_dataset[missing_target_name]),
-                    dims=("bin",),
-                )
-                target_dataset[f"{missing_target_name}_bin_edges"] = prediction_dataset[
-                    f"{missing_target_name}_bin_edges"
-                ]
-        for missing_prediction_name in set(target_dataset.data_vars) - set(
-            prediction_dataset.data_vars
-        ):
-            if not missing_prediction_name.endswith("_bin_edges"):
-                prediction_dataset[missing_prediction_name] = xr.DataArray(
-                    np.zeros_like(target_dataset[missing_prediction_name]),
-                    dims=("bin",),
-                )
-                prediction_dataset[f"{missing_prediction_name}_bin_edges"] = (
-                    target_dataset[f"{missing_prediction_name}_bin_edges"]
-                )
-        ds = xr.concat([target_dataset, prediction_dataset], dim="source")
-        ds["source"] = ["target", "prediction"]
-        return ds
+        data = {}
+        for var_name, histogram in self._histograms.items():
+            data[var_name] = xr.DataArray(histogram.counts, dims=("source", "bin"))
+            # the bin edges are the same for every source, and are repeated
+            # for each source so that the dataset can also represent
+            # histograms with bins that differ by source
+            data[f"{var_name}_bin_edges"] = xr.DataArray(
+                np.stack([histogram.get_bin_edges()] * len(_SOURCES)),
+                dims=("source", "bin_edges"),
+            )
+        return xr.Dataset(data, coords={"source": list(_SOURCES)})
 
 
 class ComparedDynamicTailsHistograms(ComparedDynamicHistograms):
