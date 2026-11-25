@@ -7,8 +7,8 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # canceled (beaker 01M8A1HVVTWHYRGDWETK9Q22AZ, 2 segments done): forcing store lacked areacello, so ocean global-mean
 # diagnostics used cos(lat) weights instead of the paper evals' areacello x sea_surface_fraction.
 1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju||01M7RXG2MDBGVVTRC7XZ3FMCRJ|canceled_inf_piC200-1pct140|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/elynnwu/2026-11-24-x6-piC200-1pct140|01M7RXG2MMXQZF5ZWNR1Z9G29Q||jupiter+titan||||1|17
-# v2: same run with areacello in the forcing store (2026-11-25-x6-piC200-1pct140-forcing-v2).
-1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju|v2|01M7RXG2MDBGVVTRC7XZ3FMCRJ|run_inf_piC200-1pct140|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/elynnwu/2026-11-25-x6-piC200-1pct140|01M7RXG2MMXQZF5ZWNR1Z9G29Q||jupiter+titan||||1|17
+# v2 (beaker 01M8AA63CGN82FH86XT0MG3CJN): same run with areacello in the forcing store (2026-11-25-x6-piC200-1pct140-forcing-v2).
+1deg-hybridsstdiag-randco2ft-x6-pclr-replay-jointpairs-tb6xf0ju|v2|01M7RXG2MDBGVVTRC7XZ3FMCRJ|running_inf_piC200-1pct140|best_inference_ckpt|high|--min-runtime 8h|experiment_dir=gs://vcm-ml-experiments/elynnwu/2026-11-25-x6-piC200-1pct140|01M7RXG2MMXQZF5ZWNR1Z9G29Q||jupiter+titan||||1|17
 
 # smoke test (beaker 01M8827N7261SRF6313HR6HY82): 2 segments x 72 steps (~1 yr each) to a scratch dir. Failed: all-NaN
 # from step 1, because coupled inference never derives insolation and read the store's NaN DSWRFtoa placeholder.
