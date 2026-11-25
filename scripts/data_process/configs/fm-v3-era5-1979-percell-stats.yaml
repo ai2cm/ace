@@ -1,0 +1,39 @@
+# Per-grid-cell normalization stats for the FM v3 grid single-source
+# `era5-1979` runs (configs/experiments/2026-10-19-fm/scripts/
+# create_fm_v3_grid_jobs.py, network c1 + cellloss), over exactly their
+# training data: the v2 ERA5 training store with the
+# 1979-1993 and 1995-2008 splits (training skips 1994, a validation year). The
+# entries are those of fm-era5-1979-stats.yaml (the scalar stats of the
+# create_fm_c96amip_jobs.py fm-era5-1979 runs, whose train_loader.dataset.concat
+# the grid runs keep), read from weka as training does.
+#
+# Relative to fm-era5-1979-stats.yaml, as fm-v3-e3sm-balanced-percell-stats.yaml
+# relative to its v2 scalar stats:
+# - per_grid_cell: every file holds a mean / std per grid cell (reduced over
+#   time only) on the store's 4deg grid.
+# - scalar_variables stay scalars, copied from the fm-era5-1979 scalar stats
+#   (root from root, groups/era5 from groups/era5), so they equal the constants of
+#   the scalar-normalized fm-era5-1979 runs.
+# - pooling: timestep (the default; one source, so the same as label_equal).
+#   The one group, era5, is the training label; its files equal the root's (the
+#   c1 runs read the root only).
+per_grid_cell: true
+scalar_variables:
+- HGTsfc
+- land_fraction
+- ocean_fraction
+- sea_ice_fraction
+- global_mean_co2
+scalar_reference:
+  directory: /climate-default/agents/alexeyy/agent-alexeyy-fm-era5-1979-stats-gpu-c1ic/2026-11-18-fm-era5-1979
+dataset_pairs:
+- dataset: /climate-default/2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+  start_time: '1979-01-01'
+  end_time: '1993-12-31'
+  group: era5
+- dataset: /climate-default/2026-04-17-era5-4deg-8layer-daily-1940-2025.zarr
+  start_time: '1995-01-01'
+  end_time: '2008-12-31'
+  group: era5
+groups:
+- era5

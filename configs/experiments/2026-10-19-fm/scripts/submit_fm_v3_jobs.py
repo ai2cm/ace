@@ -46,6 +46,25 @@ unless --resubmit.
 Usage:
     python submit_fm_v3_jobs.py [--dry-run] [--only NAME ...] [--smoke]
                                 [--resubmit] [--resume-from EXPERIMENT]
+                                [--grid {v3,v3-grid-5src,v3-grid-single}]
+                                [--stats-jobs] [--record PATH]
+                                [--priority {low,normal,high}]
+
+--grid picks the run list: `v3` (default) the 18 create_fm_v3_jobs.py runs;
+`v3-grid-5src` the 21 5-source and `v3-grid-single` the 12 single-source
+runs of create_fm_v3_grid_jobs.py (wandb group ace2-fm-v3-grid-2026-11-25;
+same launch, GPUs, shared memory, clusters and priority policy: s0 high,
+s1/s2 normal). The grids are recorded in records/fm_v3_grid_jobs.json, `v3`
+in records/fm_v3_jobs.json, unless --record. --priority overrides the
+priority of every selected job.
+
+--stats-jobs submits the two per-grid-cell stats jobs the single-source grid
+needs instead (create_fm_v3_grid_jobs.STATS_JOBS: get_pooled_stats.py with
+scripts/data_process/configs/fm-v3-{c96amip,era5-1979}-percell-stats.yaml,
+then verify_percell_stats.py, on one GPU node like the fm-c96amip scalar
+stats jobs), writing to $AGENT_OUTPUT_DIR/<output name>. Each is recorded
+(job name fm-v3-<source>-percell-stats) with its `stats_dir`, and the
+`--single-source-stats` argument of create_fm_v3_grid_jobs.py is printed.
 
 --only takes job names (ace2-fm-nc-sfno-v3-...) or their unique substrings
 (e.g. c1-cellloss-s0). --smoke selects from the smoke tests (c2-cellloss,
@@ -76,9 +95,12 @@ import pathlib
 import re
 import subprocess
 import sys
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
+from typing import Any, Protocol, TypeVar
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
+import create_fm_v3_grid_jobs as grid  # noqa: E402
 from _submit_common import check_configs_at_head  # noqa: E402
 from create_fm_v3_jobs import (  # noqa: E402
     N_GPUS,
@@ -93,6 +115,18 @@ HERE = pathlib.Path(__file__).parent
 EXP_DIR = HERE.parent
 REPO_ROOT = EXP_DIR.parents[2]
 RECORD_PATH = EXP_DIR / "records" / "fm_v3_jobs.json"
+AnyRun = Run | grid.Run
+GRID_RECORD_PATH = EXP_DIR / "records" / "fm_v3_grid_jobs.json"
+# --grid: (all runs, description of a run, default record). The describe
+# functions take their own grid's runs, hence Any.
+GRIDS: dict[
+    str, tuple[Callable[[], Sequence[AnyRun]], Callable[[Any], str], pathlib.Path]
+] = {
+    "v3": (runs, describe, RECORD_PATH),
+    "v3-grid-5src": (grid.multi_source_runs, grid.describe, GRID_RECORD_PATH),
+    "v3-grid-single": (grid.single_source_runs, grid.describe, GRID_RECORD_PATH),
+}
+PRIORITIES = ("low", "normal", "high")
 
 GANTRY = "/usr/local/bin/gantry"
 BRANCH = "agent/alexeyy/exp/alexeyfm2"
@@ -136,12 +170,27 @@ LAUNCH_SCRIPT = (
     '"$1" --override "experiment_dir=$AGENT_OUTPUT_DIR"'
 )
 
+# The per-cell stats jobs (--stats-jobs): $1 the output name under
+# $AGENT_OUTPUT_DIR, $2 the stats config, $3 the training config the check
+# compares names and grids against.
+STATS_GPUS = 1
+STATS_SHARED_MEMORY = "64GiB"
+STATS_WORKERS = 32
+STATS_LAUNCH_SCRIPT = (
+    'set -euo pipefail; : "${AGENT_OUTPUT_DIR:?AGENT_OUTPUT_DIR is not set}"; '
+    'OUT="$AGENT_OUTPUT_DIR/$1"; echo "OUTPUT_DIR=$OUT"; '
+    'python scripts/data_process/get_pooled_stats.py compute "$2" "$OUT" '
+    f"--workers {STATS_WORKERS}; "
+    "python configs/experiments/2026-10-19-fm/scripts/verify_percell_stats.py "
+    '"$OUT" "$3" "$2"'
+)
+
 SUBMITTED_RE = re.compile(
     r"^Submitted (?P<name>\S+)\s+id:\s+(?P<id>\S+)\s+url:\s+(?P<url>\S+)", re.M
 )
 
 
-def priority(run: Run) -> str:
+def priority(run: AnyRun) -> str:
     return HIGH_PRIORITY if run.smoke or run.seed == SEEDS[0] else DEFAULT_PRIORITY
 
 
@@ -150,13 +199,18 @@ def image() -> str:
 
 
 def gantry_command(
-    run: Run, dry_run: bool, resume_from: str | None = None
+    run: AnyRun,
+    dry_run: bool,
+    resume_from: str | None = None,
+    *,
+    description: str,
+    job_priority: str,
 ) -> list[str]:
     config = run.path.relative_to(REPO_ROOT)
     cmd = [GANTRY, "run", "--branch", BRANCH]
     cmd += ["--name", run.job_name, "--task-name", run.job_name]
-    cmd += ["--description", describe(run)]
-    cmd += ["--beaker-image", image(), "--priority", priority(run)]
+    cmd += ["--description", description]
+    cmd += ["--beaker-image", image(), "--priority", job_priority]
     cmd += ["--min-runtime", MIN_RUNTIME]
     for cluster in CLUSTERS:
         cmd += ["--cluster", cluster]
@@ -182,6 +236,83 @@ def gantry_command(
     if resume_from is not None:
         cmd += [resume_from]
     return cmd
+
+
+def stats_gantry_command(job: grid.StatsJob, dry_run: bool) -> list[str]:
+    cmd = [GANTRY, "run", "--branch", BRANCH]
+    cmd += ["--name", job.job_name, "--task-name", job.job_name]
+    cmd += ["--description", job.description]
+    cmd += ["--beaker-image", image(), "--priority", HIGH_PRIORITY]
+    for cluster in CLUSTERS:
+        cmd += ["--cluster", cluster]
+    cmd += ["--gpus", str(STATS_GPUS), "--shared-memory", STATS_SHARED_MEMORY]
+    cmd += ["--weka", WEKA]
+    cmd += ["--system-python", "--install", "pip install --no-deps ."]
+    cmd += ["--allow-dirty"]
+    if dry_run:
+        cmd += ["--dry-run"]
+    cmd += ["--", "bash", "-c", STATS_LAUNCH_SCRIPT, "fm-v3-stats"]
+    cmd += [
+        job.output_name,
+        str(job.stats_config.relative_to(REPO_ROOT)),
+        str(job.train_config.relative_to(REPO_ROOT)),
+    ]
+    return cmd
+
+
+def submit_stats_jobs(
+    jobs: list[grid.StatsJob], dry_run: bool, resubmit: bool, record_path: pathlib.Path
+) -> None:
+    record = read_record(record_path)
+    pending = []
+    for job in jobs:
+        if job.job_name in record and not resubmit:
+            entry = record[job.job_name]
+            print(f"Skipping (recorded as {entry['experiment']}): {job.job_name}")
+        else:
+            pending.append(job)
+    if not dry_run:
+        check_configs_at_head(
+            [path for job in pending for path in (job.stats_config, job.train_config)]
+        )
+    for job in pending:
+        cmd = stats_gantry_command(job, dry_run)
+        print("Submitting:", subprocess.list2cmdline(cmd), flush=True)
+        proc = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True)
+        sys.stdout.write(proc.stdout)
+        sys.stderr.write(proc.stderr)
+        if proc.returncode != 0:
+            raise SystemExit(f"gantry exited {proc.returncode} for {job.job_name}")
+        if dry_run:
+            continue
+        match = SUBMITTED_RE.search(proc.stdout)
+        if match is None:
+            raise SystemExit(f"could not parse the gantry output for {job.job_name}")
+        assert match["name"].startswith(EXPERIMENT_PREFIX + job.job_name), match
+        record = read_record(record_path)
+        record[job.job_name] = {
+            "experiment": match["name"],
+            "id": match["id"],
+            "url": match["url"],
+            "commit": head_commit(),
+            "submitted": datetime.now(UTC).isoformat(timespec="seconds"),
+            "stats_config": str(job.stats_config.relative_to(REPO_ROOT)),
+            "stats_dir": f"{AGENT_OUTPUT_ROOT}/{match['name']}/{job.output_name}",
+        }
+        write_record(record, record_path)
+    record = read_record(record_path)
+    recorded = [
+        f"{job.source}={record[job.job_name]['stats_dir']}"
+        for job in jobs
+        if job.job_name in record
+    ]
+    if recorded:
+        print(
+            "Once these jobs succeed: python create_fm_v3_grid_jobs.py "
+            f"--single-source-stats {' '.join(recorded)}"
+        )
+    if pending and not dry_run:
+        print(f"Recorded in {record_path.relative_to(REPO_ROOT)}; commit it.")
 
 
 def resume_dir(experiment_or_dir: str) -> str:
@@ -210,19 +341,27 @@ def output_paths(experiment: str) -> dict[str, str]:
     }
 
 
-def read_record() -> dict:
-    if RECORD_PATH.exists():
-        return json.loads(RECORD_PATH.read_text())
+def read_record(path: pathlib.Path = RECORD_PATH) -> dict:
+    if path.exists():
+        return json.loads(path.read_text())
     return {}
 
 
-def write_record(record: dict) -> None:
-    RECORD_PATH.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+def write_record(record: dict, path: pathlib.Path = RECORD_PATH) -> None:
+    path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
 
 
-def select(all_runs: list[Run], only: list[str] | None) -> list[Run]:
+class _Named(Protocol):
+    @property
+    def job_name(self) -> str: ...
+
+
+NamedT = TypeVar("NamedT", bound=_Named)
+
+
+def select(all_runs: Sequence[NamedT], only: list[str] | None) -> list[NamedT]:
     if not only:
-        return all_runs
+        return list(all_runs)
     selected = []
     for token in only:
         matches = [r for r in all_runs if r.job_name == token]
@@ -259,7 +398,31 @@ def main() -> None:
     parser.add_argument(
         "--resubmit",
         action="store_true",
-        help="Submit even jobs already recorded in records/fm_v3_jobs.json.",
+        help="Submit even jobs already recorded in the record (see --record).",
+    )
+    parser.add_argument(
+        "--grid",
+        choices=list(GRIDS),
+        default="v3",
+        help="Run list: the v3 runs (default) or a create_fm_v3_grid_jobs.py grid.",
+    )
+    parser.add_argument(
+        "--stats-jobs",
+        action="store_true",
+        help="Submit the single-source grid's per-cell stats jobs instead.",
+    )
+    parser.add_argument(
+        "--record",
+        type=pathlib.Path,
+        help=(
+            "Record file (default: records/fm_v3_jobs.json for --grid v3, "
+            "records/fm_v3_grid_jobs.json for the grids and --stats-jobs)."
+        ),
+    )
+    parser.add_argument(
+        "--priority",
+        choices=PRIORITIES,
+        help="Beaker priority of every selected job (default: s0 high, else normal).",
     )
     parser.add_argument(
         "--resume-from",
@@ -271,15 +434,38 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+    all_runs, describe_run, default_record = GRIDS[args.grid]
+    if args.stats_jobs:
+        default_record = GRID_RECORD_PATH
+    record_path = (args.record or default_record).resolve()
+    if args.smoke and args.grid != "v3":
+        parser.error("--smoke is only for --grid v3")
+    if args.stats_jobs:
+        if args.smoke or args.resume_from or args.grid != "v3" or args.priority:
+            parser.error(
+                "--stats-jobs takes only --dry-run, --only, --resubmit, --record"
+            )
+        submit_stats_jobs(
+            select(grid.stats_jobs(), args.only),
+            args.dry_run,
+            args.resubmit,
+            record_path,
+        )
+        return
 
-    selected = select(smoke_runs() if args.smoke else runs(), args.only)
+    selected = select(smoke_runs() if args.smoke else all_runs(), args.only)
+    missing = [run.path.name for run in selected if not run.path.exists()]
+    if missing:
+        raise SystemExit(
+            f"Configs not generated (run create_fm_v3_grid_jobs.py): {missing}"
+        )
     resume_from = None
     if args.resume_from is not None:
         if len(selected) != 1:
             raise SystemExit("--resume-from needs exactly one run (use --only)")
         resume_from = resume_dir(args.resume_from)
         args.resubmit = True
-    record = read_record()
+    record = read_record(record_path)
     pending = []
     for run in selected:
         if run.job_name in record and not args.resubmit:
@@ -290,7 +476,14 @@ def main() -> None:
     if not args.dry_run:
         check_configs_at_head([run.path for run in pending])
     for run in pending:
-        cmd = gantry_command(run, args.dry_run, resume_from)
+        job_priority = args.priority or priority(run)
+        cmd = gantry_command(
+            run,
+            args.dry_run,
+            resume_from,
+            description=describe_run(run),
+            job_priority=job_priority,
+        )
         print("Submitting:", subprocess.list2cmdline(cmd), flush=True)
         proc = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True)
         sys.stdout.write(proc.stdout)
@@ -303,7 +496,7 @@ def main() -> None:
         if match is None:
             raise SystemExit(f"could not parse the gantry output for {run.job_name}")
         assert match["name"].startswith(EXPERIMENT_PREFIX + run.job_name), match
-        record = read_record()
+        record = read_record(record_path)
         previous_entry = record.get(run.job_name, {})
         previous = previous_entry.get("experiment")
         # Every earlier job of this run, oldest first.
@@ -322,7 +515,7 @@ def main() -> None:
             "id": match["id"],
             "url": match["url"],
             "commit": head_commit(),
-            "priority": priority(run),
+            "priority": job_priority,
             "submitted": datetime.now(UTC).isoformat(timespec="seconds"),
             "config": str(run.path.relative_to(EXP_DIR)),
             **output_paths(match["name"]),
@@ -331,9 +524,9 @@ def main() -> None:
             **({"superseded": superseded} if superseded else {}),
             **({"resumed_from": resume_from} if resume_from else {}),
         }
-        write_record(record)
+        write_record(record, record_path)
     if pending and not args.dry_run:
-        print(f"Recorded in {RECORD_PATH.relative_to(REPO_ROOT)}; commit it.")
+        print(f"Recorded in {record_path.relative_to(REPO_ROOT)}; commit it.")
 
 
 if __name__ == "__main__":

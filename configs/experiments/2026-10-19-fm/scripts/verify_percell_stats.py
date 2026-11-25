@@ -2,7 +2,9 @@
 
 Runs on beaker (the stats live on weka), after
 `get_pooled_stats.py compute scripts/data_process/configs/
-fm-v3-e3sm-balanced-percell-stats.yaml OUT`. For the pooled stats at OUT and
+fm-v3-e3sm-balanced-percell-stats.yaml OUT` (or another per-cell stats
+config, e.g. fm-v3-{c96amip,era5-1979}-percell-stats.yaml for the FM v3
+grid's single-source runs). For the pooled stats at OUT and
 each group under OUT/groups/, it checks that:
 
 - every variable of the training config's in_names and out_names is present;
@@ -12,7 +14,8 @@ each group under OUT/groups/, it checks that:
 - the per-cell horizontal coordinates equal, dim by dim in order, those of
   every store of the training config's train_loader (stores name their dims
   lat/lon or grid_yt/grid_xt; fme matches them by position);
-- the scalar-kept variables are scalars equal to the reference (v2) values;
+- the scalar-kept variables are scalars equal to the reference values;
+- each group_placeholders variable is a per-cell 0 (mean) / 1 (std);
 - the files load and build with `NormalizationConfig(per_grid_cell=True)`.
 
 It prints a summary, writes maps of the pooled per-cell mean and std of a few
@@ -256,15 +259,16 @@ def main():
             grids,
         )
 
-    e3sm = _load(args.stats_dir / "groups" / "e3sm")
-    for name in stats_config.get("group_placeholders", {}).get("e3sm", []):
-        for filename, ds in e3sm.items():
-            expected = 0.0 if filename == "centering.nc" else 1.0
-            checker.check(
-                ds[name].ndim == 2 and bool((ds[name] == expected).all()),
-                f"groups/e3sm/{filename}: {name} is not a per-cell {expected} "
-                "placeholder",
-            )
+    for group, placeholders in stats_config.get("group_placeholders", {}).items():
+        group_files = _load(args.stats_dir / "groups" / group)
+        for name in placeholders:
+            for filename, ds in group_files.items():
+                expected = 0.0 if filename == "centering.nc" else 1.0
+                checker.check(
+                    ds[name].ndim == 2 and bool((ds[name] == expected).all()),
+                    f"groups/{group}/{filename}: {name} is not a per-cell "
+                    f"{expected} placeholder",
+                )
 
     _plot(_load(args.stats_dir), args.stats_dir / "plots")
 
