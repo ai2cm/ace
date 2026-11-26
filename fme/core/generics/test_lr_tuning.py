@@ -10,7 +10,7 @@ from fme.core.device import get_device
 from fme.core.ema import EMATracker
 from fme.core.generics.data import DataLoader, GriddedDataABC
 from fme.core.generics.lr_tuning import LRTuningConfig, run_lr_tuning_trial
-from fme.core.generics.optimization import OptimizationABC
+from fme.core.generics.optimization import OptimizationABC, OptimizationModules
 from fme.core.generics.train_stepper import TrainOutputABC, TrainStepperABC
 from fme.core.optimization import Optimization, OptimizationConfig
 from fme.core.scheduler import SchedulerConfig, SequentialSchedulerConfig
@@ -114,7 +114,7 @@ class _Stepper(TrainStepperABC["None", "_BatchData", "None", "None", "_TrainOutp
         pass
 
 
-def _build_optimization(modules: torch.nn.ModuleList) -> Optimization:
+def _build_optimization(modules: OptimizationModules) -> Optimization:
     return OptimizationConfig(
         optimizer_type="Adam",
         lr=0.01,
