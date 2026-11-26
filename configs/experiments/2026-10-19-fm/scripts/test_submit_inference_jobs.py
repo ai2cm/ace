@@ -297,15 +297,41 @@ def _jobs(arch, run, ckpts=("bestinf", "lastema")):
 
 
 def test_agent_vm_job_names_fit_the_proxy():
+    all_names: list[str] = []
     for arch in [*V3_GRID_ARCHS, *V3_SINGLE_SOURCE_ARCHS]:
         for run in inference_run_names(arch):
             jobs = _jobs(arch, run)
             assert len(jobs) == 30
-            names = {job.name for job in jobs}
-            assert len(names) == 30
-            for name in names:
-                assert len(name) <= AGENT_NAME_LIMIT
-                assert name.startswith(run + "-")
+            for job in jobs:
+                assert len(job.name) <= AGENT_NAME_LIMIT == 80
+                if len(job.wandb_name) <= AGENT_NAME_LIMIT:
+                    assert job.name == job.wandb_name
+                else:
+                    assert job.name.startswith(submit.agent_run_name(run) + "-")
+            all_names += [job.name for job in jobs]
+    # Unique across every run, family and checkpoint of every v3 arch.
+    assert len(set(all_names)) == len(all_names)
+
+
+def test_agent_vm_names_of_submitted_jobs_unchanged():
+    record = submit.read_record(submit.EVAL_RECORD_PATH)
+    assert record
+    for name, entry in record.items():
+        assert submit.agent_job_name(entry["wandb_name"]) == name
+        assert entry["experiment"].startswith(_agent_vm.AGENT_PREFIX + name + "-")
+
+
+def test_agent_vm_job_name_shortens_run_then_kind():
+    run = "ace2-fm-nc-swin-v2.2-v3-fm-e3sm-temperature-c2-cellloss-s0-maskoff"
+    short_run = "ace2-fm-nc-swin-v2.2-v3-fm-e3sm-temp-c2-s0-maskoff"
+    assert submit.agent_run_name(run) == short_run
+    assert submit.agent_job_name(f"{run}-cm4xshield-lastema") == (
+        f"{short_run}-cm4xshield-lastema"
+    )
+    paper = f"{run}-era5-control-dataCO2-10yr-sstprescribed-eval-lastema"
+    assert submit.agent_job_name(paper) == f"{short_run}-era5-ctl-10yr-lastema"
+    som = f"{run}-som-abrupt-4xCO2-ens-sstslab-eval"
+    assert submit.agent_job_name(som) == f"{short_run}-som-4xCO2-ens"
 
 
 def test_agent_vm_skips_jobs_found_under_either_name(monkeypatch, tmp_path):
@@ -315,7 +341,8 @@ def test_agent_vm_skips_jobs_found_under_either_name(monkeypatch, tmp_path):
     jobs = {job.wandb_name: job for job in _jobs(arch, run)}
     long_name = f"{run}-era5-control-dataCO2-10yr-sstprescribed-eval-lastema"
     long_job = jobs[long_name]
-    assert long_job.name == f"{run}-era5-control-dataCO2-10yr-sstp-lastema"
+    short_run = submit.agent_run_name(run)
+    assert long_job.name == f"{short_run}-era5-ctl-10yr-lastema"
     from_vm = jobs[f"{run}-bestinf"]
     from_vm_failed = jobs[f"{run}-lastema"]
     elsewhere = jobs[f"{run}-cm4xshield-bestinf"]
@@ -345,7 +372,7 @@ def test_agent_vm_skips_jobs_found_under_either_name(monkeypatch, tmp_path):
     monkeypatch.setattr(_agent_vm, "beaker_listing", beaker_listing)
     existing = submit.agent_existing_jobs(list(jobs.values()), "ai2/ace")
     assert existing == {from_vm.name, long_job.name, elsewhere.name, recorded.name}
-    assert listed == [run]
+    assert sorted(listed) == sorted([run, short_run])
 
 
 def test_agent_vm_listing_at_the_cap_is_redone_per_name(monkeypatch):

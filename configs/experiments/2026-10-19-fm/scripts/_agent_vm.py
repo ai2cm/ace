@@ -37,10 +37,11 @@ BEAKER = "/usr/local/bin/beaker"
 # beaker shims).
 AGENT_VM_MARKER = pathlib.Path("/etc/agent-sandbox/proxy.toml")
 AGENT_PREFIX = "agent-alexeyy-"
-# Beaker rejects experiment names over 128 characters; the proxy adds
-# AGENT_PREFIX and a "-<4 characters>" suffix to the --name it is given.
+# The proxy rejects a --name over AGENT_NAME_LIMIT characters ("name: String
+# should have at most 80 characters"), then names the experiment
+# AGENT_PREFIX + <name> + "-<4 characters>".
 AGENT_SUFFIX_LENGTH = 4
-AGENT_NAME_LIMIT = 128 - len(AGENT_PREFIX) - 1 - AGENT_SUFFIX_LENGTH
+AGENT_NAME_LIMIT = 80
 GANTRY_LIST_LIMIT = 5000
 # The beaker shim's cap on `beaker workspace experiments --limit`.
 BEAKER_LIST_LIMIT = 100

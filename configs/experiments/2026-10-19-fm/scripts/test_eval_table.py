@@ -221,11 +221,15 @@ def test_eval_table_on_agent_vm(monkeypatch, capsys, tmp_path):
     eval_table.main()
 
     [names_by_text] = groups
-    assert set(names_by_text) == set(inference_run_names(arch))
-    assert short_paper in names_by_text[run]
+    runs = inference_run_names(arch)
+    short_runs = [submit_inference_jobs.agent_run_name(r) for r in runs]
+    assert set(names_by_text) == {*runs, *short_runs}
+    assert short_paper in names_by_text[submit_inference_jobs.agent_run_name(run)]
     out = capsys.readouterr().out
     assert "| eval | bestinf | 0 | 1 | 0 | 0 | 11 | 12 |" in out
     assert "| eval | lastema | 0 | 0 | 1 | 0 | 11 | 12 |" in out
     assert "| paper-som | lastema | 1 | 0 | 0 | 0 | 23 | 24 |" in out
     assert "| Total |  | 1 | 1 | 1 | 1 | 356 | 360 |" in out
-    assert f"{run}-cm4xshield-bestinf  E  (canceled)" in out
+    # Found under its real-gantry (full) name, listed under its VM name.
+    cm4xshield = submit_inference_jobs.agent_job_name(f"{run}-cm4xshield-bestinf")
+    assert f"{cm4xshield}  E  (canceled)" in out

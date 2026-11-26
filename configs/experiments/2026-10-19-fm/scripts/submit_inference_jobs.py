@@ -131,8 +131,9 @@ single-source archs, sfno-v3-grid, swin-v2.2-v3-grid) work, and:
 - --skip-if-in-beaker looks each job up under its VM name and its real-gantry
   name (job_name_aliases) in `gantry list --all`, the ids recorded in
   records/fm_v3_grid_eval_jobs.json (`gantry status`) and one
-  `beaker workspace experiments --text <run>` listing per training run (the
-  shim caps a listing at 100; a capped listing is redone job name by job
+  `beaker workspace experiments --text <run>` listing per training run, and
+  one per its agent_run_name for the shortened names (agent_listing_groups;
+  the shim caps a listing at 100; a capped listing is redone job name by job
   name), so jobs submitted elsewhere (e.g. the sfno-v3 cohort's) count too.
 - Each job is submitted with /usr/local/bin/gantry run (agent_gantry_command:
   supported flags only, the pushed BRANCH, --weka climate-default, the wandb
@@ -142,9 +143,14 @@ single-source archs, sfno-v3-grid, swin-v2.2-v3-grid) work, and:
   /results, and is recorded in records/fm_v3_grid_eval_jobs.json (commit
   it). The shim mounts the /climate-default folders the config names (the
   ERA5 store through its "# WEKA_MOUNT:" header). The proxy names the
-  experiment agent-alexeyy-<name>-<suffix>, so names are kept to
-  AGENT_NAME_LIMIT (109) characters: the longest paper kinds become "-sstp"
-  and "-slab" (agent_job_name; the wandb run name stays the full one).
+  experiment agent-alexeyy-<name>-<suffix> and takes a name of at most
+  AGENT_NAME_LIMIT (80) characters: a longer name gets its run shortened
+  ("-cellloss" dropped, "-temperature-"/"-balanced-" to "-temp-"/"-bal-":
+  agent_run_name) and, if still too long, its paper kind
+  ("-era5-control-dataCO2-10yr-sstprescribed-eval" to "-era5-ctl-10yr",
+  "-som-abrupt-4xCO2-ens-sstslab-eval" to "-som-4xCO2-ens"); names that fit
+  stay as they are (agent_job_name; the wandb run name stays the full one).
+  The per-run listings search for both the run and its agent_run_name.
 - --dry-run runs `gantry run --dry-run` for every job (checking flags, branch
   and mounts without sending anything) and prints the request of the first.
 As each training run finishes, submit exactly its 30 jobs (eval, cm4xshield,
@@ -357,14 +363,28 @@ BEAKER_NAME_SHORTENINGS = (
     (LONG_SOURCES_TOKEN, SHORT_SOURCES_TOKEN),
     ("-spencer-balanced-", "-spb-"),
 )
-# On an agent VM the proxy adds 19 characters to the name (AGENT_NAME_LIMIT),
-# so the v3 grid's longest paper names (up to 119 characters) are shortened
-# further, by their kind only (not the run name, which the per-run listings
-# of agent_listing_groups search for).
-AGENT_NAME_SHORTENINGS = (
-    *BEAKER_NAME_SHORTENINGS,
-    ("-sstprescribed-eval", "-sstp"),
-    ("-sstslab-eval", "-slab"),
+# On an agent VM the proxy takes a --name of at most AGENT_NAME_LIMIT (80)
+# characters, which the v3 runs' names (up to 66) leave little room in. A
+# name over the limit (only those: shorter ones stay as they are) has its run
+# shortened as a whole (agent_run_name: AGENT_RUN_SHORTENINGS) and, if still
+# over, its paper kind (AGENT_KIND_SHORTENINGS: the SST treatment follows from
+# the som/era5 family), e.g.
+#   ace2-fm-nc-swin-v2.2-v3-fm-e3sm-temperature-c2-cellloss-s0-maskoff
+#     -era5-control-dataCO2-10yr-sstprescribed-eval-lastema
+# becomes
+#   ace2-fm-nc-swin-v2.2-v3-fm-e3sm-temp-c2-s0-maskoff-era5-ctl-10yr-lastema
+# The per-run listings of agent_listing_groups search for both the run and
+# its agent_run_name.
+AGENT_RUN_SHORTENINGS = (
+    ("-cellloss-", "-"),
+    ("-temperature-", "-temp-"),
+    ("-balanced-", "-bal-"),
+)
+AGENT_KIND_SHORTENINGS = (
+    ("-sstprescribed-eval", ""),
+    ("-sstslab-eval", ""),
+    ("-control-dataCO2-", "-ctl-"),
+    ("-abrupt-4xCO2-", "-4xCO2-"),
 )
 # --ckpt value standing for every checkpoint of the arch (arch_checkpoints).
 ALL_CHECKPOINTS = "all"
@@ -416,9 +436,36 @@ def beaker_job_name(
     return short
 
 
+def _replace_all(name: str, shortenings: tuple[tuple[str, str], ...]) -> str:
+    for long_token, short_token in shortenings:
+        name = name.replace(long_token, short_token)
+    return name
+
+
+def agent_run_name(run: str) -> str:
+    """Training run `run` as it appears in the agent-VM job names that do not
+    fit AGENT_NAME_LIMIT with the full run (AGENT_RUN_SHORTENINGS).
+    """
+    return _replace_all(run, AGENT_RUN_SHORTENINGS)
+
+
 def agent_job_name(name: str) -> str:
-    """The --name of `name`'s job on an agent VM (AGENT_NAME_LIMIT)."""
-    return beaker_job_name(name, AGENT_NAME_LIMIT, AGENT_NAME_SHORTENINGS)
+    """The --name of wandb run name `name`'s job on an agent VM: `name` if it
+    fits AGENT_NAME_LIMIT, else with BEAKER_NAME_SHORTENINGS, then its
+    training run shortened (AGENT_RUN_SHORTENINGS, so the name starts with
+    agent_run_name of the run), then its paper kind (AGENT_KIND_SHORTENINGS),
+    each only while the name is still over the limit.
+    """
+    if len(name) <= AGENT_NAME_LIMIT:
+        return name
+    short = beaker_job_name(name, BEAKER_NAME_LIMIT)
+    for shortenings in (AGENT_RUN_SHORTENINGS, AGENT_KIND_SHORTENINGS):
+        if len(short) <= AGENT_NAME_LIMIT:
+            break
+        short = _replace_all(short, shortenings)
+    if len(short) > AGENT_NAME_LIMIT:
+        raise ValueError(f"job name over {AGENT_NAME_LIMIT} characters: {short}")
+    return short
 
 
 def job_name(name: str) -> str:
@@ -435,13 +482,22 @@ def job_name_aliases(name: str) -> set[str]:
 
 def agent_listing_groups(jobs: Iterable[tuple[str, str]]) -> dict[str, set[str]]:
     """Beaker listing text -> the job_name_aliases it finds, for (training
-    run, wandb run name) `jobs`: one listing per run, and one per alias that
-    does not contain its run (a run name shortened by BEAKER_NAME_SHORTENINGS).
+    run, wandb run name) `jobs`: one listing per run, one per run as
+    agent_run_name shortens it (for the aliases that carry it), and one per
+    alias that contains neither (a run name shortened by
+    BEAKER_NAME_SHORTENINGS).
     """
     groups: dict[str, set[str]] = {}
     for run, name in jobs:
+        short_run = agent_run_name(run)
         for alias in job_name_aliases(name):
-            groups.setdefault(run if run in alias else alias, set()).add(alias)
+            if run in alias:
+                text = run
+            elif short_run in alias:
+                text = short_run
+            else:
+                text = alias
+            groups.setdefault(text, set()).add(alias)
     return groups
 
 
