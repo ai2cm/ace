@@ -20,6 +20,6 @@ SamudrACEv2-onorc_a2p5muon-jointpairs|o2a0rs0|ace-samudra-cm4|bqycdnji|best_infe
 SamudrACEv2-onorc_a2p5muon-jointpairs|o0a1rs0|ace-samudra-cm4|iodsqwkh|best_inference_ckpt|ace2-cm4-atmos-noLSM|55cv4eg4|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
 SamudrACEv2-onorc_a2p5muon-jointpairs|o1a1rs0|ace-samudra-cm4|tr8oqgez|best_inference_ckpt|ace2-cm4-atmos-noLSM|55cv4eg4|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
 SamudrACEv2-onorc_a2p5muon-jointpairs|o2a1rs0|ace-samudra-cm4|bqycdnji|best_inference_ckpt|ace2-cm4-atmos-noLSM|55cv4eg4|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|ace-samudra-cm4|iodsqwkh|best_inference_ckpt|ace2-cm4-atmos-noLSM|huw1tpxt|best_inference_ckpt|train|urgent|titan|8||3|ai2/ace|seed=0|8h||
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|ace-samudra-cm4|iodsqwkh|best_inference_ckpt|ace2-cm4-atmos-noLSM|huw1tpxt|best_inference_ckpt|training|urgent|titan|8||3|ai2/ace|seed=0|8h||
 SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|ace-samudra-cm4|tr8oqgez|best_inference_ckpt|ace2-cm4-atmos-noLSM|huw1tpxt|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
 SamudrACEv2-onorc_a2p5muon-jointpairs|o2a2rs0|ace-samudra-cm4|bqycdnji|best_inference_ckpt|ace2-cm4-atmos-noLSM|huw1tpxt|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
