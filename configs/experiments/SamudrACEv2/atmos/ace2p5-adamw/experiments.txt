@@ -8,3 +8,5 @@ SamudrACEv2-ace2p5-adamw|rs1|01M858Y5TVFBMYTD18Q9RBS0JK|training|best_inference_
 SamudrACEv2-ace2p5-adamw|rs2|01M858YJRV90NJ729Y6V0MVNY3|training|best_inference_ckpt|normal|--min-runtime 8h
 
 SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|training|best_inference_ckpt|normal|--min-runtime 8h
+
+SamudrACEv2-ace2p5-adamw-ft|rs1|01M8CRFHDEWVZ7BHADASXJAV1F|training|best_inference_ckpt|normal|--min-runtime 8h
