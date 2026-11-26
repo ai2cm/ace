@@ -5,13 +5,13 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 
 # SamudrACEv2-hybridSSTdiag-fiz-norc rs0 01M8AJFN7DHNN8CYFEB2M506JE: training finished (jobs[-1] 01M8AJFNBW7HAGNS0PJQ59HHBF: exit 0); results dataset 01M8AJFN7QCDV15RSY76R2AZ74.
-SamudrACEv2-hybridSSTdiag-fiz-norc|rs0|01M8AJFN7DHNN8CYFEB2M506JE|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M8AJFN7QCDV15RSY76R2AZ74||||||1
-SamudrACEv2-hybridSSTdiag-fiz-norc|rs0|01M8AJFN7DHNN8CYFEB2M506JE|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M8AJFN7QCDV15RSY76R2AZ74||||||1
+SamudrACEv2-hybridSSTdiag-fiz-norc|rs0|01M8AJFN7DHNN8CYFEB2M506JE|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M8AJFN7QCDV15RSY76R2AZ74||||||1
+SamudrACEv2-hybridSSTdiag-fiz-norc|rs0|01M8AJFN7DHNN8CYFEB2M506JE|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M8AJFN7QCDV15RSY76R2AZ74||||||1
 
 # SamudrACEv2-hybridSSTdiag-fiz-norc rs1 01M8AJG3V6QECVDXFKMD45M8SB: training finished (jobs[-1] 01M8AJJGKG6B6MW54RKVN9ZCED: exit 0); results dataset 01M8AJJGF1E3H65K9JTNS85TWF.
-SamudrACEv2-hybridSSTdiag-fiz-norc|rs1|01M8AJG3V6QECVDXFKMD45M8SB|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M8AJJGF1E3H65K9JTNS85TWF||||||1
-SamudrACEv2-hybridSSTdiag-fiz-norc|rs1|01M8AJG3V6QECVDXFKMD45M8SB|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M8AJJGF1E3H65K9JTNS85TWF||||||1
+SamudrACEv2-hybridSSTdiag-fiz-norc|rs1|01M8AJG3V6QECVDXFKMD45M8SB|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M8AJJGF1E3H65K9JTNS85TWF||||||1
+SamudrACEv2-hybridSSTdiag-fiz-norc|rs1|01M8AJG3V6QECVDXFKMD45M8SB|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M8AJJGF1E3H65K9JTNS85TWF||||||1
 
 # SamudrACEv2-hybridSSTdiag-fiz-norc rs2 01M8AJGM5W15R0Q19Z3HGSK8EV: training finished (jobs[-1] 01M8C708GAC7469B84VNJ8H88M: exit 0); results dataset 01M8C708D2P4SAWZWPS14BFRPR.
-SamudrACEv2-hybridSSTdiag-fiz-norc|rs2|01M8AJGM5W15R0Q19Z3HGSK8EV|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M8C708D2P4SAWZWPS14BFRPR||||||1
-SamudrACEv2-hybridSSTdiag-fiz-norc|rs2|01M8AJGM5W15R0Q19Z3HGSK8EV|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M8C708D2P4SAWZWPS14BFRPR||||||1
+SamudrACEv2-hybridSSTdiag-fiz-norc|rs2|01M8AJGM5W15R0Q19Z3HGSK8EV|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||01M8C708D2P4SAWZWPS14BFRPR||||||1
+SamudrACEv2-hybridSSTdiag-fiz-norc|rs2|01M8AJGM5W15R0Q19Z3HGSK8EV|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M8C708D2P4SAWZWPS14BFRPR||||||1

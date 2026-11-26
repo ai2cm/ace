@@ -11,5 +11,5 @@ SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|ran_piC-ic0151-200yr|best_inf
 # randCO2 evals of the SamudrACEv2-ftalt o0a2rs0 atmosphere: configs/experiments/SamudrACEv2/atmos/ftalt-o0a2rs0-lifted/experiments.txt
 # --config-dir configs/experiments/SamudrACEv2/eval/coupled
 # SamudrACEv2-ftalt o0a2rs0 01M8AJ0JD76JKBRCDESPNQK9G4: training finished (jobs[-1] 01M8AJ0JHR0K0GVQ19RFRP975S: exit 0); results dataset 01M8AJ0JDSX4131K0BAS498EP1.
-SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h||01M8AJ0JDSX4131K0BAS498EP1
-SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M8AJ0JDSX4131K0BAS498EP1
+SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h||01M8AJ0JDSX4131K0BAS498EP1
+SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M8AJ0JDSX4131K0BAS498EP1

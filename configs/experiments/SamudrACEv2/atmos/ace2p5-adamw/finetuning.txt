@@ -1,6 +1,6 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
 
 # results_dataset: final (exit 0, 15-epoch) job's result of each pretrain experiment in experiments.txt.
-SamudrACEv2-ace2p5-adamw-ft|rs0|ace2-cm4-atmos-noLSM|tbo6ks7g|best_ckpt|train|urgent|b200|4||3|ai2/ace|seed=0|01M87NWCHXTJ7PNGP5EZDQWYK2|8h
-SamudrACEv2-ace2p5-adamw-ft|rs1|ace2-cm4-atmos-noLSM|31kdm60p|best_ckpt|train|urgent|b200|4||3|ai2/ace|seed=1|01M8AMGNT646A5GF8PXQV0YPSP|8h
-SamudrACEv2-ace2p5-adamw-ft|rs2|ace2-cm4-atmos-noLSM|9aselnd0|best_ckpt|train|urgent|b200|4||3|ai2/ace|seed=2|01M8AMGNP5RF2M7EE0YYPJ8WDG|8h
+SamudrACEv2-ace2p5-adamw-ft|rs0|ace2-cm4-atmos-noLSM|tbo6ks7g|best_ckpt|training|urgent|b200|4||3|ai2/ace|seed=0|01M87NWCHXTJ7PNGP5EZDQWYK2|8h
+SamudrACEv2-ace2p5-adamw-ft|rs1|ace2-cm4-atmos-noLSM|31kdm60p|best_ckpt|training|urgent|b200|4||3|ai2/ace|seed=1|01M8AMGNT646A5GF8PXQV0YPSP|8h
+SamudrACEv2-ace2p5-adamw-ft|rs2|ace2-cm4-atmos-noLSM|9aselnd0|best_ckpt|training|urgent|b200|4||3|ai2/ace|seed=2|01M8AMGNP5RF2M7EE0YYPJ8WDG|8h

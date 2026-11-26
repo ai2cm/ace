@@ -11,31 +11,31 @@ SamudrACEv2-ace2p5-muon|rs2|01M7VJ5WDN3C0QXGG322JERVPJ|training|best_inference_c
 # launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/atmos/ace2p5-muon . --config-dir configs/experiments/SamudrACEv2/eval/atmos
 # --config-dir configs/experiments/SamudrACEv2/eval/atmos
 # SamudrACEv2-ace2p5-muon-ft rs0 01M7ZY2VNAD633DDN6CMFFT46D: training finished (jobs[-1] 01M7ZY2VS4EFNDX2XFG54NFAPN: exit 0); results dataset 01M7ZY2VNQ22WM20KPCH5YAJVH.
-SamudrACEv2-ace2p5-muon-ft|rs0|01M7ZY2VNAD633DDN6CMFFT46D|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h||01M7ZY2VNQ22WM20KPCH5YAJVH
-SamudrACEv2-ace2p5-muon-ft|rs0|01M7ZY2VNAD633DDN6CMFFT46D|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M7ZY2VNQ22WM20KPCH5YAJVH
-SamudrACEv2-ace2p5-muon-ft|rs0|01M7ZY2VNAD633DDN6CMFFT46D|run_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M7ZY2VNQ22WM20KPCH5YAJVH
-SamudrACEv2-ace2p5-muon-ft|rs0|01M7ZY2VNAD633DDN6CMFFT46D|run_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M7ZY2VNQ22WM20KPCH5YAJVH
-SamudrACEv2-ace2p5-muon-ft|rs0|01M7ZY2VNAD633DDN6CMFFT46D|run_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M7ZY2VNQ22WM20KPCH5YAJVH
-SamudrACEv2-ace2p5-muon-ft|rs0|01M7ZY2VNAD633DDN6CMFFT46D|run_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M7ZY2VNQ22WM20KPCH5YAJVH
-SamudrACEv2-ace2p5-muon-ft|rs0|01M7ZY2VNAD633DDN6CMFFT46D|run_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M7ZY2VNQ22WM20KPCH5YAJVH
-SamudrACEv2-ace2p5-muon-ft|rs0|01M7ZY2VNAD633DDN6CMFFT46D|run_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M7ZY2VNQ22WM20KPCH5YAJVH
+SamudrACEv2-ace2p5-muon-ft|rs0|01M7ZY2VNAD633DDN6CMFFT46D|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h||01M7ZY2VNQ22WM20KPCH5YAJVH
+SamudrACEv2-ace2p5-muon-ft|rs0|01M7ZY2VNAD633DDN6CMFFT46D|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M7ZY2VNQ22WM20KPCH5YAJVH
+SamudrACEv2-ace2p5-muon-ft|rs0|01M7ZY2VNAD633DDN6CMFFT46D|running_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M7ZY2VNQ22WM20KPCH5YAJVH
+SamudrACEv2-ace2p5-muon-ft|rs0|01M7ZY2VNAD633DDN6CMFFT46D|running_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M7ZY2VNQ22WM20KPCH5YAJVH
+SamudrACEv2-ace2p5-muon-ft|rs0|01M7ZY2VNAD633DDN6CMFFT46D|running_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M7ZY2VNQ22WM20KPCH5YAJVH
+SamudrACEv2-ace2p5-muon-ft|rs0|01M7ZY2VNAD633DDN6CMFFT46D|running_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M7ZY2VNQ22WM20KPCH5YAJVH
+SamudrACEv2-ace2p5-muon-ft|rs0|01M7ZY2VNAD633DDN6CMFFT46D|running_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M7ZY2VNQ22WM20KPCH5YAJVH
+SamudrACEv2-ace2p5-muon-ft|rs0|01M7ZY2VNAD633DDN6CMFFT46D|running_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M7ZY2VNQ22WM20KPCH5YAJVH
 
 # SamudrACEv2-ace2p5-muon-ft rs1 01M7ZY3H5SGXBRXQYZYDVE1JQJ: training finished (jobs[-1] 01M7ZY3HB16BY896VJYE7KY7BP: exit 0); results dataset 01M7ZY3H5ZZRHJS7134R6DB9FA.
-SamudrACEv2-ace2p5-muon-ft|rs1|01M7ZY3H5SGXBRXQYZYDVE1JQJ|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h||01M7ZY3H5ZZRHJS7134R6DB9FA
-SamudrACEv2-ace2p5-muon-ft|rs1|01M7ZY3H5SGXBRXQYZYDVE1JQJ|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M7ZY3H5ZZRHJS7134R6DB9FA
-SamudrACEv2-ace2p5-muon-ft|rs1|01M7ZY3H5SGXBRXQYZYDVE1JQJ|run_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M7ZY3H5ZZRHJS7134R6DB9FA
-SamudrACEv2-ace2p5-muon-ft|rs1|01M7ZY3H5SGXBRXQYZYDVE1JQJ|run_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M7ZY3H5ZZRHJS7134R6DB9FA
-SamudrACEv2-ace2p5-muon-ft|rs1|01M7ZY3H5SGXBRXQYZYDVE1JQJ|run_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M7ZY3H5ZZRHJS7134R6DB9FA
-SamudrACEv2-ace2p5-muon-ft|rs1|01M7ZY3H5SGXBRXQYZYDVE1JQJ|run_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M7ZY3H5ZZRHJS7134R6DB9FA
-SamudrACEv2-ace2p5-muon-ft|rs1|01M7ZY3H5SGXBRXQYZYDVE1JQJ|run_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M7ZY3H5ZZRHJS7134R6DB9FA
-SamudrACEv2-ace2p5-muon-ft|rs1|01M7ZY3H5SGXBRXQYZYDVE1JQJ|run_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M7ZY3H5ZZRHJS7134R6DB9FA
+SamudrACEv2-ace2p5-muon-ft|rs1|01M7ZY3H5SGXBRXQYZYDVE1JQJ|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h||01M7ZY3H5ZZRHJS7134R6DB9FA
+SamudrACEv2-ace2p5-muon-ft|rs1|01M7ZY3H5SGXBRXQYZYDVE1JQJ|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M7ZY3H5ZZRHJS7134R6DB9FA
+SamudrACEv2-ace2p5-muon-ft|rs1|01M7ZY3H5SGXBRXQYZYDVE1JQJ|running_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M7ZY3H5ZZRHJS7134R6DB9FA
+SamudrACEv2-ace2p5-muon-ft|rs1|01M7ZY3H5SGXBRXQYZYDVE1JQJ|running_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M7ZY3H5ZZRHJS7134R6DB9FA
+SamudrACEv2-ace2p5-muon-ft|rs1|01M7ZY3H5SGXBRXQYZYDVE1JQJ|running_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M7ZY3H5ZZRHJS7134R6DB9FA
+SamudrACEv2-ace2p5-muon-ft|rs1|01M7ZY3H5SGXBRXQYZYDVE1JQJ|running_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M7ZY3H5ZZRHJS7134R6DB9FA
+SamudrACEv2-ace2p5-muon-ft|rs1|01M7ZY3H5SGXBRXQYZYDVE1JQJ|running_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M7ZY3H5ZZRHJS7134R6DB9FA
+SamudrACEv2-ace2p5-muon-ft|rs1|01M7ZY3H5SGXBRXQYZYDVE1JQJ|running_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M7ZY3H5ZZRHJS7134R6DB9FA
 
 # SamudrACEv2-ace2p5-muon-ft rs2 01M7ZY44ZPBJRR35PSVBFBJCVT: training finished (jobs[-1] 01M7ZY4537YX8KPDVSV5RQCFJC: exit 0); results dataset 01M7ZY44ZW2X3VSG3SSSPG59W7.
-SamudrACEv2-ace2p5-muon-ft|rs2|01M7ZY44ZPBJRR35PSVBFBJCVT|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h||01M7ZY44ZW2X3VSG3SSSPG59W7
-SamudrACEv2-ace2p5-muon-ft|rs2|01M7ZY44ZPBJRR35PSVBFBJCVT|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M7ZY44ZW2X3VSG3SSSPG59W7
-SamudrACEv2-ace2p5-muon-ft|rs2|01M7ZY44ZPBJRR35PSVBFBJCVT|run_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M7ZY44ZW2X3VSG3SSSPG59W7
-SamudrACEv2-ace2p5-muon-ft|rs2|01M7ZY44ZPBJRR35PSVBFBJCVT|run_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M7ZY44ZW2X3VSG3SSSPG59W7
-SamudrACEv2-ace2p5-muon-ft|rs2|01M7ZY44ZPBJRR35PSVBFBJCVT|run_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M7ZY44ZW2X3VSG3SSSPG59W7
-SamudrACEv2-ace2p5-muon-ft|rs2|01M7ZY44ZPBJRR35PSVBFBJCVT|run_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M7ZY44ZW2X3VSG3SSSPG59W7
-SamudrACEv2-ace2p5-muon-ft|rs2|01M7ZY44ZPBJRR35PSVBFBJCVT|run_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M7ZY44ZW2X3VSG3SSSPG59W7
-SamudrACEv2-ace2p5-muon-ft|rs2|01M7ZY44ZPBJRR35PSVBFBJCVT|run_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M7ZY44ZW2X3VSG3SSSPG59W7
+SamudrACEv2-ace2p5-muon-ft|rs2|01M7ZY44ZPBJRR35PSVBFBJCVT|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h||01M7ZY44ZW2X3VSG3SSSPG59W7
+SamudrACEv2-ace2p5-muon-ft|rs2|01M7ZY44ZPBJRR35PSVBFBJCVT|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M7ZY44ZW2X3VSG3SSSPG59W7
+SamudrACEv2-ace2p5-muon-ft|rs2|01M7ZY44ZPBJRR35PSVBFBJCVT|running_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M7ZY44ZW2X3VSG3SSSPG59W7
+SamudrACEv2-ace2p5-muon-ft|rs2|01M7ZY44ZPBJRR35PSVBFBJCVT|running_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M7ZY44ZW2X3VSG3SSSPG59W7
+SamudrACEv2-ace2p5-muon-ft|rs2|01M7ZY44ZPBJRR35PSVBFBJCVT|running_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M7ZY44ZW2X3VSG3SSSPG59W7
+SamudrACEv2-ace2p5-muon-ft|rs2|01M7ZY44ZPBJRR35PSVBFBJCVT|running_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M7ZY44ZW2X3VSG3SSSPG59W7
+SamudrACEv2-ace2p5-muon-ft|rs2|01M7ZY44ZPBJRR35PSVBFBJCVT|running_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M7ZY44ZW2X3VSG3SSSPG59W7
+SamudrACEv2-ace2p5-muon-ft|rs2|01M7ZY44ZPBJRR35PSVBFBJCVT|running_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M7ZY44ZW2X3VSG3SSSPG59W7
