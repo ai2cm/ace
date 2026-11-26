@@ -33,6 +33,23 @@
     "wandb_group": "ace2-fm-cm4xshield-eval-v3-era5-1979-2026-11-25",
     "wandb_name": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-cm4-1pct-bestinf"
   },
+  "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-cm4-1pct-lastema": {
+    "arch": "swin-v2.2-v3-era5-1979",
+    "checkpoint": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-s7ph/training_checkpoints/ema_ckpt_0120.tar",
+    "ckpt": "lastema",
+    "commit": "82586349ee06eddb7a213b9c05b1d70e6e3f47c5",
+    "config": "ace-eval-suite-config-4deg-cm4-1pct-v2.yaml",
+    "dataset_label": "era5",
+    "experiment": "agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-cm4-1pct-lastema-oo1c",
+    "family": "cm4-1pct",
+    "id": "01M8CC671RK4MMY55KDG3WXEZY",
+    "priority": "normal",
+    "run": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff",
+    "submitted": "2026-11-26T16:49:30+00:00",
+    "url": "https://beaker.org/ex/01M8CC671RK4MMY55KDG3WXEZY",
+    "wandb_group": "ace2-fm-cm4xshield-eval-lastema-v3-era5-1979-2026-11-25",
+    "wandb_name": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-cm4-1pct-lastema"
+  },
   "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-cm4xshield-bestinf": {
     "arch": "swin-v2.2-v3-era5-1979",
     "checkpoint": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-s7ph/training_checkpoints/best_inference_ckpt.tar",
@@ -49,6 +66,40 @@
     "url": "https://beaker.org/ex/01M8CB4GYMFMJ4BY7KVJN0K4JS",
     "wandb_group": "ace2-fm-cm4xshield-eval-v3-era5-1979-2026-11-25",
     "wandb_name": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-cm4xshield-bestinf"
+  },
+  "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-cm4xshield-lastema": {
+    "arch": "swin-v2.2-v3-era5-1979",
+    "checkpoint": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-s7ph/training_checkpoints/ema_ckpt_0120.tar",
+    "ckpt": "lastema",
+    "commit": "82586349ee06eddb7a213b9c05b1d70e6e3f47c5",
+    "config": "ace-eval-suite-config-4deg-cm4-xshield-v2.yaml",
+    "dataset_label": "era5",
+    "experiment": "agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-cm4xshield-lastema-139g",
+    "family": "cm4xshield",
+    "id": "01M8CC62MWDRY7VNM01RSTT84V",
+    "priority": "normal",
+    "run": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff",
+    "submitted": "2026-11-26T16:49:25+00:00",
+    "url": "https://beaker.org/ex/01M8CC62MWDRY7VNM01RSTT84V",
+    "wandb_group": "ace2-fm-cm4xshield-eval-lastema-v3-era5-1979-2026-11-25",
+    "wandb_name": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-cm4xshield-lastema"
+  },
+  "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-lastema": {
+    "arch": "swin-v2.2-v3-era5-1979",
+    "checkpoint": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-s7ph/training_checkpoints/ema_ckpt_0120.tar",
+    "ckpt": "lastema",
+    "commit": "82586349ee06eddb7a213b9c05b1d70e6e3f47c5",
+    "config": "ace-eval-suite-config-4deg-2026-06-26-windows.yaml",
+    "dataset_label": "era5",
+    "experiment": "agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-lastema-pes8",
+    "family": "eval",
+    "id": "01M8CC601H77TZEQE9SQM19F4Z",
+    "priority": "normal",
+    "run": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff",
+    "submitted": "2026-11-26T16:49:22+00:00",
+    "url": "https://beaker.org/ex/01M8CC601H77TZEQE9SQM19F4Z",
+    "wandb_group": "ace2-fm-eval-lastema-v3-era5-1979-2026-11-25",
+    "wandb_name": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-lastema"
   },
   "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-c96-p0k": {
     "arch": "swin-v2.2-v3-era5-1979",
@@ -67,6 +118,23 @@
     "wandb_group": "ace2-fm-sst-perts-v3-era5-1979-2026-11-25",
     "wandb_name": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-c96-p0k"
   },
+  "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-c96-p0k-lastema": {
+    "arch": "swin-v2.2-v3-era5-1979",
+    "checkpoint": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-s7ph/training_checkpoints/ema_ckpt_0120.tar",
+    "ckpt": "lastema",
+    "commit": "82586349ee06eddb7a213b9c05b1d70e6e3f47c5",
+    "config": "ace-inference-sst-config-4deg-c96-c96-p0k.yaml",
+    "dataset_label": "era5",
+    "experiment": "agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-c96-p0k-lastema-j6t0",
+    "family": "sst",
+    "id": "01M8CC6J9DJNAQSSBRWNR71TPR",
+    "priority": "normal",
+    "run": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff",
+    "submitted": "2026-11-26T16:49:41+00:00",
+    "url": "https://beaker.org/ex/01M8CC6J9DJNAQSSBRWNR71TPR",
+    "wandb_group": "ace2-fm-sst-perts-lastema-v3-era5-1979-2026-11-25",
+    "wandb_name": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-c96-p0k-lastema"
+  },
   "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-c96-p2k": {
     "arch": "swin-v2.2-v3-era5-1979",
     "checkpoint": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-s7ph/training_checkpoints/best_inference_ckpt.tar",
@@ -83,6 +151,23 @@
     "url": "https://beaker.org/ex/01M8CB516QXGYRVQN7GNRKA7BK",
     "wandb_group": "ace2-fm-sst-perts-v3-era5-1979-2026-11-25",
     "wandb_name": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-c96-p2k"
+  },
+  "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-c96-p2k-lastema": {
+    "arch": "swin-v2.2-v3-era5-1979",
+    "checkpoint": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-s7ph/training_checkpoints/ema_ckpt_0120.tar",
+    "ckpt": "lastema",
+    "commit": "82586349ee06eddb7a213b9c05b1d70e6e3f47c5",
+    "config": "ace-inference-sst-config-4deg-c96-c96-p2k.yaml",
+    "dataset_label": "era5",
+    "experiment": "agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-c96-p2k-lastema-pix9",
+    "family": "sst",
+    "id": "01M8CC6N0FSW1JRXT3V3PVJ9ZV",
+    "priority": "normal",
+    "run": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff",
+    "submitted": "2026-11-26T16:49:44+00:00",
+    "url": "https://beaker.org/ex/01M8CC6N0FSW1JRXT3V3PVJ9ZV",
+    "wandb_group": "ace2-fm-sst-perts-lastema-v3-era5-1979-2026-11-25",
+    "wandb_name": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-c96-p2k-lastema"
   },
   "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-c96-p4k": {
     "arch": "swin-v2.2-v3-era5-1979",
@@ -101,6 +186,23 @@
     "wandb_group": "ace2-fm-sst-perts-v3-era5-1979-2026-11-25",
     "wandb_name": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-c96-p4k"
   },
+  "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-c96-p4k-lastema": {
+    "arch": "swin-v2.2-v3-era5-1979",
+    "checkpoint": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-s7ph/training_checkpoints/ema_ckpt_0120.tar",
+    "ckpt": "lastema",
+    "commit": "82586349ee06eddb7a213b9c05b1d70e6e3f47c5",
+    "config": "ace-inference-sst-config-4deg-c96-c96-p4k.yaml",
+    "dataset_label": "era5",
+    "experiment": "agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-c96-p4k-lastema-d0b3",
+    "family": "sst",
+    "id": "01M8CC6QNZG4WFJR51MR08WN4V",
+    "priority": "normal",
+    "run": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff",
+    "submitted": "2026-11-26T16:49:46+00:00",
+    "url": "https://beaker.org/ex/01M8CC6QNZG4WFJR51MR08WN4V",
+    "wandb_group": "ace2-fm-sst-perts-lastema-v3-era5-1979-2026-11-25",
+    "wandb_name": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-c96-p4k-lastema"
+  },
   "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-era5-p0k": {
     "arch": "swin-v2.2-v3-era5-1979",
     "checkpoint": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-s7ph/training_checkpoints/best_inference_ckpt.tar",
@@ -117,6 +219,23 @@
     "url": "https://beaker.org/ex/01M8CB4PGH9AADK4491X0B5D70",
     "wandb_group": "ace2-fm-sst-perts-v3-era5-1979-2026-11-25",
     "wandb_name": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-era5-p0k"
+  },
+  "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-era5-p0k-lastema": {
+    "arch": "swin-v2.2-v3-era5-1979",
+    "checkpoint": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-s7ph/training_checkpoints/ema_ckpt_0120.tar",
+    "ckpt": "lastema",
+    "commit": "82586349ee06eddb7a213b9c05b1d70e6e3f47c5",
+    "config": "ace-inference-sst-config-4deg-era5-era5-p0k.yaml",
+    "dataset_label": "era5",
+    "experiment": "agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-era5-p0k-lastema-m1f0",
+    "family": "sst",
+    "id": "01M8CC6A31R0DSH2K9T1TPWWG1",
+    "priority": "normal",
+    "run": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff",
+    "submitted": "2026-11-26T16:49:33+00:00",
+    "url": "https://beaker.org/ex/01M8CC6A31R0DSH2K9T1TPWWG1",
+    "wandb_group": "ace2-fm-sst-perts-lastema-v3-era5-1979-2026-11-25",
+    "wandb_name": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-era5-p0k-lastema"
   },
   "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-era5-p2k": {
     "arch": "swin-v2.2-v3-era5-1979",
@@ -135,6 +254,23 @@
     "wandb_group": "ace2-fm-sst-perts-v3-era5-1979-2026-11-25",
     "wandb_name": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-era5-p2k"
   },
+  "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-era5-p2k-lastema": {
+    "arch": "swin-v2.2-v3-era5-1979",
+    "checkpoint": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-s7ph/training_checkpoints/ema_ckpt_0120.tar",
+    "ckpt": "lastema",
+    "commit": "82586349ee06eddb7a213b9c05b1d70e6e3f47c5",
+    "config": "ace-inference-sst-config-4deg-era5-era5-p2k.yaml",
+    "dataset_label": "era5",
+    "experiment": "agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-era5-p2k-lastema-0oy7",
+    "family": "sst",
+    "id": "01M8CC6CTCWMJKD49V7VM0479S",
+    "priority": "normal",
+    "run": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff",
+    "submitted": "2026-11-26T16:49:35+00:00",
+    "url": "https://beaker.org/ex/01M8CC6CTCWMJKD49V7VM0479S",
+    "wandb_group": "ace2-fm-sst-perts-lastema-v3-era5-1979-2026-11-25",
+    "wandb_name": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-era5-p2k-lastema"
+  },
   "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-era5-p4k": {
     "arch": "swin-v2.2-v3-era5-1979",
     "checkpoint": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-s7ph/training_checkpoints/best_inference_ckpt.tar",
@@ -151,5 +287,22 @@
     "url": "https://beaker.org/ex/01M8CB4VWAJG12Y9MC5Y1SK9RS",
     "wandb_group": "ace2-fm-sst-perts-v3-era5-1979-2026-11-25",
     "wandb_name": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-era5-p4k"
+  },
+  "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-era5-p4k-lastema": {
+    "arch": "swin-v2.2-v3-era5-1979",
+    "checkpoint": "/climate-default/agents/alexeyy/agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-s7ph/training_checkpoints/ema_ckpt_0120.tar",
+    "ckpt": "lastema",
+    "commit": "82586349ee06eddb7a213b9c05b1d70e6e3f47c5",
+    "config": "ace-inference-sst-config-4deg-era5-era5-p4k.yaml",
+    "dataset_label": "era5",
+    "experiment": "agent-alexeyy-ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-era5-p4k-lastema-hjia",
+    "family": "sst",
+    "id": "01M8CC6FH9JHR98T6X1ZX803KJ",
+    "priority": "normal",
+    "run": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff",
+    "submitted": "2026-11-26T16:49:38+00:00",
+    "url": "https://beaker.org/ex/01M8CC6FH9JHR98T6X1ZX803KJ",
+    "wandb_group": "ace2-fm-sst-perts-lastema-v3-era5-1979-2026-11-25",
+    "wandb_name": "ace2-fm-nc-swin-v2.2-v3-fm-era5-1979-c1-cellloss-s0-maskoff-sst-era5-p4k-lastema"
   }
 }

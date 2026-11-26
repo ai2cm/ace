@@ -148,8 +148,9 @@ single-source archs, sfno-v3-grid, swin-v2.2-v3-grid) work, and:
   ("-cellloss" dropped, "-temperature-"/"-balanced-" to "-temp-"/"-bal-":
   agent_run_name) and, if still too long, its paper kind
   ("-era5-control-dataCO2-10yr-sstprescribed-eval" to "-era5-ctl-10yr",
-  "-som-abrupt-4xCO2-ens-sstslab-eval" to "-som-4xCO2-ens"); names that fit
-  stay as they are (agent_job_name; the wandb run name stays the full one).
+  "-som-abrupt-4xCO2-ens-sstslab-eval" to "-som-4xco2-ens"), all lowercase
+  since the proxy lowercases experiment names; names that fit stay as they
+  are (agent_job_name; the wandb run name stays the full one).
   The per-run listings search for both the run and its agent_run_name.
 - --dry-run runs `gantry run --dry-run` for every job (checking flags, branch
   and mounts without sending anything) and prints the request of the first.
@@ -374,7 +375,8 @@ BEAKER_NAME_SHORTENINGS = (
 # becomes
 #   ace2-fm-nc-swin-v2.2-v3-fm-e3sm-temp-c2-s0-maskoff-era5-ctl-10yr-lastema
 # The per-run listings of agent_listing_groups search for both the run and
-# its agent_run_name.
+# its agent_run_name. A shortened name is lowercased: the proxy lowercases
+# experiment names, and the submitted name must match it.
 AGENT_RUN_SHORTENINGS = (
     ("-cellloss-", "-"),
     ("-temperature-", "-temp-"),
@@ -384,7 +386,7 @@ AGENT_KIND_SHORTENINGS = (
     ("-sstprescribed-eval", ""),
     ("-sstslab-eval", ""),
     ("-control-dataCO2-", "-ctl-"),
-    ("-abrupt-4xCO2-", "-4xCO2-"),
+    ("-abrupt-4xCO2-", "-4xco2-"),
 )
 # --ckpt value standing for every checkpoint of the arch (arch_checkpoints).
 ALL_CHECKPOINTS = "all"
@@ -454,7 +456,8 @@ def agent_job_name(name: str) -> str:
     fits AGENT_NAME_LIMIT, else with BEAKER_NAME_SHORTENINGS, then its
     training run shortened (AGENT_RUN_SHORTENINGS, so the name starts with
     agent_run_name of the run), then its paper kind (AGENT_KIND_SHORTENINGS),
-    each only while the name is still over the limit.
+    each only while the name is still over the limit, lowercased (the proxy
+    lowercases experiment names).
     """
     if len(name) <= AGENT_NAME_LIMIT:
         return name
@@ -465,7 +468,7 @@ def agent_job_name(name: str) -> str:
         short = _replace_all(short, shortenings)
     if len(short) > AGENT_NAME_LIMIT:
         raise ValueError(f"job name over {AGENT_NAME_LIMIT} characters: {short}")
-    return short
+    return short.lower()
 
 
 def job_name(name: str) -> str:

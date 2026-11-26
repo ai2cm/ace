@@ -308,6 +308,8 @@ def test_agent_vm_job_names_fit_the_proxy():
                     assert job.name == job.wandb_name
                 else:
                     assert job.name.startswith(submit.agent_run_name(run) + "-")
+                    # The proxy lowercases experiment names.
+                    assert job.name == job.name.lower()
             all_names += [job.name for job in jobs]
     # Unique across every run, family and checkpoint of every v3 arch.
     assert len(set(all_names)) == len(all_names)
@@ -331,7 +333,7 @@ def test_agent_vm_job_name_shortens_run_then_kind():
     paper = f"{run}-era5-control-dataCO2-10yr-sstprescribed-eval-lastema"
     assert submit.agent_job_name(paper) == f"{short_run}-era5-ctl-10yr-lastema"
     som = f"{run}-som-abrupt-4xCO2-ens-sstslab-eval"
-    assert submit.agent_job_name(som) == f"{short_run}-som-4xCO2-ens"
+    assert submit.agent_job_name(som) == f"{short_run}-som-4xco2-ens"
 
 
 def test_agent_vm_skips_jobs_found_under_either_name(monkeypatch, tmp_path):
