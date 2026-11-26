@@ -17,9 +17,9 @@ SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|running_piC-ic0151-200yr|be
 # The lift flag applies to every run_ row in this file: launch only while no coupled row is run_.
 # launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/coupled/fto-ftalt . --config-dir configs/experiments/SamudrACEv2/eval/atmos --lift-coupled-atmosphere
 # --config-dir configs/experiments/SamudrACEv2/eval/atmos
-SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|run_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M8AJ0JDSX4131K0BAS498EP1
-SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|run_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M8AJ0JDSX4131K0BAS498EP1
-SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|run_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M8AJ0JDSX4131K0BAS498EP1
-SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|run_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M8AJ0JDSX4131K0BAS498EP1
-SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|run_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M8AJ0JDSX4131K0BAS498EP1
-SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|run_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M8AJ0JDSX4131K0BAS498EP1
+SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|running_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M8AJ0JDSX4131K0BAS498EP1
+SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|running_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M8AJ0JDSX4131K0BAS498EP1
+SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|running_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M8AJ0JDSX4131K0BAS498EP1
+SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|running_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M8AJ0JDSX4131K0BAS498EP1
+SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|running_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M8AJ0JDSX4131K0BAS498EP1
+SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|running_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M8AJ0JDSX4131K0BAS498EP1
