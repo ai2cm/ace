@@ -6,9 +6,9 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # with no path component starting with "coupled", and applies to every row of the file.
 # launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/atmos/fto-o0a2rs0-lifted . --config-dir configs/experiments/SamudrACEv2/eval/atmos --lift-coupled-atmosphere
 # --config-dir configs/experiments/SamudrACEv2/eval/atmos
-SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|running_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM
-SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|running_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM
-SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|running_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM
-SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|running_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM
-SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|running_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM
-SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|running_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM
+SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|ran_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM
+SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|ran_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM
+SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|ran_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM
+SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|ran_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM
+SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|ran_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM
+SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|ran_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M85PVVQZV5Q18J5XZXJF5WFM

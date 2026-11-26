@@ -5,15 +5,15 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 # SamudrACEv2-hybridSSTdiag-fiz-adamw rs0 01M8596C468AFQ7Z7J5JZ7195C: training finished (jobs[-1] 01M88GNXJK0Y7RZSPTED5S1HRQ: exit 0); results dataset 01M88GNXENERD26JESJ7CVWENS.
 # training row: SamudrACEv2-hybridSSTdiag-fiz-adamw|rs0|01M8596C468AFQ7Z7J5JZ7195C|training|best_inference_ckpt|normal|--min-runtime 8h
-SamudrACEv2-hybridSSTdiag-fiz-adamw|rs0|01M8596C468AFQ7Z7J5JZ7195C|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M88GNXENERD26JESJ7CVWENS
-SamudrACEv2-hybridSSTdiag-fiz-adamw|rs0|01M8596C468AFQ7Z7J5JZ7195C|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M88GNXENERD26JESJ7CVWENS
+SamudrACEv2-hybridSSTdiag-fiz-adamw|rs0|01M8596C468AFQ7Z7J5JZ7195C|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M88GNXENERD26JESJ7CVWENS
+SamudrACEv2-hybridSSTdiag-fiz-adamw|rs0|01M8596C468AFQ7Z7J5JZ7195C|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M88GNXENERD26JESJ7CVWENS
 
 # SamudrACEv2-hybridSSTdiag-fiz-adamw rs1 01M8596TKN9X4J764G4QKRCTCT: training finished (jobs[-1] 01M88WT46X7DQ9ZPDAZGPHK6EJ: exit 0); results dataset 01M88WT430CTBAX62SR9FYDH6E.
 # training row: SamudrACEv2-hybridSSTdiag-fiz-adamw|rs1|01M8596TKN9X4J764G4QKRCTCT|training|best_inference_ckpt|normal|--min-runtime 8h
-SamudrACEv2-hybridSSTdiag-fiz-adamw|rs1|01M8596TKN9X4J764G4QKRCTCT|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M88WT430CTBAX62SR9FYDH6E
-SamudrACEv2-hybridSSTdiag-fiz-adamw|rs1|01M8596TKN9X4J764G4QKRCTCT|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M88WT430CTBAX62SR9FYDH6E
+SamudrACEv2-hybridSSTdiag-fiz-adamw|rs1|01M8596TKN9X4J764G4QKRCTCT|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M88WT430CTBAX62SR9FYDH6E
+SamudrACEv2-hybridSSTdiag-fiz-adamw|rs1|01M8596TKN9X4J764G4QKRCTCT|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M88WT430CTBAX62SR9FYDH6E
 
 # SamudrACEv2-hybridSSTdiag-fiz-adamw rs2 01M85977NE60WVY5K48AKC2VN5: training finished (jobs[-1] 01M88HRVSWFR5SSHSVS7TFMPK7: exit 0); results dataset 01M88HRVPNXAW44F40PE082QPM.
 # training row: SamudrACEv2-hybridSSTdiag-fiz-adamw|rs2|01M85977NE60WVY5K48AKC2VN5|training|best_inference_ckpt|normal|--min-runtime 8h
-SamudrACEv2-hybridSSTdiag-fiz-adamw|rs2|01M85977NE60WVY5K48AKC2VN5|running_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M88HRVPNXAW44F40PE082QPM
-SamudrACEv2-hybridSSTdiag-fiz-adamw|rs2|01M85977NE60WVY5K48AKC2VN5|running_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M88HRVPNXAW44F40PE082QPM
+SamudrACEv2-hybridSSTdiag-fiz-adamw|rs2|01M85977NE60WVY5K48AKC2VN5|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||01M88HRVPNXAW44F40PE082QPM
+SamudrACEv2-hybridSSTdiag-fiz-adamw|rs2|01M85977NE60WVY5K48AKC2VN5|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||01M88HRVPNXAW44F40PE082QPM

@@ -2,14 +2,14 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 # --config-dir configs/experiments/SamudrACEv2/eval/ocean
 
-SamudrACEv2-hybridSSTdiag-fiz-Tref-neg2-w1|rs0|01M7VNVHM680KXCKF7W3C51SM1|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||||||||1
-SamudrACEv2-hybridSSTdiag-fiz-Tref-neg2-w1|rs0|01M7VNVHM680KXCKF7W3C51SM1|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg2-w1|rs0|01M7VNVHM680KXCKF7W3C51SM1|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg2-w1|rs0|01M7VNVHM680KXCKF7W3C51SM1|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||||||||1
 
-SamudrACEv2-hybridSSTdiag-fiz-Tref-neg32-w1|rs0|01M7VNVW7MZFVB4SW82K913QZN|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||||||||1
-SamudrACEv2-hybridSSTdiag-fiz-Tref-neg32-w1|rs0|01M7VNVW7MZFVB4SW82K913QZN|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg32-w1|rs0|01M7VNVW7MZFVB4SW82K913QZN|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg32-w1|rs0|01M7VNVW7MZFVB4SW82K913QZN|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||||||||1
 
-SamudrACEv2-hybridSSTdiag-fiz-Tref-neg273-w1|rs0|01M7VNW7ZPCHY3YW3XV7SRXZ23|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||||||||1
-SamudrACEv2-hybridSSTdiag-fiz-Tref-neg273-w1|rs0|01M7VNW7ZPCHY3YW3XV7SRXZ23|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg273-w1|rs0|01M7VNW7ZPCHY3YW3XV7SRXZ23|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg273-w1|rs0|01M7VNW7ZPCHY3YW3XV7SRXZ23|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||||||||1
 
-SamudrACEv2-hybridSSTdiag-fiz-Tref-neg273-wlearned|rs0|01M7VNWMAWD98C9NK7SHA29X20|run_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||||||||1
-SamudrACEv2-hybridSSTdiag-fiz-Tref-neg273-wlearned|rs0|01M7VNWMAWD98C9NK7SHA29X20|run_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg273-wlearned|rs0|01M7VNWMAWD98C9NK7SHA29X20|ran_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 1h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-Tref-neg273-wlearned|rs0|01M7VNWMAWD98C9NK7SHA29X20|ran_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 2h||||||||1
