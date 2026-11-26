@@ -1,2 +1,5 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
 
+
+SamudrACEv2-hybridSSTdiag-fiz-norc|rs0|01M8AJFN7DHNN8CYFEB2M506JE|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-norc|rs0|01M8AJFN7DHNN8CYFEB2M506JE|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
