@@ -119,6 +119,47 @@ sfno, nc-swin-v2.1 for swin-v2.2), each on the eval suite of its old -bestinf
 job, so their last-epoch EMA scores cover the same entries as their
 best-inference ones.
 
+On an agent VM (_agent_vm: /etc/agent-sandbox/proxy.toml exists; `beaker`
+is a read-only shim and `gantry` submits through the Beaker proxy) only the
+archs with Weka checkpoints (WEKA_RECORDS: sfno-v3, the v2 and v3
+single-source archs, sfno-v3-grid, swin-v2.2-v3-grid) work, and:
+- A training run counts as finished when `gantry status` of its recorded
+  experiment id (else `beaker experiment get`, for experiments gantry does
+  not know) says succeeded with exit code 0: the experiment-level status,
+  i.e. that of its latest job, so a preempted and resumed run counts only
+  once its final job succeeded.
+- --skip-if-in-beaker looks each job up under its VM name and its real-gantry
+  name (job_name_aliases) in `gantry list --all`, the ids recorded in
+  records/fm_v3_grid_eval_jobs.json (`gantry status`) and one
+  `beaker workspace experiments --text <run>` listing per training run (the
+  shim caps a listing at 100; a capped listing is redone job name by job
+  name), so jobs submitted elsewhere (e.g. the sfno-v3 cohort's) count too.
+- Each job is submitted with /usr/local/bin/gantry run (agent_gantry_command:
+  supported flags only, the pushed BRANCH, --weka climate-default, the wandb
+  key from --env-secret WANDB_API_KEY=wandb-api-key-ai2cm-sa), runs the
+  checkpoint from its /climate-default/agents/alexeyy/... path (passed as
+  --checkpoint-path / checkpoint_path override, no dataset mount), writes to
+  /results, and is recorded in records/fm_v3_grid_eval_jobs.json (commit
+  it). The shim mounts the /climate-default folders the config names (the
+  ERA5 store through its "# WEKA_MOUNT:" header). The proxy names the
+  experiment agent-alexeyy-<name>-<suffix>, so names are kept to
+  AGENT_NAME_LIMIT (109) characters: the longest paper kinds become "-sstp"
+  and "-slab" (agent_job_name; the wandb run name stays the full one).
+- --dry-run runs `gantry run --dry-run` for every job (checking flags, branch
+  and mounts without sending anything) and prints the request of the first.
+As each training run finishes, submit exactly its 30 jobs (eval, cm4xshield,
+cm4-1pct, sst x 6, paper-som x 2, paper-era5 x 4, at bestinf and lastema):
+
+    cd configs/experiments/2026-10-19-fm && PYTHONPATH=<repo root> \
+        python scripts/submit_inference_jobs.py --arch sfno-v3-grid \
+        --run <run> --family eval cm4xshield cm4-1pct sst paper-som \
+        paper-era5 --ckpt bestinf lastema --skip-if-in-beaker \
+        --beaker-priority normal
+
+(a run still training is listed as skipped and nothing is submitted; the same
+for swin-v2.2-v3-grid and the four single-source archs). Status:
+`python scripts/eval_table.py --arch <arch>`.
+
 Gantry clones the repository at HEAD, so the configs must be committed and
 pushed before a real submission; this is checked unless --dry-run is given.
 Every config a submission uses is validated against this checkout's fme
@@ -152,8 +193,21 @@ import pathlib
 import subprocess
 import sys
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from typing import NamedTuple
 
+from _agent_vm import (
+    AGENT_NAME_LIMIT,
+    AGENT_PREFIX,
+    GANTRY,
+    LOOKUP_THREADS,
+    exists,
+    experiment_job,
+    find_experiments,
+    on_agent_vm,
+    training_status,
+)
 from _beaker_listing import (
     DEFAULT_TEXT,
     OK,
@@ -203,6 +257,18 @@ from generate_inference_configs import (
 )
 from submit_fm_c96amip_jobs import RECORD_PATH as C96AMIP_RECORD_PATH
 from submit_fm_jobs import WANDB_PREFIX, add_default_beaker_args
+from submit_fm_v3_jobs import (
+    BRANCH,
+    REPO_ROOT,
+    SUBMITTED_RE,
+    WANDB_SECRET,
+    WANDB_USERNAME,
+    WEKA,
+    head_commit,
+    image,
+    read_record,
+    write_record,
+)
 
 HERE = pathlib.Path(__file__).parent
 EXP_DIR = HERE.parent  # experiment root (configs, records); scripts live in scripts/
@@ -217,6 +283,12 @@ WEKA_RECORDS = {
     **dict.fromkeys(V3_GRID_ARCHS, (V3_GRID_RECORD_PATH, V3_RECORD_PATH)),
     **dict.fromkeys(V3_SINGLE_SOURCE_ARCHS, (V3_GRID_RECORD_PATH,)),
 }
+# Agent VM (_agent_vm): every inference job submitted through the gantry shim,
+# Beaker job name -> experiment, id, url, commit, run, family, checkpoint, ...
+EVAL_RECORD_PATH = EXP_DIR / "records" / "fm_v3_grid_eval_jobs.json"
+VM_PRIORITIES = ("low", "normal", "high")
+VM_MIN_RUNTIME = "4h"
+VM_SHARED_MEMORY = "50GiB"
 
 WANDB_GROUPS = {
     "eval": "ace2-fm-eval-2026-10-19",
@@ -285,6 +357,15 @@ BEAKER_NAME_SHORTENINGS = (
     (LONG_SOURCES_TOKEN, SHORT_SOURCES_TOKEN),
     ("-spencer-balanced-", "-spb-"),
 )
+# On an agent VM the proxy adds 19 characters to the name (AGENT_NAME_LIMIT),
+# so the v3 grid's longest paper names (up to 119 characters) are shortened
+# further, by their kind only (not the run name, which the per-run listings
+# of agent_listing_groups search for).
+AGENT_NAME_SHORTENINGS = (
+    *BEAKER_NAME_SHORTENINGS,
+    ("-sstprescribed-eval", "-sstp"),
+    ("-sstslab-eval", "-slab"),
+)
 # --ckpt value standing for every checkpoint of the arch (arch_checkpoints).
 ALL_CHECKPOINTS = "all"
 EVAL_SUITE_NAME_SUFFIXES = {
@@ -295,13 +376,15 @@ EVAL_SUITE_NAME_SUFFIXES = {
 
 
 class Job(NamedTuple):
-    name: str  # Beaker experiment name
+    name: str  # Beaker experiment name (the --name given to gantry)
     family: str
     config: str  # filename in inference_configs/
     dataset_id: str
     wandb_group: str
     wandb_name: str
     checkpoint: str  # path on Weka or inside the training result dataset
+    run: str = ""  # training run
+    ckpt: str = ""  # --ckpt choice
 
 
 class TrainingOutput(NamedTuple):
@@ -314,19 +397,52 @@ class TrainingOutput(NamedTuple):
         return checkpoint_path(ckpt, arch)
 
 
-def beaker_job_name(name: str) -> str:
-    """`name`, or, if over BEAKER_NAME_LIMIT, `name` with the tokens of
-    BEAKER_NAME_SHORTENINGS replaced one after the other until it fits (the
-    wandb run name stays `name`).
+def beaker_job_name(
+    name: str,
+    limit: int = BEAKER_NAME_LIMIT,
+    shortenings: tuple[tuple[str, str], ...] = BEAKER_NAME_SHORTENINGS,
+) -> str:
+    """`name`, or, if over `limit`, `name` with the tokens of `shortenings`
+    replaced one after the other until it fits (the wandb run name stays
+    `name`).
     """
     short = name
-    for long_token, short_token in BEAKER_NAME_SHORTENINGS:
-        if len(short) <= BEAKER_NAME_LIMIT:
+    for long_token, short_token in shortenings:
+        if len(short) <= limit:
             break
         short = short.replace(long_token, short_token, 1)
-    if len(short) > BEAKER_NAME_LIMIT:
-        raise ValueError(f"job name over {BEAKER_NAME_LIMIT} characters: {short}")
+    if len(short) > limit:
+        raise ValueError(f"job name over {limit} characters: {short}")
     return short
+
+
+def agent_job_name(name: str) -> str:
+    """The --name of `name`'s job on an agent VM (AGENT_NAME_LIMIT)."""
+    return beaker_job_name(name, AGENT_NAME_LIMIT, AGENT_NAME_SHORTENINGS)
+
+
+def job_name(name: str) -> str:
+    """The Beaker job name of wandb run name `name` on this machine."""
+    return agent_job_name(name) if on_agent_vm() else beaker_job_name(name)
+
+
+def job_name_aliases(name: str) -> set[str]:
+    """Every Beaker job name `name`'s job may have been submitted under: on an
+    agent VM or with the real gantry.
+    """
+    return {agent_job_name(name), beaker_job_name(name)}
+
+
+def agent_listing_groups(jobs: Iterable[tuple[str, str]]) -> dict[str, set[str]]:
+    """Beaker listing text -> the job_name_aliases it finds, for (training
+    run, wandb run name) `jobs`: one listing per run, and one per alias that
+    does not contain its run (a run name shortened by BEAKER_NAME_SHORTENINGS).
+    """
+    groups: dict[str, set[str]] = {}
+    for run, name in jobs:
+        for alias in job_name_aliases(name):
+            groups.setdefault(run if run in alias else alias, set()).add(alias)
+    return groups
 
 
 def family_jobs(
@@ -461,9 +577,8 @@ def _resolve_weka_runs(
         if record_path.exists():
             records.update(json.loads(record_path.read_text()))
     record_names = " / ".join(path.name for path in record_paths)
-    text = listing_text(arch)
-    print(f"Listing experiments in {workspace} matching {text}...")
-    by_id = {exp["id"]: exp for exp in list_experiments(workspace, text)}
+    ids = [records[run]["id"] for run in runs if run in records]
+    statuses = _recorded_statuses(ids, workspace, arch)
     ready = {}
     skipped = {}
     for run in runs:
@@ -472,10 +587,10 @@ def _resolve_weka_runs(
             skipped[run] = f"not in {record_names}"
             continue
         exp_id = record["id"]
-        if exp_id not in by_id:
+        if exp_id not in statuses:
             skipped[run] = f"recorded Beaker experiment {exp_id} not found"
             continue
-        status = experiment_status(by_id[exp_id])
+        status = statuses[exp_id]
         if status != OK:
             skipped[run] = f"Beaker status {status} ({exp_id})"
             continue
@@ -489,6 +604,150 @@ def _resolve_weka_runs(
             },
         )
     return ready, skipped
+
+
+def _recorded_statuses(ids: list[str], workspace: str, arch: str) -> dict[str, str]:
+    """Experiment id -> status (_beaker_listing) of each of `ids` found. On an
+    agent VM, from `gantry status` per id (else `beaker experiment get`):
+    the experiment-level status, ok only if its latest job exited 0
+    (_agent_vm.training_status). Elsewhere, from one listing of the arch.
+    """
+    if on_agent_vm():
+        print(f"Looking up {len(ids)} recorded experiment(s) with gantry status...")
+        with ThreadPoolExecutor(LOOKUP_THREADS) as ex:
+            jobs = dict(zip(ids, ex.map(experiment_job, ids)))
+        return {i: training_status(job) for i, job in jobs.items() if job is not None}
+    text = listing_text(arch)
+    print(f"Listing experiments in {workspace} matching {text}...")
+    return {
+        exp["id"]: experiment_status(exp) for exp in list_experiments(workspace, text)
+    }
+
+
+def agent_existing_jobs(jobs: list[Job], workspace: str) -> set[str]:
+    """Names of `jobs` already succeeded, running or queued in Beaker, seen
+    from an agent VM: under either of their job_name_aliases, in
+    `gantry list --all`, EVAL_RECORD_PATH's ids (`gantry status`) or one
+    beaker shim listing per training run (_agent_vm.find_experiments).
+    """
+    if not jobs:
+        return set()
+    aliases = {job.name: job_name_aliases(job.wandb_name) for job in jobs}
+    groups = agent_listing_groups((job.run, job.wandb_name) for job in jobs)
+    recorded = {n: e["id"] for n, e in read_record(EVAL_RECORD_PATH).items()}
+    print(
+        f"Looking up {len(jobs)} job(s) in gantry list, {EVAL_RECORD_PATH.name} "
+        f"and {len(groups)} beaker listing(s) in {workspace}..."
+    )
+    found = find_experiments(groups, recorded, workspace)
+    return {
+        name
+        for name, names in aliases.items()
+        if exists(job for alias in names for job in found.get(alias, ()))
+    }
+
+
+def agent_gantry_command(
+    job: Job,
+    dataset_label: str | None,
+    priority: str,
+    clusters: list[str],
+    dry_run: bool,
+) -> list[str]:
+    """The gantry shim command of one inference job on an agent VM: as
+    run-ace-inference-job.sh for a Weka checkpoint, with only flags the proxy
+    supports (no --workspace, --budget or --dataset-secret: the proxy sets the
+    first two, and the configs read no GCS data), on the pushed BRANCH. The
+    checkpoint is passed as an override of its /climate-default path, so the
+    shim mounts the agent's own folder and the data folders the config names.
+    Outputs go to /results (the configs' experiment_dir).
+    """
+    config = str((INFERENCE_CONFIGS_DIR / job.config).relative_to(REPO_ROOT))
+    mode = MODES[job.family]
+    if mode == "suite":
+        script = str((HERE / "run_eval_suite.py").relative_to(REPO_ROOT))
+        command = ["python", "-I", script, config, "--checkpoint-path", job.checkpoint]
+        if dataset_label is not None:
+            command += ["--dataset-label", dataset_label]
+    else:
+        command = ["python", "-I", "-m", f"fme.ace.{mode}", config]
+        command += ["--override", f"checkpoint_path={job.checkpoint}"]
+        if dataset_label is not None:
+            command += [f"labels=[{dataset_label}]"]
+    cmd = [GANTRY, "run", "--branch", BRANCH]
+    cmd += ["--name", job.name, "--task-name", job.name]
+    cmd += ["--description", f"Run ACE FM {mode} on a Weka checkpoint"]
+    cmd += ["--beaker-image", image(), "--priority", priority]
+    cmd += ["--min-runtime", VM_MIN_RUNTIME]
+    for cluster in clusters:
+        cmd += ["--cluster", cluster]
+    env = {
+        "WANDB_USERNAME": WANDB_USERNAME,
+        "WANDB_NAME": job.wandb_name,
+        "WANDB_JOB_TYPE": "inference",
+        "WANDB_RUN_GROUP": job.wandb_group,
+        "WANDB_PROJECT": WANDB_PROJECT,
+    }
+    for key, value in env.items():
+        cmd += ["--env", f"{key}={value}"]
+    cmd += ["--env-secret", WANDB_SECRET]
+    cmd += ["--gpus", "1", "--shared-memory", VM_SHARED_MEMORY]
+    cmd += ["--weka", WEKA]
+    cmd += ["--system-python", "--install", "pip install --no-deps ."]
+    # Jobs run the pushed commit; uncommitted edits in this worktree do not
+    # reach them (check_configs_at_head covers the configs).
+    cmd += ["--allow-dirty"]
+    if dry_run:
+        cmd += ["--dry-run"]
+    return [*cmd, "--", *command]
+
+
+def submit_agent_job(
+    job: Job,
+    arch: str,
+    dataset_label: str | None,
+    args: argparse.Namespace,
+    show_request: bool = True,
+) -> None:
+    """Submit (or, with --dry-run, have the shim print) one job through the
+    gantry shim, and record a submission in EVAL_RECORD_PATH.
+    """
+    cmd = agent_gantry_command(
+        job, dataset_label, args.beaker_priority, args.beaker_cluster, args.dry_run
+    )
+    print("Submitting:", subprocess.list2cmdline(cmd), flush=True)
+    proc = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True)
+    # A dry run's request (JSON) is printed for the first job only.
+    if not args.dry_run or proc.returncode != 0 or show_request:
+        sys.stdout.write(proc.stdout)
+    sys.stderr.write(proc.stderr)
+    if proc.returncode != 0:
+        raise SystemExit(f"gantry exited {proc.returncode} for {job.name}")
+    if args.dry_run:
+        return
+    match = SUBMITTED_RE.search(proc.stdout)
+    if match is None:
+        raise SystemExit(f"could not parse the gantry output for {job.name}")
+    assert match["name"].startswith(AGENT_PREFIX + job.name), match
+    record = read_record(EVAL_RECORD_PATH)
+    record[job.name] = {
+        "experiment": match["name"],
+        "id": match["id"],
+        "url": match["url"],
+        "commit": head_commit(),
+        "priority": args.beaker_priority,
+        "submitted": datetime.now(UTC).isoformat(timespec="seconds"),
+        "arch": arch,
+        "run": job.run,
+        "family": job.family,
+        "ckpt": job.ckpt,
+        "config": job.config,
+        "checkpoint": job.checkpoint,
+        "wandb_name": job.wandb_name,
+        "wandb_group": job.wandb_group,
+        **({"dataset_label": dataset_label} if dataset_label is not None else {}),
+    }
+    write_record(record, EVAL_RECORD_PATH)
 
 
 def validate_configs(
@@ -607,6 +866,15 @@ def main() -> None:
     # Same Beaker defaults as the training submitter (submit_fm_jobs.py).
     add_default_beaker_args(parser)
     args = parser.parse_args()
+    agent_vm = on_agent_vm()
+    if agent_vm and args.arch not in WEKA_RECORDS:
+        parser.error(
+            f"{args.arch} reads its checkpoints from Beaker result datasets, which "
+            "the agent VM's beaker shim cannot list; on an agent VM only the archs "
+            f"with Weka checkpoints work: {', '.join(WEKA_RECORDS)}"
+        )
+    if agent_vm and args.beaker_priority not in VM_PRIORITIES:
+        parser.error(f"--beaker-priority must be one of {VM_PRIORITIES} on an agent VM")
     if args.arch in WEKA_RECORDS and args.use_map:
         records = " / ".join(path.name for path in WEKA_RECORDS[args.arch])
         parser.error(f"{args.arch} uses {records} for checkpoints")
@@ -640,13 +908,15 @@ def main() -> None:
 
     jobs = [
         Job(
-            beaker_job_name(name),
+            job_name(name),
             family,
             config,
             ready[run].dataset_id,
             wandb_groups(ckpt, args.arch)[family],
             name,
             ready[run].checkpoint(ckpt, args.arch),
+            run,
+            ckpt,
         )
         for ckpt, families in ckpt_families.items()
         for family, run, name, config in select_jobs(
@@ -671,6 +941,8 @@ def main() -> None:
                 wandb_groups(ckpt, args.arch)["eval"],
                 f"{run}{suffix}",
                 checkpoint_path(ckpt, args.arch),
+                run,
+                ckpt,
             )
             for run, (dataset, config) in sorted(OLD_RUNS[args.arch].items())
         ]
@@ -680,7 +952,15 @@ def main() -> None:
             raise SystemExit(f"--job-name not among the selected jobs: {unknown}")
         jobs = [job for job in jobs if job.name in args.job_name]
     jobs = drop_jobs_in_beaker(
-        jobs, lambda job: job.name, args, [listing_text(args.arch)]
+        jobs,
+        lambda job: job.name,
+        args,
+        [listing_text(args.arch)],
+        existing=(
+            (lambda: agent_existing_jobs(jobs, args.beaker_workspace))
+            if agent_vm
+            else None
+        ),
     )
     if not jobs:
         print("Nothing to submit.")
@@ -703,7 +983,10 @@ def main() -> None:
     )
     validate_configs(needed, dataset_label)
 
-    for job in jobs:
+    for i, job in enumerate(jobs):
+        if agent_vm:
+            submit_agent_job(job, args.arch, dataset_label, args, show_request=i == 0)
+            continue
         submit_job(
             RUN_SCRIPT,
             [
@@ -734,6 +1017,8 @@ def main() -> None:
         print(f"wandb group ({family}): {group}")
     longest = max(jobs, key=lambda job: len(job.name))
     print(f"Longest job name ({len(longest.name)} chars): {longest.name}")
+    if agent_vm and not args.dry_run:
+        print(f"Recorded in {EVAL_RECORD_PATH.relative_to(REPO_ROOT)}; commit it.")
 
 
 if __name__ == "__main__":

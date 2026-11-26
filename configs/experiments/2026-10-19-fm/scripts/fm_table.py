@@ -15,10 +15,11 @@ Two backends:
 - beaker (where the real `beaker` CLI is on PATH): one `beaker workspace
   experiments` listing per row prefix (_beaker_listing) and `beaker job logs`
   of every job (preemption retry) of each experiment, as before.
-- gantry (agent VMs, recognized by AGENT_VM_MARKER; their `beaker` is a
-  read-only shim whose listings are capped at 100 experiments, in another
-  format, and which has no `beaker job logs`): the gantry shim
-  (/usr/local/bin/gantry), which sees only jobs submitted from this VM. Job
+- gantry (agent VMs, recognized by _agent_vm.AGENT_VM_MARKER; their `beaker`
+  is a read-only shim whose listings are capped at 100 experiments, in
+  another format, and which has no `beaker job logs`): the gantry shim
+  (/usr/local/bin/gantry; helpers in _agent_vm.py), which sees only jobs
+  submitted from this VM. Job
   name -> Beaker id comes from the submit scripts' RECORDS
   (records/fm_c96amip_jobs.json, fm_v3_grid_jobs.json, fm_v3_jobs.json; a
   recorded id `gantry list` does not show is looked up with `gantry status`),
@@ -87,6 +88,13 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from _agent_vm import AGENT_PREFIX, GANTRY_RUNNING, GantryJob, on_agent_vm  # noqa: E402
+from _agent_vm import gantry as _gantry  # noqa: E402
+from _agent_vm import gantry_job as _gantry_job  # noqa: E402
+from _agent_vm import gantry_list as _gantry_list  # noqa: E402
+from _agent_vm import gantry_started as _gantry_started  # noqa: E402
+from _agent_vm import gantry_status as _gantry_status  # noqa: E402
+from _agent_vm import job_name_of as _job_name_of  # noqa: E402
 from _beaker_listing import (  # noqa: E402
     OK,
     NamedExperiment,
@@ -113,13 +121,6 @@ from submit_fm_c96amip_jobs import RECORD_PATH as C96AMIP_RECORD  # noqa: E402
 
 # The submit scripts' records, each naming the latest submission of its jobs.
 RECORDS = (C96AMIP_RECORD, V3_GRID_RECORD_PATH, V3_RECORD_PATH)
-GANTRY = "/usr/local/bin/gantry"
-# Present on agent VMs only (the Beaker proxy's config, read by the gantry and
-# beaker shims): there `beaker` is the read-only shim, so the gantry backend
-# is used.
-AGENT_VM_MARKER = pathlib.Path("/etc/agent-sandbox/proxy.toml")
-AGENT_PREFIX = "agent-alexeyy-"
-GANTRY_LIST_LIMIT = 500
 # W&B (gantry backend): the runs' project, and where the jobs write
 # ($AGENT_OUTPUT_DIR = AGENT_OUTPUT_ROOT/<experiment>, the runs'
 # config.experiment_dir).
@@ -479,87 +480,6 @@ def beaker_backend(rows: list[Row]) -> tuple[dict[str, Tracked], dict[str, Progr
 
 # --- gantry backend --------------------------------------------------------------
 
-# gantry list statuses -> the beaker backend's statuses (anything else counts
-# as Failed / Other).
-GANTRY_DONE = {"succeeded", "success", "completed", "finished", "ok", "done"}
-GANTRY_RUNNING = {"running", "started", "initializing", "executing"}
-GANTRY_QUEUED = {"queued", "pending", "submitted", "scheduled", "created", "waiting"}
-GANTRY_LIST_RE = re.compile(r"^(?P<id>\S+)\s+(?P<status>\S+)\s+(?P<rest>.*)$")
-
-
-@dataclass
-class GantryJob:
-    id: str
-    status: str
-    created: str
-    name: str
-
-
-def _gantry(*args: str) -> str:
-    proc = subprocess.run([GANTRY, *args], capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise RuntimeError(f"gantry {' '.join(args)} failed: {proc.stderr.strip()}")
-    return proc.stdout
-
-
-def _gantry_list() -> list[GantryJob]:
-    """`gantry list --all`: `<id>  <status>  [<priority>]  <created>  <name>`
-    per line.
-    """
-    jobs = []
-    out = _gantry("list", "--all", "--limit", str(GANTRY_LIST_LIMIT))
-    for line in out.splitlines():
-        match = GANTRY_LIST_RE.match(line.strip())
-        if match is None or line.startswith("no jobs"):
-            continue
-        rest = match["rest"].split()
-        name = rest[-1]
-        created = rest[-2] if len(rest) > 1 else ""
-        jobs.append(GantryJob(match["id"], match["status"].lower(), created, name))
-    return jobs
-
-
-def _gantry_job(job_id: str) -> GantryJob | None:
-    """A job `gantry list` did not show, from `gantry status`; None if gantry
-    does not know it.
-    """
-    try:
-        status = json.loads(_gantry("status", job_id))
-    except RuntimeError:
-        return None
-    return GantryJob(
-        status["id"],
-        (status.get("status") or "").lower(),
-        status.get("created") or "",
-        status.get("name") or "",
-    )
-
-
-def _gantry_started(job: GantryJob) -> bool:
-    """Whether `gantry status` gives the job a start time."""
-    return bool(json.loads(_gantry("status", job.id)).get("started"))
-
-
-def _job_name_of(experiment: str, names: set[str]) -> str | None:
-    """The tracked job name of an experiment agent-alexeyy-<name>-<suffix>."""
-    if not experiment.startswith(AGENT_PREFIX):
-        return None
-    body = experiment.removeprefix(AGENT_PREFIX)
-    if body in names:
-        return body
-    stem, sep, suffix = body.rpartition("-")
-    return stem if sep and stem in names and suffix else None
-
-
-def _gantry_status(status: str) -> tuple[str, bool]:
-    if status in GANTRY_DONE:
-        return OK, False
-    if status in GANTRY_RUNNING:
-        return "running", False
-    if status in GANTRY_QUEUED:
-        return "running", True
-    return status or "unknown", False
-
 
 def _split_runs(log: str) -> list[str]:
     """One experiment's log split into its runs (preemption retries), each
@@ -730,7 +650,7 @@ def gantry_backend(rows: list[Row]) -> tuple[dict[str, Tracked], dict[str, Progr
 
 
 def main() -> None:
-    use_beaker = shutil.which("beaker") is not None and not AGENT_VM_MARKER.exists()
+    use_beaker = shutil.which("beaker") is not None and not on_agent_vm()
     rows = ROWS
     if use_beaker:
         tracked, prog = beaker_backend(rows)

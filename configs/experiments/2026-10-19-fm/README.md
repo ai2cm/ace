@@ -11,7 +11,7 @@ Scripts resolve paths from their own location, so they can be run from anywhere.
 | `inference_configs/` | Generated inference / eval-suite configs (`generate_inference_configs.py`). |
 | `inference_sources/` | Inputs read by `generate_inference_configs.py`. |
 | `jeremy_configs/` | Reference training configs. |
-| `records/` | Script-written state: `wandb_to_beaker_map.json`, `anneal_soups.json`. |
+| `records/` | Script-written state: `wandb_to_beaker_map.json`, `anneal_soups.json`, the agent VM's training and inference submissions (`fm_*_jobs.json`, `fm_v3_grid_eval_jobs.json`). |
 | `docs/PRs.md` | PRs merged into this branch. |
 | `scripts/` | All scripts, listed below. |
 
@@ -40,6 +40,9 @@ Inference and evaluation:
 - long fine-tune evals (`--arch sfno-v2-ft-e32`, `sfno-v2-ft-e128`, `swin-v2.2-v2-ft-e32`, `swin-v2.2-v2-ft-e128`: 9 runs each, `run_configs/ft-e32/` and `run_configs/ft-e128/`). The same commands with these archs: the `eval` family at bestinf, lastema (`ema_ckpt_0032` / `ema_ckpt_0128`) and `ema2`, `ema4`, `ema8`, `ema16` (e32) or `ema8`, `ema16`, `ema32`, `ema64` (e128), 6 jobs per run, 54 per arch:
   `python scripts/submit_inference_jobs.py --arch sfno-v2-ft-e32 --family eval --ckpt all --skip-if-in-beaker`
   Status: `python scripts/eval_table.py --arch sfno-v2-ft-e32 --family eval`.
+- On an agent VM (no real `beaker` CLI; `gantry` and a read-only `beaker` are shims to the Beaker proxy), `submit_inference_jobs.py` and `eval_table.py` switch to the shims (`scripts/_agent_vm.py`, shared with `fm_table.py`) for the archs with Weka checkpoints (sfno-v3, the v3 grid's sfno-v3-grid / swin-v2.2-v3-grid and its single-source archs, the v2 single-source archs). A run counts as finished when `gantry status` of its recorded id says succeeded (exit 0); existing jobs are found in `gantry list --all`, `records/fm_v3_grid_eval_jobs.json` and per-run `beaker workspace experiments --text` listings, under the VM name (`agent-alexeyy-<name>-<suffix>`) or the real-gantry one. Jobs go through `gantry run` with the pushed branch, `--weka climate-default`, the checkpoint's Weka path as an override, and are recorded in `records/fm_v3_grid_eval_jobs.json` (commit it). As each training run finishes, submit exactly its 30 jobs (a run still training is skipped):
+  `cd configs/experiments/2026-10-19-fm && PYTHONPATH=<repo root> python scripts/submit_inference_jobs.py --arch sfno-v3-grid --run <run> --family eval cm4xshield cm4-1pct sst paper-som paper-era5 --ckpt bestinf lastema --skip-if-in-beaker --beaker-priority normal`
+  Add `--dry-run` to check every `gantry run` with the shim first. Status: `python scripts/eval_table.py --arch sfno-v3-grid`.
 - `run_anneal_postprocess.sh`: runs `update_beaker_map.py`, `make_soup_checkpoints.py`, `submit_anneal_eval_jobs.py`.
 - `anneal_eval_status.py`: anneal eval progress table.
 
@@ -48,4 +51,4 @@ Status and diagnostics:
 - `fm_table.py`: per-architecture progress table (`/fm-job-watch`).
 - `diagnose_dataset_properties.py`: diagnoses `DatasetProperties.update` warnings.
 
-Shared helpers: `_beaker_listing.py`, `_submit_common.py`, `_inference_common.py`, `_version_select.py`.
+Shared helpers: `_beaker_listing.py`, `_agent_vm.py` (gantry / beaker shims on agent VMs), `_submit_common.py`, `_inference_common.py`, `_version_select.py`.

@@ -33,9 +33,20 @@ Usage:
 import argparse
 import pathlib
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from typing import NamedTuple
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from _agent_vm import (  # noqa: E402
+    GANTRY_RUNNING,
+    LOOKUP_THREADS,
+    find_experiments,
+    gantry_started,
+    gantry_status,
+    newest,
+    on_agent_vm,
+)
 from _beaker_listing import OK, RUNNING  # noqa: E402
 from _inference_common import (  # noqa: E402
     ARCHS,
@@ -50,8 +61,12 @@ from _inference_common import (  # noqa: E402
 )
 from fm_table import _print_table, _queued, newest_by_name  # noqa: E402
 from generate_inference_configs import FAMILIES  # noqa: E402
+from submit_fm_v3_jobs import read_record  # noqa: E402
 from submit_inference_jobs import (  # noqa: E402
-    beaker_job_name,
+    EVAL_RECORD_PATH,
+    agent_listing_groups,
+    job_name,
+    job_name_aliases,
     listing_text,
     select_jobs,
 )
@@ -78,20 +93,33 @@ COLUMNS = (
 )
 
 
+class ExpectedJob(NamedTuple):
+    family: str
+    ckpt: str
+    name: str  # Beaker job name on this machine (submit_inference_jobs.job_name)
+    run: str
+    wandb_name: str
+
+
+class JobState(NamedTuple):
+    status: str
+    queued: bool
+    id: str
+
+
 def expected_jobs(
     arch: str, ckpts: list[str], families: list[str] | None = None
-) -> list[tuple[str, str, str]]:
-    """(family, ckpt, Beaker job name) of every job submit_inference_jobs.py
-    submits for `arch` in `families` (default all) at each of `ckpts`, over
-    all of its inference runs; a family has jobs only at its own checkpoints
-    (arch_checkpoints).
+) -> list[ExpectedJob]:
+    """Every job submit_inference_jobs.py submits for `arch` in `families`
+    (default all) at each of `ckpts`, over all of its inference runs; a family
+    has jobs only at its own checkpoints (arch_checkpoints).
     """
     runs = inference_run_names(arch)
     selected = FAMILIES if families is None else families
     return [
-        (family, ckpt, beaker_job_name(name))
+        ExpectedJob(family, ckpt, job_name(name), run, name)
         for ckpt in ckpts
-        for family, _, name, _ in select_jobs(
+        for family, run, name, _ in select_jobs(
             [f for f in selected if ckpt in arch_checkpoints(arch, f)],
             runs,
             ckpt,
@@ -155,43 +183,86 @@ def _report(
     ckpts = ckpt_args or list(
         dict.fromkeys(ckpt for arch in arches for ckpt in arch_checkpoints(arch))
     )
-    jobs = []
-    by_name = {}
-    for arch in arches:
-        arch_jobs = expected_jobs(arch, ckpts, families)
-        jobs.extend(arch_jobs)
-        by_name.update(
-            newest_by_name(listing_text(arch), {name for _, _, name in arch_jobs})
-        )
+    by_arch = {arch: expected_jobs(arch, ckpts, families) for arch in arches}
+    jobs = [job for arch_jobs in by_arch.values() for job in arch_jobs]
+    states = _agent_states(jobs) if on_agent_vm() else _beaker_states(by_arch)
     status = {
-        name: (
-            (by_name[name].status, _queued(by_name[name]))
-            if name in by_name
-            else (MISSING, False)
-        )
-        for _, _, name in jobs
+        job.name: (states[job.name][:2] if job.name in states else (MISSING, False))
+        for job in jobs
     }
     rows = []
     for ckpt in ckpts:
         for family in families:
-            cell = [status[n] for f, c, n in jobs if f == family and c == ckpt]
+            cell = [
+                status[j.name] for j in jobs if j.family == family and j.ckpt == ckpt
+            ]
             if cell:
                 rows.append((family, ckpt, *_counts(cell)))
-    rows.append(("Total", "", *_counts([status[n] for _, _, n in jobs])))
+    rows.append(("Total", "", *_counts([status[j.name] for j in jobs])))
 
     print(title)
     print(f"As of {datetime.now(UTC):%Y-%m-%d %H:%M} UTC")
     print()
     _print_table(COLUMNS, rows)
     failed = [
-        (name, by_name[name].status, by_name[name].id)
-        for _, _, name in jobs
-        if status[name][0] not in (OK, RUNNING, MISSING)
+        (job.name, states[job.name].status, states[job.name].id)
+        for job in jobs
+        if status[job.name][0] not in (OK, RUNNING, MISSING)
     ]
     print()
     print(f"Failed ({len(failed)}):")
     for name, state, experiment_id in failed:
         print(f"  {name}  {experiment_id}  ({state})")
+
+
+def _beaker_states(by_arch: dict[str, list[ExpectedJob]]) -> dict[str, JobState]:
+    """Job name -> state of the newest experiment of each job of `by_arch`
+    (arch -> its jobs), from one real-beaker listing per arch
+    (fm_table.newest_by_name).
+    """
+    states = {}
+    for arch, jobs in by_arch.items():
+        names = {job.name for job in jobs}
+        for name, named in newest_by_name(listing_text(arch), names).items():
+            experiment_id = named.experiment.get("id", "")
+            states[name] = JobState(named.status, _queued(named), experiment_id)
+    return states
+
+
+def _agent_states(jobs: list[ExpectedJob]) -> dict[str, JobState]:
+    """Job name -> state of the newest experiment of each of `jobs`, under any
+    of its job_name_aliases, seen from an agent VM (_agent_vm.find_experiments:
+    gantry list, EVAL_RECORD_PATH, one beaker shim listing per run). A job the
+    shims call running counts as queued until `gantry status` gives it a start
+    time (a job gantry does not know stays running).
+    """
+    aliases = {job.name: job_name_aliases(job.wandb_name) for job in jobs}
+    groups = agent_listing_groups((job.run, job.wandb_name) for job in jobs)
+    recorded = {n: e["id"] for n, e in read_record(EVAL_RECORD_PATH).items()}
+    found = find_experiments(groups, recorded)
+    latest = {
+        name: job
+        for name, names in aliases.items()
+        if (job := newest(j for alias in names for j in found.get(alias, ())))
+        is not None
+    }
+
+    def started(job) -> bool:
+        try:
+            return gantry_started(job)
+        except RuntimeError:
+            return True
+
+    running = [job for job in latest.values() if job.status in GANTRY_RUNNING]
+    with ThreadPoolExecutor(LOOKUP_THREADS) as ex:
+        not_started = {
+            job.id for job, ok in zip(running, ex.map(started, running)) if not ok
+        }
+    states = {}
+    for name, job in latest.items():
+        status, queued = gantry_status(job.status)
+        states[name] = JobState(status, queued or job.id in not_started, job.id)
+    return states
 
 
 if __name__ == "__main__":

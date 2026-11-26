@@ -1,8 +1,11 @@
 import json
 import sys
 
+import _agent_vm
 import eval_table
 import fm_table
+import submit_inference_jobs
+from _agent_vm import GantryJob
 from _beaker_listing import OK, RUNNING, NamedExperiment
 from _inference_common import (
     C96AMIP_ARCHS,
@@ -12,10 +15,17 @@ from _inference_common import (
     V3_SINGLE_SOURCE_ARCHS,
     inference_run_names,
 )
-from fm_table import ROWS, GantryJob
+from fm_table import ROWS
+
+
+def _use_real_beaker(monkeypatch):
+    """Take the real-beaker path, as off an agent VM."""
+    monkeypatch.setattr(eval_table, "on_agent_vm", lambda: False)
+    monkeypatch.setattr(submit_inference_jobs, "on_agent_vm", lambda: False)
 
 
 def test_tables_track_the_cohorts(monkeypatch, capsys):
+    _use_real_beaker(monkeypatch)
     listed_names = set()
     listed_texts = []
 
@@ -124,8 +134,8 @@ def test_gantry_list_reads_the_created_column(monkeypatch):
     out = (
         "01ABC  succeeded   high     2026-11-18T03:03:07+00:00  agent-alexeyy-x-3ga0\n"
     )
-    monkeypatch.setattr(fm_table, "_gantry", lambda *args: out)
-    [job] = fm_table._gantry_list()
+    monkeypatch.setattr(_agent_vm, "gantry", lambda *args: out)
+    [job] = _agent_vm.gantry_list()
     assert (job.id, job.status, job.created, job.name) == (
         "01ABC",
         "succeeded",
@@ -135,6 +145,8 @@ def test_gantry_list_reads_the_created_column(monkeypatch):
 
 
 def test_eval_table_with_v3_arch_tracks_all_families(monkeypatch, capsys):
+    _use_real_beaker(monkeypatch)
+
     def list_jobs(text, names):
         assert text == "ace2-fm-nc-sfno-v3-fm-"
         assert len(names) == 540
@@ -148,6 +160,7 @@ def test_eval_table_with_v3_arch_tracks_all_families(monkeypatch, capsys):
 
 
 def test_eval_table_tracks_v3_eval_checkpoints(monkeypatch, capsys):
+    _use_real_beaker(monkeypatch)
     runs = inference_run_names(V3_ARCH)
     expected = {f"{run}-{ckpt}" for run in runs for ckpt in ("bestinf", "lastema")}
     running = f"{runs[0]}-bestinf"
@@ -173,3 +186,46 @@ def test_eval_table_tracks_v3_eval_checkpoints(monkeypatch, capsys):
     assert "| eval | bestinf | 0 | 1 | 0 | 0 | 17 | 18 |" in output
     assert "| eval | lastema | 0 | 0 | 1 | 0 | 17 | 18 |" in output
     assert "| Total |  | 0 | 1 | 1 | 0 | 34 | 36 |" in output
+
+
+def test_eval_table_on_agent_vm(monkeypatch, capsys, tmp_path):
+    monkeypatch.setattr(eval_table, "on_agent_vm", lambda: True)
+    monkeypatch.setattr(submit_inference_jobs, "on_agent_vm", lambda: True)
+    monkeypatch.setattr(eval_table, "EVAL_RECORD_PATH", tmp_path / "none.json")
+    arch = "swin-v2.2-v3-grid"
+    run = next(r for r in inference_run_names(arch) if "temperature" in r)
+    paper = f"{run}-som-control-dataCO2-ens-sstslab-eval-lastema"
+    short_paper = submit_inference_jobs.agent_job_name(paper)
+    assert short_paper != paper
+    found = {
+        # Submitted elsewhere, then resubmitted from the VM: the newest counts.
+        f"{run}-bestinf": [
+            GantryJob("A", "failed", "2026-11-26", f"{run}-bestinf"),
+            GantryJob(
+                "B", "running", "2026-11-27", f"agent-alexeyy-{run}-bestinf-ab12"
+            ),
+        ],
+        f"{run}-lastema": [GantryJob("C", "running", "t", "x")],
+        short_paper: [GantryJob("D", "succeeded", "t", "x")],
+        f"{run}-cm4xshield-bestinf": [GantryJob("E", "canceled", "t", "x")],
+    }
+    groups = []
+
+    def find_experiments(names_by_text, recorded):
+        groups.append(names_by_text)
+        return found
+
+    monkeypatch.setattr(eval_table, "find_experiments", find_experiments)
+    monkeypatch.setattr(eval_table, "gantry_started", lambda job: job.id == "B")
+    monkeypatch.setattr(sys, "argv", ["eval_table.py", "--arch", arch])
+    eval_table.main()
+
+    [names_by_text] = groups
+    assert set(names_by_text) == set(inference_run_names(arch))
+    assert short_paper in names_by_text[run]
+    out = capsys.readouterr().out
+    assert "| eval | bestinf | 0 | 1 | 0 | 0 | 11 | 12 |" in out
+    assert "| eval | lastema | 0 | 0 | 1 | 0 | 11 | 12 |" in out
+    assert "| paper-som | lastema | 1 | 0 | 0 | 0 | 23 | 24 |" in out
+    assert "| Total |  | 1 | 1 | 1 | 1 | 356 | 360 |" in out
+    assert f"{run}-cm4xshield-bestinf  E  (canceled)" in out

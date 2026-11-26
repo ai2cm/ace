@@ -72,6 +72,7 @@ def drop_jobs_in_beaker(
     job_name: Callable[[T], str],
     args: argparse.Namespace,
     list_texts: Sequence[str] = (DEFAULT_TEXT,),
+    existing: Callable[[], set[str]] | None = None,
 ) -> list[T]:
     """`jobs` without those named by --exclude-job and, with
     --skip-if-in-beaker, without those already succeeded or running in Beaker.
@@ -80,22 +81,26 @@ def drop_jobs_in_beaker(
     contains it), matched on the job name with gantry's collision suffix
     stripped. Every job name must contain one of `list_texts`; pass narrower
     texts than the default "ace2-fm-", which matches ~9k experiments and makes
-    the listing take many minutes.
+    the listing take many minutes. `existing`, if given, replaces the
+    listings: it returns the job names already succeeded or running (the
+    agent VM's lookup, submit_inference_jobs.agent_existing_jobs).
     """
     jobs = list(jobs)
     excluded = set(args.exclude_job)
-    existing: set[str] = set()
-    if args.skip_if_in_beaker:
+    existing_names: set[str] = set()
+    if args.skip_if_in_beaker and existing is not None:
+        existing_names = existing()
+    elif args.skip_if_in_beaker:
         for text in list_texts:
             print(f"Listing experiments in {args.beaker_workspace} matching {text}")
-            existing |= existing_job_names(args.beaker_workspace, text)
+            existing_names |= existing_job_names(args.beaker_workspace, text)
     pending = []
     for job in jobs:
         name = job_name(job)
         assert any(text in name for text in list_texts), name
         if name in excluded:
             print(f"Skipping (excluded): {name}")
-        elif name in existing:
+        elif name in existing_names:
             print(f"Skipping (already in Beaker): {name}")
         else:
             pending.append(job)

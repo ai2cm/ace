@@ -101,6 +101,7 @@ from typing import Any, Protocol, TypeVar
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 import create_fm_v3_grid_jobs as grid  # noqa: E402
+from _agent_vm import AGENT_PREFIX, GANTRY  # noqa: E402
 from _submit_common import check_configs_at_head  # noqa: E402
 from create_fm_v3_jobs import (  # noqa: E402
     N_GPUS,
@@ -128,9 +129,8 @@ GRIDS: dict[
 }
 PRIORITIES = ("low", "normal", "high")
 
-GANTRY = "/usr/local/bin/gantry"
 BRANCH = "agent/alexeyy/exp/alexeyfm2"
-EXPERIMENT_PREFIX = "agent-alexeyy-"
+EXPERIMENT_PREFIX = AGENT_PREFIX
 CLUSTERS = ("ai2/jupiter", "ai2/titan", "ai2/saturn")
 HIGH_PRIORITY = "high"
 DEFAULT_PRIORITY = "normal"
