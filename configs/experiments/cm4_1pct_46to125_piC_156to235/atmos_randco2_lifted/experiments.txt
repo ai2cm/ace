@@ -12,89 +12,89 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # Evals launched 2026-11-15 UTC: 01M7EWM0SPF7ST298G9H4XB9QZ.
 # Evals launched 2026-11-15 UTC: 01M7EWKR3V83VCFQ11QWXPRG6C.
 # Evals launched 2026-11-15 UTC: 01M7EQYH1E3Q8K68CCNTG5JKR9.
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto||01M5AR9ZMHXQPCNK2W8N18YQBS|running_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5AR9ZMW9QMP9QHJZM3AB0SR|ai2/ace
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto||01M5AR9ZMHXQPCNK2W8N18YQBS|running_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5AR9ZMW9QMP9QHJZM3AB0SR|ai2/ace
-cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto||01M5AR9ZMHXQPCNK2W8N18YQBS|running_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5AR9ZMW9QMP9QHJZM3AB0SR|ai2/ace
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto||01M5AR9ZMHXQPCNK2W8N18YQBS|ran_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5AR9ZMW9QMP9QHJZM3AB0SR|ai2/ace
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto||01M5AR9ZMHXQPCNK2W8N18YQBS|ran_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5AR9ZMW9QMP9QHJZM3AB0SR|ai2/ace
+cm4_1pctCO2-1pct_45to125_piC_156to235-coupled_clip-oppfm_a2sLR-ft_fto||01M5AR9ZMHXQPCNK2W8N18YQBS|ran_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5AR9ZMW9QMP9QHJZM3AB0SR|ai2/ace
 
 # 2q4vkyxv:best_inference_ckpt (first_row)
 # Evals launched 2026-11-15 UTC: 01M7ET7DDJ7C1N8SFGSWN6YZ1Z.
 # Evals launched 2026-11-15 UTC: 01M7ET745T1HMZ86WW2QQVD2RW.
 # Evals launched 2026-11-15 UTC: 01M7EQYTEWPJ9J0CBJ7AJCY3D7.
-cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW69K74Z9ZJ73CQH1ZZ|running_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5N7HXWNJ0YE4SRW691TFCV9|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW69K74Z9ZJ73CQH1ZZ|running_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5N7HXWNJ0YE4SRW691TFCV9|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW69K74Z9ZJ73CQH1ZZ|running_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5N7HXWNJ0YE4SRW691TFCV9|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW69K74Z9ZJ73CQH1ZZ|ran_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5N7HXWNJ0YE4SRW691TFCV9|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW69K74Z9ZJ73CQH1ZZ|ran_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5N7HXWNJ0YE4SRW691TFCV9|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_ccde0-oppfm_a2sLR-ft_fto|o0a2rs0|01M5N7HXW69K74Z9ZJ73CQH1ZZ|ran_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5N7HXWNJ0YE4SRW691TFCV9|ai2/ace
 
 # 9bj993pv:ema_ckpt_0001 (deferred)
 # Evals launched 2026-11-15 UTC: 01M7ET8904H76G8F5XSDKMTDDS.
 # Evals launched 2026-11-15 UTC: 01M7ET7ZMWKTCBV0EK5X3NK56B.
 # Evals launched 2026-11-15 UTC: 01M7ET7Q1FWDRDC0D5J86Y8XE8.
-cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M62AB3KER1BSQ6CAFNKHDR99|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M62AB3KER1BSQ6CAFNKHDR99|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M62AB3KER1BSQ6CAFNKHDR99|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M62AB3KER1BSQ6CAFNKHDR99|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M62AB3KER1BSQ6CAFNKHDR99|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M62AB3KER1BSQ6CAFNKHDR99|ai2/ace
 
 # 9bj993pv:ema_ckpt_0002 (deferred)
 # Evals launched 2026-11-15 UTC: 01M7ET94TAQ9Y5QAMN5FBQQM95.
 # Evals launched 2026-11-15 UTC: 01M7ET8VGKXJABT96HDB45MVRG.
 # Evals launched 2026-11-15 UTC: 01M7ET8JAA0N6Z3EQ8A7Z4BMSW.
-cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M62AB3KER1BSQ6CAFNKHDR99|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M62AB3KER1BSQ6CAFNKHDR99|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M62AB3KER1BSQ6CAFNKHDR99|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M62AB3KER1BSQ6CAFNKHDR99|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M62AB3KER1BSQ6CAFNKHDR99|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M62AB3KER1BSQ6CAFNKHDR99|ai2/ace
 
 # 9bj993pv:ema_ckpt_0003 (first_row)
 # Evals launched 2026-11-15 UTC: 01M7ET9QBGS30CWWCGWZZ7SFVQ.
 # Evals launched 2026-11-15 UTC: 01M7ET9E1N1Q5EB01CNNGNS4MW.
 # Evals launched 2026-11-15 UTC: 01M7EQZ3MHCTW677HD480JT7BR.
-cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M62AB3KER1BSQ6CAFNKHDR99|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M62AB3KER1BSQ6CAFNKHDR99|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M62AB3KER1BSQ6CAFNKHDR99|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M62AB3KER1BSQ6CAFNKHDR99|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M62AB3KER1BSQ6CAFNKHDR99|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62AB3K9JNPF3N6C6CZ5QHAT|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M62AB3KER1BSQ6CAFNKHDR99|ai2/ace
 
 # k2658h3a:ema_ckpt_0001 (deferred)
 # Evals launched 2026-11-15 UTC: 01M7ETAJPA30F7QPM36QD966DR.
 # Evals launched 2026-11-15 UTC: 01M7ETA9FEJRA641Y1QQAZ2NSD.
 # Evals launched 2026-11-15 UTC: 01M7ETA08HXPS24XNG3VABGN54.
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
 
 # k2658h3a:ema_ckpt_0002 (deferred)
 # Evals launched 2026-11-15 UTC: 01M7ETBDWMJNJF1KJ58VBJWHSF.
 # Evals launched 2026-11-15 UTC: 01M7ETB4HTMW9WPKK8TMHNHQCK.
 # Evals launched 2026-11-15 UTC: 01M7ETAVFCSED36Z2QACRK21JK.
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
 
 # k2658h3a:ema_ckpt_0003 (first_row)
 # Evals launched 2026-11-15 UTC: 01M7ETBZVPTQKTRCQAA0BVE972.
 # Evals launched 2026-11-15 UTC: 01M7ETBPVAF16NNXSB8CABNHGK.
 # Evals launched 2026-11-15 UTC: 01M7EQZCXAQDYMKE3SMCWT0YFW.
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay||01M73SGN1R0VNPVFCGP0HF2DE2|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M73SGN1XQ1YN5P56E7FWZMWN|ai2/ace
 
 # p7czybxj:ema_ckpt_0001 (deferred)
 # Evals launched 2026-11-15 UTC: 01M7EWMV4D39E58Z5XFX2FQRQD.
 # Evals launched 2026-11-15 UTC: 01M7EWMJANXPGT7HVNPC0CMSHQ.
 # Evals launched 2026-11-15 UTC: 01M7EWM9MCF0AT8S4M59BW42YS.
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
 
 # p7czybxj:ema_ckpt_0002 (deferred)
 # Evals launched 2026-11-15 UTC: 01M7EWNP0X691CKAQCCTT46HCB.
 # Evals launched 2026-11-15 UTC: 01M7EWND2AY51HH6YYKRK3ETPG.
 # Evals launched 2026-11-15 UTC: 01M7EWN40TQTD9E6KDZMQCV1CK.
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
 
 # p7czybxj:ema_ckpt_0003 (first_row)
 # Evals launched 2026-11-15 UTC: 01M7EWP89NEC10P520G6QK2JDK.
 # Evals launched 2026-11-15 UTC: 01M7EWNZ054HKYAF1Y4226FYGY.
 # Evals launched 2026-11-15 UTC: 01M7EQZP6986TJJYWZSJ6JD8N8.
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN|ai2/ace
 
 # ---- U3c: U10 families (D3 (a), D4 (a)); rows below are script-owned ----
 # U10 runs (summaries/U10.md): replay families on the legacy (-sea_ice) configs per the request rule,
@@ -107,12 +107,12 @@ cm4_1pct_45to125_piC_156to235-coupled_clip-oppfm_randco2v2-ft_fto|o0a2rs0|01M62A
 # Evals launched 2026-11-15 UTC: 01M7F4WNX4794A86BCBJKH4N0G.
 # Evals launched 2026-11-15 UTC: 01M7F4WCWH31QFAX9DR3D6XM6X.
 # Evals launched 2026-11-15 UTC: 01M7F4W46T50839JS4XRY4XGEC.
-cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|running_randco2-1xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|running_randco2-2xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|running_randco2-4xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|ran_randco2-1xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|ran_randco2-2xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|ran_randco2-4xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
 
 # 7aml1771:ema_ckpt_0002 (first_row)
 # Evals launched 2026-11-15 UTC: 01M7F4YVQPHK1FFD847Y1KQQ61.
@@ -121,12 +121,12 @@ cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|
 # Evals launched 2026-11-15 UTC: 01M7F4Y1RHPDB8W9QBZBHJRGKW.
 # Evals launched 2026-11-15 UTC: 01M7F4XS5B8HFQ4WSPXMW91NFQ.
 # Evals launched 2026-11-15 UTC: 01M7F2NT74P2AA5127MNN8NXM5.
-cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|running_randco2-1xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|running_randco2-2xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|running_randco2-4xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|ran_randco2-1xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|ran_randco2-2xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|ran_randco2-4xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6TBJ5M5BZYDKHEE3G8GGXZK|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6TBJ5MJQFFNQG2V9C5CEMDH|ai2/ace
 
 # 66vp731h:ema_ckpt_0001 (deferred)
 # Evals launched 2026-11-15 UTC: 01M7F50HKZ22442HVC5NH7NFQH.
@@ -135,12 +135,12 @@ cm4_1pct_45to125_piC_156to235-coupled_replay-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|
 # Evals launched 2026-11-15 UTC: 01M7F4ZPBVRKM9ZVMZS0VM427G.
 # Evals launched 2026-11-15 UTC: 01M7F4ZDE35JA9MRYA8YNTPM2B.
 # Evals launched 2026-11-15 UTC: 01M7F4Z4DDPGC1JFWDDCFGCK9X.
-cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|running_randco2-1xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|running_randco2-2xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|running_randco2-4xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|ran_randco2-1xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|ran_randco2-2xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|ran_randco2-4xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
 
 # 66vp731h:ema_ckpt_0002 (first_row)
 # Evals launched 2026-11-15 UTC: 01M7F51Z3C89FKH05XKNZFCFWY.
@@ -149,65 +149,65 @@ cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6
 # Evals launched 2026-11-15 UTC: 01M7F513H1X6274HDTQ474XFN2.
 # Evals launched 2026-11-15 UTC: 01M7F50TNZWA4V2A0RNNGPY3VQ.
 # Evals launched 2026-11-15 UTC: 01M7F2P2Y3F0YS4NE2Y0NF469B.
-cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|running_randco2-1xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|running_randco2-2xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|running_randco2-4xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|ran_randco2-1xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|ran_randco2-2xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|ran_randco2-4xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_replay-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6TBRBDEQXEJJY3W9YADE3DV|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6XPE1MJHFQZ9DMMDMWQ75NT|ai2/ace
 
 # rpt45ia0:ema_ckpt_0001 (deferred)
 # Evals launched 2026-11-15 UTC: 01M7F52T8CM8YJ3QAHQV2S63MH.
 # Evals launched 2026-11-15 UTC: 01M7F52H9H96DD4Z47Z4CYNBV3.
 # Evals launched 2026-11-15 UTC: 01M7F527YYNT0MPHT4NRNR7KE6.
-cm4-1pct_45to125_piC_156to235-coupled_repsst-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6X6JEB7GQX2NDQREBBAKA9Z|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6X6JEBKWR1PR2GCFWN8VMMA|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_repsst-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6X6JEB7GQX2NDQREBBAKA9Z|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6X6JEBKWR1PR2GCFWN8VMMA|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_repsst-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6X6JEB7GQX2NDQREBBAKA9Z|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6X6JEBKWR1PR2GCFWN8VMMA|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_repsst-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6X6JEB7GQX2NDQREBBAKA9Z|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6X6JEBKWR1PR2GCFWN8VMMA|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_repsst-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6X6JEB7GQX2NDQREBBAKA9Z|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6X6JEBKWR1PR2GCFWN8VMMA|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_repsst-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6X6JEB7GQX2NDQREBBAKA9Z|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6X6JEBKWR1PR2GCFWN8VMMA|ai2/ace
 
 # rpt45ia0:ema_ckpt_0002 (first_row)
 # Evals launched 2026-11-15 UTC: 01M7F53CH1BN5KG0G5T3HB6WF9.
 # Evals launched 2026-11-15 UTC: 01M7F533JGZ87WTQ4QZZRQECJZ.
 # Evals launched 2026-11-15 UTC: 01M7F2PBRV2V1GZRDYESCBBV38.
-cm4-1pct_45to125_piC_156to235-coupled_repsst-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6X6JEB7GQX2NDQREBBAKA9Z|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6X6JEBKWR1PR2GCFWN8VMMA|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_repsst-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6X6JEB7GQX2NDQREBBAKA9Z|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6X6JEBKWR1PR2GCFWN8VMMA|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_repsst-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6X6JEB7GQX2NDQREBBAKA9Z|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6X6JEBKWR1PR2GCFWN8VMMA|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_repsst-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6X6JEB7GQX2NDQREBBAKA9Z|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6X6JEBKWR1PR2GCFWN8VMMA|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_repsst-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6X6JEB7GQX2NDQREBBAKA9Z|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6X6JEBKWR1PR2GCFWN8VMMA|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_repsst-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M6X6JEB7GQX2NDQREBBAKA9Z|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6X6JEBKWR1PR2GCFWN8VMMA|ai2/ace
 
 # d6l1huwc:ema_ckpt_0001 (deferred)
 # Evals launched 2026-11-15 UTC: 01M7F547YSZE3DXTNJV2F2VF37.
 # Evals launched 2026-11-15 UTC: 01M7F53YP9B0XE9QKCJDJ6QS3K.
 # Evals launched 2026-11-15 UTC: 01M7F53NNGR825P6Z06DRJR1NC.
-cm4_1pct_45to125_piC_156to235-coupled_repsst-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6X6JYXA823PNPQZ1XP5VRBF|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6X6JYXQ4BWW83NEBBC2S50X|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_repsst-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6X6JYXA823PNPQZ1XP5VRBF|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6X6JYXQ4BWW83NEBBC2S50X|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_repsst-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6X6JYXA823PNPQZ1XP5VRBF|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6X6JYXQ4BWW83NEBBC2S50X|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_repsst-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6X6JYXA823PNPQZ1XP5VRBF|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6X6JYXQ4BWW83NEBBC2S50X|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_repsst-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6X6JYXA823PNPQZ1XP5VRBF|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6X6JYXQ4BWW83NEBBC2S50X|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_repsst-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6X6JYXA823PNPQZ1XP5VRBF|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M6X6JYXQ4BWW83NEBBC2S50X|ai2/ace
 
 # d6l1huwc:ema_ckpt_0002 (first_row)
 # Evals launched 2026-11-15 UTC: 01M7F54SZYZR34PBQSVZ21MPDK.
 # Evals launched 2026-11-15 UTC: 01M7F54H6D3T56GBT5GAV9AZK5.
 # Evals launched 2026-11-15 UTC: 01M7F2PMDGZYNDFYCYBSCJBD08.
-cm4_1pct_45to125_piC_156to235-coupled_repsst-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6X6JYXA823PNPQZ1XP5VRBF|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6X6JYXQ4BWW83NEBBC2S50X|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_repsst-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6X6JYXA823PNPQZ1XP5VRBF|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6X6JYXQ4BWW83NEBBC2S50X|ai2/ace
-cm4_1pct_45to125_piC_156to235-coupled_repsst-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6X6JYXA823PNPQZ1XP5VRBF|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6X6JYXQ4BWW83NEBBC2S50X|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_repsst-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6X6JYXA823PNPQZ1XP5VRBF|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6X6JYXQ4BWW83NEBBC2S50X|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_repsst-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6X6JYXA823PNPQZ1XP5VRBF|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6X6JYXQ4BWW83NEBBC2S50X|ai2/ace
+cm4_1pct_45to125_piC_156to235-coupled_repsst-oppfm_randco2v2-ftr_ft_fto|o0a2rs0|01M6X6JYXA823PNPQZ1XP5VRBF|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M6X6JYXQ4BWW83NEBBC2S50X|ai2/ace
 
 # 66br6elh:ema_ckpt_0001 (deferred)
 # Evals launched 2026-11-15 UTC: 01M7F55P3E3QT7SRV06ZQBCK23.
 # Evals launched 2026-11-15 UTC: 01M7F55CN774KW9XZGDJ36XREC.
 # Evals launched 2026-11-15 UTC: 01M7F5535MP7QC7JEJK715ZD3M.
-cm4-1pct_45to125_piC_156to235-coupled_repsst80-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M76ZAQ0819F96RFSJPAEJX3S|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M76ZAQ0KTNBZ4K7KK4XHAWN5|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_repsst80-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M76ZAQ0819F96RFSJPAEJX3S|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M76ZAQ0KTNBZ4K7KK4XHAWN5|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_repsst80-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M76ZAQ0819F96RFSJPAEJX3S|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M76ZAQ0KTNBZ4K7KK4XHAWN5|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_repsst80-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M76ZAQ0819F96RFSJPAEJX3S|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M76ZAQ0KTNBZ4K7KK4XHAWN5|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_repsst80-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M76ZAQ0819F96RFSJPAEJX3S|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M76ZAQ0KTNBZ4K7KK4XHAWN5|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_repsst80-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M76ZAQ0819F96RFSJPAEJX3S|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M76ZAQ0KTNBZ4K7KK4XHAWN5|ai2/ace
 
 # 66br6elh:ema_ckpt_0002 (deferred)
 # Evals launched 2026-11-15 UTC: 01M7F56HYR3MP7JKDTV2AR4XAM.
 # Evals launched 2026-11-15 UTC: 01M7F568VAXWQ8MEBP13XQ9E69.
 # Evals launched 2026-11-15 UTC: 01M7F55ZM4N3H8PV4D5VN5RW7R.
-cm4-1pct_45to125_piC_156to235-coupled_repsst80-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M76ZAQ0819F96RFSJPAEJX3S|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M76ZAQ0KTNBZ4K7KK4XHAWN5|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_repsst80-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M76ZAQ0819F96RFSJPAEJX3S|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M76ZAQ0KTNBZ4K7KK4XHAWN5|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_repsst80-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M76ZAQ0819F96RFSJPAEJX3S|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M76ZAQ0KTNBZ4K7KK4XHAWN5|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_repsst80-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M76ZAQ0819F96RFSJPAEJX3S|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M76ZAQ0KTNBZ4K7KK4XHAWN5|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_repsst80-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M76ZAQ0819F96RFSJPAEJX3S|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M76ZAQ0KTNBZ4K7KK4XHAWN5|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_repsst80-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M76ZAQ0819F96RFSJPAEJX3S|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M76ZAQ0KTNBZ4K7KK4XHAWN5|ai2/ace
 
 # 66br6elh:ema_ckpt_0003 (first_row)
 # Evals launched 2026-11-15 UTC: 01M7F57428A719M4C7SBA6ARPX.
 # Evals launched 2026-11-15 UTC: 01M7F56TQW0KD1Y7TWR1B54R4V.
 # Evals launched 2026-11-15 UTC: 01M7F2PXCEH5DJCAZK34K5K06H.
-cm4-1pct_45to125_piC_156to235-coupled_repsst80-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M76ZAQ0819F96RFSJPAEJX3S|running_randco2-1xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M76ZAQ0KTNBZ4K7KK4XHAWN5|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_repsst80-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M76ZAQ0819F96RFSJPAEJX3S|running_randco2-2xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M76ZAQ0KTNBZ4K7KK4XHAWN5|ai2/ace
-cm4-1pct_45to125_piC_156to235-coupled_repsst80-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M76ZAQ0819F96RFSJPAEJX3S|running_randco2-4xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M76ZAQ0KTNBZ4K7KK4XHAWN5|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_repsst80-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M76ZAQ0819F96RFSJPAEJX3S|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M76ZAQ0KTNBZ4K7KK4XHAWN5|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_repsst80-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M76ZAQ0819F96RFSJPAEJX3S|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M76ZAQ0KTNBZ4K7KK4XHAWN5|ai2/ace
+cm4-1pct_45to125_piC_156to235-coupled_repsst80-oppfm_a2sLR-ftr_ft_fto|o0a2rs0|01M76ZAQ0819F96RFSJPAEJX3S|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M76ZAQ0KTNBZ4K7KK4XHAWN5|ai2/ace

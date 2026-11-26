@@ -11,14 +11,14 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # Evals launched 2026-11-15 UTC: 01M7ETD1PJ2JQ6S12NKW18WWRK.
 # Evals launched 2026-11-15 UTC: 01M7ETCS0SEAVEA14GCHCQ6WP3.
 # Evals launched 2026-11-15 UTC: 01M7ETCFN3NYGMZD1D5E5CT3S9.
-cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|running_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M326W4K8VKWEXBVR5YM60YQH|ai2/ace
-cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|running_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M326W4K8VKWEXBVR5YM60YQH|ai2/ace
-cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|running_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M326W4K8VKWEXBVR5YM60YQH|ai2/ace
+cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|ran_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M326W4K8VKWEXBVR5YM60YQH|ai2/ace
+cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|ran_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M326W4K8VKWEXBVR5YM60YQH|ai2/ace
+cm4_1pct_46to125_piC_156to235-atmos_ace2s_origLR-ft|rs2|01M2GH5253V8MGN3AWP1254RVY|ran_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M326W4K8VKWEXBVR5YM60YQH|ai2/ace
 
 # tb6xf0ju:best_inference_ckpt (deferred)
 # Evals launched 2026-11-15 UTC: 01M7ETDWTTB7BS15TZRWR0J2GN.
 # Evals launched 2026-11-15 UTC: 01M7ETDM439EE8TJK59RD6RRJH.
 # Evals launched 2026-11-15 UTC: 01M7ETDAXKDEPD9PZP9930BDRQ.
-rco2v2_ic12_1pct_46to125_piC_156to235-ace2s_origLR-ft|rs1|01M55CYWQ60CYEZYRXCQBQE2J2|running_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5JJTWWGYYSACGH3VY6GN6RF|ai2/ace
-rco2v2_ic12_1pct_46to125_piC_156to235-ace2s_origLR-ft|rs1|01M55CYWQ60CYEZYRXCQBQE2J2|running_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5JJTWWGYYSACGH3VY6GN6RF|ai2/ace
-rco2v2_ic12_1pct_46to125_piC_156to235-ace2s_origLR-ft|rs1|01M55CYWQ60CYEZYRXCQBQE2J2|running_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5JJTWWGYYSACGH3VY6GN6RF|ai2/ace
+rco2v2_ic12_1pct_46to125_piC_156to235-ace2s_origLR-ft|rs1|01M55CYWQ60CYEZYRXCQBQE2J2|ran_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5JJTWWGYYSACGH3VY6GN6RF|ai2/ace
+rco2v2_ic12_1pct_46to125_piC_156to235-ace2s_origLR-ft|rs1|01M55CYWQ60CYEZYRXCQBQE2J2|ran_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5JJTWWGYYSACGH3VY6GN6RF|ai2/ace
+rco2v2_ic12_1pct_46to125_piC_156to235-ace2s_origLR-ft|rs1|01M55CYWQ60CYEZYRXCQBQE2J2|ran_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M5JJTWWGYYSACGH3VY6GN6RF|ai2/ace

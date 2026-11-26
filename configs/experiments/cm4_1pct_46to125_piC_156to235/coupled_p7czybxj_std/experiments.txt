@@ -8,10 +8,12 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # is a SHA256-identical copy of 01M79M8QMQV6PFG839CAWKBZHN:training_checkpoints/ema_ckpt_0001.tar).
 # Configs, priority, min_runtime as this branch's X-run 1pct/piC rows (U10_eval_rows.py); checkpoints from the final
 # training job's results dataset 01M79M8QMQV6PFG839CAWKBZHN (as the 08c rows in coupled_enso_rank1/).
+# rows with row tag retry1 relaunch the failed_ row above them (node cordon), which they supersede (PRD U98, D32).
 # launch: ./job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_p7czybxj_std . --config-dir configs/experiments/cm4_eval/coupled
 # --config-dir configs/experiments/cm4_eval/coupled
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_1pct-ic0001-130yr|ema_ckpt_0001|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_1pct-ic0001-130yr|ema_ckpt_0002|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_piC-ic0151-200yr|ema_ckpt_0002|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN
-1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|running_piC-ic0151-200yr|ema_ckpt_0003|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|failed_1pct-ic0001-130yr|ema_ckpt_0001|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff|retry1|01M78QYC5QWEVW15TP05E4TKBF|run_1pct-ic0001-130yr|ema_ckpt_0001|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|ran_1pct-ic0001-130yr|ema_ckpt_0002|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|ran_piC-ic0151-200yr|ema_ckpt_0002|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|ran_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN
+1deg-randco2rs1-fmean-hybridsstdiag-jfto-alt-replay-con-fromoff||01M78QYC5QWEVW15TP05E4TKBF|ran_piC-ic0151-200yr|ema_ckpt_0003|high|--min-runtime 8h||01M79M8QMQV6PFG839CAWKBZHN
