@@ -9,3 +9,17 @@ SamudrACEv2-fto|o2a1rs0|ace-samudra-cm4|widzeq0u|best_inference_ckpt|ace2-cm4-at
 SamudrACEv2-fto|o0a2rs0|ace-samudra-cm4|bcugx12o|best_inference_ckpt|ace2-cm4-atmos-noLSM|huw1tpxt|best_inference_ckpt|trained|urgent|titan|8||3|ai2/ace|seed=0|8h||
 SamudrACEv2-fto|o1a2rs0|ace-samudra-cm4|t720yuti|best_inference_ckpt|ace2-cm4-atmos-noLSM|huw1tpxt|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
 SamudrACEv2-fto|o2a2rs0|ace-samudra-cm4|widzeq0u|best_inference_ckpt|ace2-cm4-atmos-noLSM|huw1tpxt|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
+# naming conventions (loose; see cm4_1pct_46to125_piC_156to235/coupled/pretraining.txt):
+# - group: SamudrACEv2-<ocean>_<atmos>-<stage>, stage: fto
+# - ocean codes: onorc = ocean/hybridSSTdiag-fiz-norc
+# - atmos codes: a2p5muon = atmos/ace2p5-muon fine-tune (SamudrACEv2-ace2p5-muon-ft)
+# - tags: o0a0rs0 = ocean rs0 + atmos rs0 + coupled rs0 (seed info only)
+SamudrACEv2-onorc_a2p5muon-fto|o0a0rs0|ace-samudra-cm4|iodsqwkh|best_inference_ckpt|ace2-cm4-atmos-noLSM|qtmvrwqk|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
+SamudrACEv2-onorc_a2p5muon-fto|o1a0rs0|ace-samudra-cm4|tr8oqgez|best_inference_ckpt|ace2-cm4-atmos-noLSM|qtmvrwqk|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
+SamudrACEv2-onorc_a2p5muon-fto|o2a0rs0|ace-samudra-cm4|bqycdnji|best_inference_ckpt|ace2-cm4-atmos-noLSM|qtmvrwqk|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
+SamudrACEv2-onorc_a2p5muon-fto|o0a1rs0|ace-samudra-cm4|iodsqwkh|best_inference_ckpt|ace2-cm4-atmos-noLSM|55cv4eg4|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
+SamudrACEv2-onorc_a2p5muon-fto|o1a1rs0|ace-samudra-cm4|tr8oqgez|best_inference_ckpt|ace2-cm4-atmos-noLSM|55cv4eg4|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
+SamudrACEv2-onorc_a2p5muon-fto|o2a1rs0|ace-samudra-cm4|bqycdnji|best_inference_ckpt|ace2-cm4-atmos-noLSM|55cv4eg4|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
+SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|ace-samudra-cm4|iodsqwkh|best_inference_ckpt|ace2-cm4-atmos-noLSM|huw1tpxt|best_inference_ckpt|train|urgent|titan|8||3|ai2/ace|seed=0|8h||
+SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|ace-samudra-cm4|tr8oqgez|best_inference_ckpt|ace2-cm4-atmos-noLSM|huw1tpxt|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
+SamudrACEv2-onorc_a2p5muon-fto|o2a2rs0|ace-samudra-cm4|bqycdnji|best_inference_ckpt|ace2-cm4-atmos-noLSM|huw1tpxt|best_inference_ckpt|skip|urgent|titan|8||3|ai2/ace|seed=0|8h||
