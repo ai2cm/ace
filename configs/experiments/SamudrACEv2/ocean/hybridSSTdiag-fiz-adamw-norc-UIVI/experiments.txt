@@ -8,3 +8,6 @@ SamudrACEv2-hybridSSTdiag-fiz-adamw-norc-UIVI|rs0|01M8DJSPD7KM4V5JHAE9HKHXXT|wai
 
 SamudrACEv2-hybridSSTdiag-fiz-adamw-norc-UIVI|rs1|01M8DJT5642XVHBVX5NYYHCNJ6|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
 SamudrACEv2-hybridSSTdiag-fiz-adamw-norc-UIVI|rs1|01M8DJT5642XVHBVX5NYYHCNJ6|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
+
+SamudrACEv2-hybridSSTdiag-fiz-adamw-norc-UIVI|rs2|01M8DJTKA2G6QM1WMWH7176Q8K|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-adamw-norc-UIVI|rs2|01M8DJTKA2G6QM1WMWH7176Q8K|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
