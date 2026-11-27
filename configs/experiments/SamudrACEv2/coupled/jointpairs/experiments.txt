@@ -13,42 +13,42 @@ SamudrACEv2-jointpairs|o0a2rs0|01M83GGB0HWGK9X63WJ1DY3NE9|ran_piC-ic0244-40yr-pa
 # training row: SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|training|best_inference_ckpt|normal|--min-runtime 8h
 # launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/coupled/jointpairs . --config-dir configs/experiments/SamudrACEv2/eval/coupled
 # --config-dir configs/experiments/SamudrACEv2/eval/coupled
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_1pct-ic0001-130yr|ema_ckpt_0001|high|--min-runtime 6h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_1pct-ic0001-130yr|ema_ckpt_0002|high|--min-runtime 6h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 6h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_1pct-ic0001-130yr|ema_ckpt_0004|high|--min-runtime 6h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_piC-ic0151-200yr|ema_ckpt_0001|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_piC-ic0151-200yr|ema_ckpt_0002|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_piC-ic0151-200yr|ema_ckpt_0003|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_piC-ic0151-200yr|ema_ckpt_0004|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|running_1pct-ic0001-130yr|ema_ckpt_0001|high|--min-runtime 6h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|running_1pct-ic0001-130yr|ema_ckpt_0002|high|--min-runtime 6h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|running_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 6h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|running_1pct-ic0001-130yr|ema_ckpt_0004|high|--min-runtime 6h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|running_piC-ic0151-200yr|ema_ckpt_0001|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|running_piC-ic0151-200yr|ema_ckpt_0002|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|running_piC-ic0151-200yr|ema_ckpt_0003|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|running_piC-ic0151-200yr|ema_ckpt_0004|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
 
 # Random-CO2 evals (prescribed SST + sea ice) of the lifted atmosphere of SamudrACEv2-onorc_a2p5muon-jointpairs o0a2rs0.
 # The lift flag applies to every run_ row in this file: launch only while no coupled row is run_.
 # launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/coupled/jointpairs . --config-dir configs/experiments/SamudrACEv2/eval/atmos --lift-coupled-atmosphere
 # --config-dir configs/experiments/SamudrACEv2/eval/atmos
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-1xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-1xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-1xCO2-ic3|ema_ckpt_0003|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-1xCO2-ic3|ema_ckpt_0004|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-2xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-2xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-2xCO2-ic3|ema_ckpt_0003|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-2xCO2-ic3|ema_ckpt_0004|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-4xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-4xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-4xCO2-ic3|ema_ckpt_0003|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-4xCO2-ic3|ema_ckpt_0004|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
-SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-1xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-1xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-1xCO2-ic3|ema_ckpt_0003|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-1xCO2-ic3|ema_ckpt_0004|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-1xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-1xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-2xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-2xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-2xCO2-ic3|ema_ckpt_0003|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-2xCO2-ic3|ema_ckpt_0004|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-2xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-2xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-4xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-4xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-4xCO2-ic3|ema_ckpt_0003|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-4xCO2-ic3|ema_ckpt_0004|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-4xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|run_randco2-4xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
 
 SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|01M8DN6F03QABQE58HBPNYC313|training|best_inference_ckpt|normal|--min-runtime 8h
