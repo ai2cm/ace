@@ -508,6 +508,205 @@ def test_surface_energy_flux_correction_prescribed_open_ocean(hfds_name):
     torch.testing.assert_close(corrected[hfds_name][-1, :], gen_hfds[-1, :])
 
 
+_RUNOFF_VALUE = 3.0
+_CALVING_VALUE = 2.0
+_WRONG_BASIS_VALUE = 1000.0
+_TERM_FORMS = ["absent", "per_ocean_area", "total_area", "both"]
+
+
+def _runoff_calving_case(hfrunoffds_form: str, calving_residue_form: str):
+    """Gen data, forcing and input for the runoff / calving heat tests.
+
+    Rows: 0 sea ice (ocean_fraction < 1), 1-3 open ocean with
+    sea_surface_fraction < 1 so the two bases differ, 4 land
+    (sea_surface_fraction 0).
+    """
+    sea_ice_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
+    sea_ice_fraction[0, :] = 0.3
+    land_fraction = torch.zeros(IMG_SHAPE, device=DEVICE)
+    land_fraction[-1, :] = 1.0
+    ssf = torch.full(IMG_SHAPE, 0.8, device=DEVICE)
+    ssf[-1, :] = 0.0
+    forcing_data = {
+        "land_fraction": land_fraction,
+        "sea_surface_fraction": ssf,
+        **_make_atmos_forcing_data(IMG_SHAPE),
+    }
+    gen_terms = {}
+    for name, value, form in (
+        ("hfrunoffds", _RUNOFF_VALUE, hfrunoffds_form),
+        ("calving_residue", _CALVING_VALUE, calving_residue_form),
+    ):
+        if form == "per_ocean_area":
+            gen_terms[name] = torch.full(IMG_SHAPE, value, device=DEVICE)
+        elif form == "total_area":
+            gen_terms[f"{name}_total_area"] = value * ssf
+        elif form == "both":
+            # the test replaces the form not matching the target basis
+            # with a decoy value
+            gen_terms[name] = torch.full(IMG_SHAPE, value, device=DEVICE)
+            gen_terms[f"{name}_total_area"] = value * ssf
+    return forcing_data, sea_ice_fraction, ssf, gen_terms
+
+
+def _expected_runoff_calving_heat(
+    hfrunoffds_form: str, calving_residue_form: str, ssf: torch.Tensor, total_area
+) -> torch.Tensor:
+    per_ocean_area = (_RUNOFF_VALUE if hfrunoffds_form != "absent" else 0.0) - (
+        _CALVING_VALUE if calving_residue_form != "absent" else 0.0
+    )
+    heat = torch.full(IMG_SHAPE, per_ocean_area, device=DEVICE)
+    return heat * ssf if total_area else heat
+
+
+@pytest.mark.parametrize("calving_residue_form", _TERM_FORMS)
+@pytest.mark.parametrize("hfrunoffds_form", _TERM_FORMS)
+@pytest.mark.parametrize("hfds_name", ["hfds", "hfds_total_area"])
+def test_prescribed_open_ocean_adds_runoff_calving_heat(
+    hfds_name, hfrunoffds_form, calving_residue_form
+):
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed_open_ocean"
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    corrector = config._build(ops, None, datetime.timedelta(seconds=3600))
+    forcing_data, sea_ice_fraction, ssf, gen_terms = _runoff_calving_case(
+        hfrunoffds_form, calving_residue_form
+    )
+    if hfrunoffds_form == "both":
+        decoy = (
+            "hfrunoffds" if hfds_name == "hfds_total_area" else "hfrunoffds_total_area"
+        )
+        gen_terms[decoy] = torch.full(IMG_SHAPE, _WRONG_BASIS_VALUE, device=DEVICE)
+    if calving_residue_form == "both":
+        decoy = (
+            "calving_residue"
+            if hfds_name == "hfds_total_area"
+            else "calving_residue_total_area"
+        )
+        gen_terms[decoy] = torch.full(IMG_SHAPE, _WRONG_BASIS_VALUE, device=DEVICE)
+    sst = torch.full(IMG_SHAPE, 300.0, device=DEVICE)
+    gen_hfds = torch.full(IMG_SHAPE, 5.0, device=DEVICE)
+    gen_data = {
+        "sst": sst,
+        hfds_name: gen_hfds,
+        "sea_ice_fraction": sea_ice_fraction,
+        **gen_terms,
+    }
+    input_data = {**forcing_data, "sst": sst, "sea_ice_fraction": sea_ice_fraction}
+
+    total_area = hfds_name == "hfds_total_area"
+    net_flux = _compute_ocean_net_surface_energy_flux(forcing_data, sst)
+    if total_area:
+        net_flux = net_flux * ssf
+    heat = _expected_runoff_calving_heat(
+        hfrunoffds_form, calving_residue_form, ssf, total_area
+    )
+    ocean_fraction = 1 - forcing_data["land_fraction"] - sea_ice_fraction
+    expected = torch.where(ocean_fraction == 1, net_flux + heat, gen_hfds)
+
+    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
+    torch.testing.assert_close(corrected[hfds_name], expected)
+    # sea ice and land rows: gen_hfds passes through, no terms added
+    torch.testing.assert_close(corrected[hfds_name][0, :], gen_hfds[0, :])
+    torch.testing.assert_close(corrected[hfds_name][-1, :], gen_hfds[-1, :])
+    if hfrunoffds_form == "absent" and calving_residue_form == "absent":
+        assert torch.equal(
+            corrected[hfds_name], torch.where(ocean_fraction == 1, net_flux, gen_hfds)
+        )
+
+
+@pytest.mark.parametrize("method", ["residual_prediction", "prescribed"])
+@pytest.mark.parametrize("hfds_name", ["hfds", "hfds_total_area"])
+def test_other_methods_ignore_runoff_calving_heat(method, hfds_name):
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(method=method),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    corrector = config._build(ops, None, datetime.timedelta(seconds=3600))
+    forcing_data, sea_ice_fraction, _, gen_terms = _runoff_calving_case(
+        "per_ocean_area", "total_area"
+    )
+    sst = torch.full(IMG_SHAPE, 300.0, device=DEVICE)
+    gen_data = {
+        "sst": sst,
+        hfds_name: torch.full(IMG_SHAPE, 5.0, device=DEVICE),
+        "sea_ice_fraction": sea_ice_fraction,
+    }
+    input_data = {**forcing_data, "sst": sst, "sea_ice_fraction": sea_ice_fraction}
+
+    without_terms = corrector(input_data, gen_data, forcing_data, None).corrected
+    with_terms = corrector(
+        input_data, {**gen_data, **gen_terms}, forcing_data, None
+    ).corrected
+    assert torch.equal(with_terms[hfds_name], without_terms[hfds_name])
+
+
+@pytest.mark.parametrize("hfds_name", ["hfds", "hfds_total_area"])
+def test_prescribed_open_ocean_reads_runoff_calving_heat_from_gen_only(hfds_name):
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed_open_ocean"
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    corrector = config._build(ops, None, datetime.timedelta(seconds=3600))
+    forcing_data, sea_ice_fraction, _, gen_terms = _runoff_calving_case("both", "both")
+    sst = torch.full(IMG_SHAPE, 300.0, device=DEVICE)
+    gen_data = {
+        "sst": sst,
+        hfds_name: torch.full(IMG_SHAPE, 5.0, device=DEVICE),
+        "sea_ice_fraction": sea_ice_fraction,
+    }
+    input_data = {**forcing_data, "sst": sst, "sea_ice_fraction": sea_ice_fraction}
+
+    without_terms = corrector(input_data, gen_data, forcing_data, None).corrected
+    terms_outside_gen = corrector(
+        {**input_data, **gen_terms}, gen_data, {**forcing_data, **gen_terms}, None
+    ).corrected
+    assert torch.equal(terms_outside_gen[hfds_name], without_terms[hfds_name])
+
+
+def test_prescribed_open_ocean_total_area_term_has_finite_gradients_on_land():
+    """hfds target with a _total_area term: dividing by sea_surface_fraction 0
+    on land must not give inf/NaN in the unselected torch.where branch."""
+    config = OceanCorrectorConfig(
+        surface_energy_flux_correction=SurfaceEnergyFluxCorrectionConfig(
+            method="prescribed_open_ocean"
+        ),
+    )
+    ops = LatLonOperations(torch.ones(size=IMG_SHAPE))
+    corrector = config._build(ops, None, datetime.timedelta(seconds=3600))
+    forcing_data, sea_ice_fraction, ssf, _ = _runoff_calving_case("absent", "absent")
+    assert (ssf[-1, :] == 0).all()
+    sst = torch.full(IMG_SHAPE, 300.0, device=DEVICE)
+    gen_hfds = torch.full(IMG_SHAPE, 5.0, device=DEVICE, requires_grad=True)
+    hfrunoffds_total_area = (_RUNOFF_VALUE * ssf).requires_grad_()
+    calving_residue_total_area = (_CALVING_VALUE * ssf).requires_grad_()
+    gen_data = {
+        "sst": sst,
+        "hfds": gen_hfds,
+        "sea_ice_fraction": sea_ice_fraction,
+        "hfrunoffds_total_area": hfrunoffds_total_area,
+        "calving_residue_total_area": calving_residue_total_area,
+    }
+    input_data = {**forcing_data, "sst": sst, "sea_ice_fraction": sea_ice_fraction}
+
+    corrected = corrector(input_data, gen_data, forcing_data, None).corrected
+    assert torch.isfinite(corrected["hfds"]).all()
+    corrected["hfds"].sum().backward()
+    for tensor in (gen_hfds, hfrunoffds_total_area, calving_residue_total_area):
+        assert tensor.grad is not None
+        assert torch.isfinite(tensor.grad).all()
+    # open-ocean rows: d hfds / d X_total_area = sign / ssf
+    torch.testing.assert_close(hfrunoffds_total_area.grad[1:-1, :], 1 / ssf[1:-1, :])
+    torch.testing.assert_close(
+        calving_residue_total_area.grad[1:-1, :], -1 / ssf[1:-1, :]
+    )
+
+
 @pytest.mark.parametrize(
     "hfds_type",
     [
