@@ -25,3 +25,5 @@ SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_ra
 SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
 SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
 SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|wait_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M8CTT4CXW17V82QJ8BG7QBPF
+
+SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|01M8DN6F03QABQE58HBPNYC313|training|best_inference_ckpt|normal|--min-runtime 8h
