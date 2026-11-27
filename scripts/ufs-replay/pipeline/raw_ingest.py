@@ -61,9 +61,13 @@ def ocean_key(t: datetime.datetime) -> str:
     return f"{BUCKET}/{c:%Y/%m/%Y%m%d%H}/ocn_{t:%Y_%m_%d_%H}.nc"
 
 
-def atmo_key(t: datetime.datetime) -> str:
-    """FV3 surface file valid at ``t`` (a multiple of 3 h).  See FV3_FHR below."""
-    fhr = FV3_FHR[t.hour % 6]
+def atmo_key(t: datetime.datetime, fallback: bool = False) -> str:
+    """FV3 surface file valid at ``t`` (a multiple of 3 h).  See FV3_FHR below.
+
+    ``fallback`` gives the copy of the same valid time in the previous cycle (fhr06 or
+    fhr09), used when the primary file is missing or truncated in the archive.
+    """
+    fhr = FV3_FHR[t.hour % 6] + (6 if fallback else 0)
     c = t + datetime.timedelta(hours=6 - fhr)
     return f"{BUCKET}/{c:%Y/%m/%Y%m%d%H}/bfg_{c:%Y%m%d%H}_fhr{fhr:02d}_control"
 
@@ -132,9 +136,16 @@ def _regridder(work_dir, static):
     return tripolar.TripolarRegridder(g, static["lat"], static["lon"], work_dir)
 
 
+def _engine(path: str) -> str:
+    """Most replay files are netCDF4/HDF5, but some (e.g. ocean files of days 9+ of
+    1985-01..11) are uncompressed netCDF3 64-bit-offset files with the same content."""
+    with open(path, "rb") as f:
+        return "netcdf4" if f.read(3) == b"CDF" else "h5netcdf"
+
+
 def ocean_dataset(path, t, R, static) -> xr.Dataset:
     """One raw MOM6 file as a one-timestep dataset with mom6.zarr's layout."""
-    raw = xr.open_dataset(path, decode_times=False, engine="h5netcdf").isel(time=0)
+    raw = xr.open_dataset(path, decode_times=False, engine=_engine(path)).isel(time=0)
     z_l = raw["z_l"].values
     if not np.allclose(z_l, static["z_l"]):
         raise ValueError("raw file z_l differs from the zarr's")
@@ -151,26 +162,40 @@ def ocean_dataset(path, t, R, static) -> xr.Dataset:
     return ds.transpose("time", ...)
 
 
-def atmo_dataset(paths, times) -> xr.Dataset:
-    parts = []
-    for p, t in zip(paths, times):
-        b = xr.open_dataset(p, decode_times=False, engine="h5netcdf")
+def _atmo_part(p, t) -> xr.Dataset:
+    with xr.open_dataset(p, decode_times=False, engine=_engine(p)) as b:
+        valid = pd.Timestamp(
+            b["time"].attrs["units"].split("since")[1].strip()
+        ) + pd.Timedelta(hours=float(b["time"].values[0]))
+        if valid != pd.Timestamp(t):
+            raise ValueError(f"{p}: valid time {valid} != expected {t}")
         d = (
             b[ATMO_VARS]
             .isel(time=0)
             .load()
             .rename({"grid_xt": "lon", "grid_yt": "lat"})
         )
-        valid = pd.Timestamp(
-            b["time"].attrs["units"].split("since")[1].strip()
-        ) + pd.Timedelta(hours=float(b["time"].values[0]))
-        if valid != pd.Timestamp(t):
-            raise ValueError(f"{p}: valid time {valid} != expected {t}")
-        b.close()
-        parts.append(
-            d.reset_coords(drop=True).expand_dims(time=[np.datetime64(t, "ns")])
+    return d.reset_coords(drop=True).expand_dims(time=[np.datetime64(t, "ns")])
+
+
+def atmo_dataset(paths, times) -> xr.Dataset:
+    return xr.concat([_atmo_part(p, t) for p, t in zip(paths, times)], "time")
+
+
+def _fetch_atmo_part(fs, ta, local, note) -> xr.Dataset:
+    """Primary bfg file valid at ``ta``; the previous cycle's copy if it is missing or
+    incomplete (a few are truncated in the archive, e.g. 19 in 1980)."""
+    try:
+        _fetch(fs, atmo_key(ta), local)
+        return _atmo_part(local, ta)
+    except (FileNotFoundError, KeyError, ValueError, OSError) as e:
+        logging.warning(
+            "bfg for %s unusable (%s: %s); using fallback", ta, type(e).__name__, e
         )
-    return xr.concat(parts, "time")
+        _fetch(fs, atmo_key(ta, fallback=True), local)
+        part = _atmo_part(local, ta)
+        note.append(f"{ta:%Y%m%dT%H}")
+        return part
 
 
 _STATE: dict = {}
@@ -209,11 +234,18 @@ def process_time(t: datetime.datetime) -> xr.Dataset:
         )
         del ds_o
         times = [t - datetime.timedelta(hours=3), t]
-        paths = []
-        for i, ta in enumerate(times):
-            paths.append(os.path.join(tmp, f"bfg{i}.nc"))
-            _fetch(fs, atmo_key(ta), paths[-1])
-        ds_a = atmo_dataset(paths, times)
+        note: list = []
+        ds_a = xr.concat(
+            [
+                _fetch_atmo_part(fs, ta, os.path.join(tmp, f"bfg{i}.nc"), note)
+                for i, ta in enumerate(times)
+            ],
+            "time",
+        )
+        for n in note:
+            d = os.path.join(S["out"], ".fallback")
+            os.makedirs(d, exist_ok=True)
+            open(os.path.join(d, f"{t:%Y%m%dT%H}_bfg{n}"), "w").close()
         atmo = P._process_atmo_chunk(
             ds_a,
             S["grid"],
