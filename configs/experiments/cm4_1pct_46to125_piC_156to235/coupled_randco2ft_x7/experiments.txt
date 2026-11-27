@@ -11,7 +11,7 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # --config-dir configs/experiments/cm4_eval/coupled
 1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|ran_1pct-ic0001-130yr|ema_ckpt_0001|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
 1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|failed_piC-ic0151-200yr|ema_ckpt_0001|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
-1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z|retry1|01M84ZPPZXBJDS9JETTWQ5MQ4F|running_piC-ic0151-200yr|ema_ckpt_0001|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
+1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z|retry1|01M84ZPPZXBJDS9JETTWQ5MQ4F|failed_piC-ic0151-200yr|ema_ckpt_0001|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
 1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|ran_1pct-ic0001-130yr|ema_ckpt_0002|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
 1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|ran_piC-ic0151-200yr|ema_ckpt_0002|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
 1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|ran_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
