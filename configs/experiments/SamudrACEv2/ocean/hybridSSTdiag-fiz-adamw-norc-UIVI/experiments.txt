@@ -1,0 +1,4 @@
+group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
+
+# launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/ocean/hybridSSTdiag-fiz-adamw-norc-UIVI . --config-dir configs/experiments/SamudrACEv2/eval/ocean
+# --config-dir configs/experiments/SamudrACEv2/eval/ocean
