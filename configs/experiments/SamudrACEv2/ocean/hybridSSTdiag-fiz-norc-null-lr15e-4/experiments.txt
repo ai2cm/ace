@@ -5,3 +5,6 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs0|01M8DJV155VNH6CWZ320E0HCZH|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
 SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs0|01M8DJV155VNH6CWZ320E0HCZH|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
+
+SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs1|01M8DJVFZNPPH5DQR35S4QVNCN|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs1|01M8DJVFZNPPH5DQR35S4QVNCN|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
