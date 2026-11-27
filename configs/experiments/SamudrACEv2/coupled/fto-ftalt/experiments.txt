@@ -41,3 +41,5 @@ SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_randco2-2
 SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M8CTRXNPZ0T3B01BV6EMTD3W
 SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M8CTRXNPZ0T3B01BV6EMTD3W
 SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M8CTRXNPZ0T3B01BV6EMTD3W
+
+SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|training|best_inference_ckpt|normal|--min-runtime 8h
