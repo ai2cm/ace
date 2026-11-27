@@ -5,4 +5,4 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 # Rows are 'deferred': set skip_or_train to 'train' only on the maintainer's launch go.
 
 1deg-hybridsstdiag-randco2ft-x15e3-jfto-x2ema||ace-samudra-coupled-cm4|eblogjwq|ema_ckpt_0003|deferred|urgent|titan|8||3|ai2/ace|seed=0|01M7HMHMXYA1C5QRQHQ0S8YD4Y|8h
-1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||ace-samudra-coupled-cm4|eblogjwq|ema_ckpt_0004|deferred|urgent|titan|8||3|ai2/ace|seed=0|01M7HMHMXYA1C5QRQHQ0S8YD4Y|8h
+1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||ace-samudra-coupled-cm4|eblogjwq|ema_ckpt_0004|train|urgent|titan|8||3|ai2/ace|seed=0|01M7HMHMXYA1C5QRQHQ0S8YD4Y|8h
