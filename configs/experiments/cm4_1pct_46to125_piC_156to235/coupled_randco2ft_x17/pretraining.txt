@@ -1,0 +1,7 @@
+group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb_id|atmos_ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|min_runtime|results_dataset_ocean|results_dataset_atmos
+
+# X17 = X2 (coupled_randco2ft_x1x2 X2 row) + X4's joint pairs (U106, D36 (a)).
+# results_dataset_{ocean,atmos} empty as in X2's row (runner resolves from wandb ids, as for X2).
+# Row is 'deferred': set skip_or_train to 'train' only on the maintainer's launch go.
+
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||ace-samudra-cm4|jrgclj2f|best_inference_ckpt|ace2-cm4-atmos-noLSM|wgz8np8z|best_inference_ckpt|deferred|urgent|titan|8||3|ai2/ace|seed=0|8h||
