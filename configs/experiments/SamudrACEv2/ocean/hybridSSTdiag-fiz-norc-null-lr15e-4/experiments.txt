@@ -2,3 +2,6 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 
 # launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/ocean/hybridSSTdiag-fiz-norc-null-lr15e-4 . --config-dir configs/experiments/SamudrACEv2/eval/ocean
 # --config-dir configs/experiments/SamudrACEv2/eval/ocean
+
+SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs0|01M8DJV155VNH6CWZ320E0HCZH|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs0|01M8DJV155VNH6CWZ320E0HCZH|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
