@@ -2,6 +2,7 @@ from .composite import (
     PatchPredictionConfig,
     PatchPredictor,
     check_input_shape_supported,
+    get_generation_model,
 )
 from .serial_denoising import (
     DenoisingExpertCheckpointConfig,
@@ -18,4 +19,5 @@ __all__ = [
     "PatchPredictionConfig",
     "PatchPredictor",
     "check_input_shape_supported",
+    "get_generation_model",
 ]

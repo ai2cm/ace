@@ -45,6 +45,7 @@ def mock_model():
     model = MagicMock()
     model.coarse_shape = (16, 16)
     model.fine_shape = (32, 32)
+    model.requires_training_patch_shape = True
     model.with_rolled_lon.return_value = model
     return model
 
@@ -168,9 +169,10 @@ def test_get_generation_model_raises_when_large_domain_without_patching(
 ):
     """
     Test _get_generation_model raises when domain is large but patching
-    not configured.
+    not configured, for a model with align_corners=True upsampling.
     """
     mock_model.coarse_shape = (16, 16)
+    mock_model.requires_training_patch_shape = True
     mock_output_target.patch = PatchPredictionConfig(divide_generation=False)
 
     downscaler = Downscaler(
@@ -179,8 +181,28 @@ def test_get_generation_model_raises_when_large_domain_without_patching(
     )
 
     set_coarse_extent_coords(mock_output_target, (32, 32))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="require patch prediction"):
         downscaler._get_generation_model(output=mock_output_target)
+
+
+def test_get_generation_model_full_large_domain_without_patching(
+    mock_model, mock_output_target
+):
+    """
+    Test _get_generation_model returns the unwrapped model for a large domain
+    without patching when the model does not use align_corners=True upsampling.
+    """
+    mock_model.coarse_shape = (16, 16)
+    mock_model.requires_training_patch_shape = False
+    mock_output_target.patch = PatchPredictionConfig(divide_generation=False)
+
+    downscaler = Downscaler(
+        model=mock_model,
+        outputs=[mock_output_target],
+    )
+
+    set_coarse_extent_coords(mock_output_target, (32, 32))
+    assert downscaler._get_generation_model(output=mock_output_target) is mock_model
 
 
 def test_run_target_generation_skips_padding_items(

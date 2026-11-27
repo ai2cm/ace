@@ -1,5 +1,5 @@
 import dataclasses
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any, Literal, Protocol
 
 import dacite
@@ -9,6 +9,10 @@ from fme.downscaling.modules.physicsnemo_unets_v1 import SongUNet
 from fme.downscaling.modules.physicsnemo_unets_v2 import SongUNetv2, apex_available
 from fme.downscaling.modules.preconditioners import EDMPrecond
 from fme.downscaling.modules.unet_diffusion import UNetDiffusionModule
+from fme.downscaling.modules.utils import validate_shape
+
+FineShapeValidator = Callable[[tuple[int, int]], None]
+"""Raises if a module cannot operate on inputs of the given fine (lat, lon) shape."""
 
 
 # TODO: Look into why we need to take in coarse and not target shape
@@ -22,6 +26,10 @@ class ModuleConfig(Protocol):
         sigma_data: float,
         use_amp_bf16: bool = False,
     ) -> torch.nn.Module: ...
+
+    def validate_fine_shape(self, fine_shape: tuple[int, int]) -> None:
+        """Raise if the built module cannot operate on inputs of ``fine_shape``."""
+        ...
 
 
 @dataclasses.dataclass
@@ -38,6 +46,10 @@ class PreBuiltBuilder:
         use_amp_bf16: bool = False,
     ) -> torch.nn.Module:
         return self.module
+
+    def validate_fine_shape(self, fine_shape: tuple[int, int]) -> None:
+        # Shape constraints of an arbitrary prebuilt module are unknown.
+        pass
 
 
 @dataclasses.dataclass
@@ -95,6 +107,13 @@ class UNetDiffusionSong:
             ),
             use_amp_bf16=use_amp_bf16,
         )
+
+    def validate_fine_shape(self, fine_shape: tuple[int, int]) -> None:
+        """
+        Raise if ``fine_shape`` cannot be halved once per downsampling level
+        of the U-Net, which is required for the decoder skip connections.
+        """
+        validate_shape(fine_shape, levels=len(self.channel_mult))
 
 
 @dataclasses.dataclass
@@ -164,6 +183,13 @@ class UNetDiffusionSongv2:
         )
         return module
 
+    def validate_fine_shape(self, fine_shape: tuple[int, int]) -> None:
+        """
+        Raise if ``fine_shape`` cannot be halved once per downsampling level
+        of the U-Net, which is required for the decoder skip connections.
+        """
+        validate_shape(fine_shape, levels=len(self.channel_mult))
+
 
 @dataclasses.dataclass
 class DiffusionModuleRegistrySelector:
@@ -199,17 +225,27 @@ class DiffusionModuleRegistrySelector:
         sigma_data: float,
         use_amp_bf16: bool = False,
     ) -> torch.nn.Module:
-        return dacite.from_dict(
-            data_class=NET_REGISTRY[self.type],
-            data=self.config,
-            config=dacite.Config(strict=True),
-        ).build(
+        return self._get_module_config().build(
             n_in_channels=n_in_channels,
             n_out_channels=n_out_channels,
             coarse_shape=coarse_shape,
             downscale_factor=downscale_factor,
             sigma_data=sigma_data,
             use_amp_bf16=use_amp_bf16,
+        )
+
+    def get_fine_shape_validator(self) -> FineShapeValidator:
+        """
+        Return a validator that raises if the module built by this selector
+        cannot operate on inputs of a given fine shape.
+        """
+        return self._get_module_config().validate_fine_shape
+
+    def _get_module_config(self) -> ModuleConfig:
+        return dacite.from_dict(
+            data_class=NET_REGISTRY[self.type],
+            data=self.config,
+            config=dacite.Config(strict=True),
         )
 
 
