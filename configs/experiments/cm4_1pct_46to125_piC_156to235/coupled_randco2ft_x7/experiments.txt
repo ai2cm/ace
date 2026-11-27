@@ -7,11 +7,13 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # deferred_upload_* rows wait for the results dataset to be committed with their EMA file (rerun the script);
 # running_/ran_/failed_* rows are already launched (queue_evals.py mark prefixes).
 # rows with row tag retry1 relaunch the failed_ row above them (node cordon), which they supersede (PRD U98, D32).
+# rows with config tag piC-ic0151-200yr-nofiles relaunch the failed_ piC row above them on titan, urgent, without netCDF files (PRD U120, D42).
 # launch: ./job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_randco2ft_x7 . --config-dir configs/experiments/cm4_eval/coupled
 # --config-dir configs/experiments/cm4_eval/coupled
 1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|ran_1pct-ic0001-130yr|ema_ckpt_0001|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
 1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|failed_piC-ic0151-200yr|ema_ckpt_0001|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
 1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z|retry1|01M84ZPPZXBJDS9JETTWQ5MQ4F|failed_piC-ic0151-200yr|ema_ckpt_0001|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
+1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z|retry2|01M84ZPPZXBJDS9JETTWQ5MQ4F|run_piC-ic0151-200yr-nofiles|ema_ckpt_0001|urgent|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ||titan
 1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|ran_1pct-ic0001-130yr|ema_ckpt_0002|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
 1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|ran_piC-ic0151-200yr|ema_ckpt_0002|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
 1deg-hybridsstdiag-randco2ft-x7-pclr-replay-jointpairs-wgz8np8z||01M84ZPPZXBJDS9JETTWQ5MQ4F|ran_1pct-ic0001-130yr|ema_ckpt_0003|high|--min-runtime 8h||01M84ZPQ04DEV983PRYKP9K9QJ
