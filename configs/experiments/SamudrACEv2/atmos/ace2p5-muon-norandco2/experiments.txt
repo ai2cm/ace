@@ -1,3 +1,5 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
 
 SamudrACEv2-ace2p5-muon-norandco2|rs0|01M8DQ2HASQ14Y8K8JM0DCDF2E|training|best_inference_ckpt|normal|--min-runtime 8h
+
+SamudrACEv2-ace2p5-muon-norandco2|rs1|01M8DQ30N1P02WRM10X9QF9VM5|training|best_inference_ckpt|normal|--min-runtime 8h
