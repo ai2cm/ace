@@ -135,7 +135,7 @@ A quick round before the fine-tunes finish: each fine-tune's `best_inference_ckp
 first epoch was saved as its own dataset and evaluated on all five scenarios with no field writes,
 under the run name `<run>-ep1` (so the ramp and piControl runs write to `<GCS root>/<run>-ep1-<scenario>`).
 That is `run-ace-evaluator.sh` with `OVERRIDE="data_writer.files=[]" JOB_SUFFIX=""` and
-`run_all <run>-ep1 <epoch-1 dataset>` in place of the listed runs. Analysis:
+`evaluate_all_scenarios <run>-ep1 <epoch-1 dataset>` in place of the listed runs. Analysis:
 explore2 `brianh/2026-06-09-land-atm-coupling/2026-11-25-snow-excursion-seeds/`.
 
 | run | epoch-1 dataset | `1pctco2` | `picontrol` | `randco2-{1x,2x,4x}co2` |

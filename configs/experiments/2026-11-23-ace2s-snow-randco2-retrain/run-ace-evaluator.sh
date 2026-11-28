@@ -89,7 +89,7 @@ run_evaluator() {
   fi
 }
 
-run_randco2() {
+evaluate_randco2_members() {
   local run="$1"
   local ckpt_dataset="$2"
   for level in 1x 2x 4x; do
@@ -97,19 +97,20 @@ run_randco2() {
   done
 }
 
-run_all() {
+evaluate_all_scenarios() {
   local run="$1"
   local ckpt_dataset="$2"
   # The ramp (~10 GPU-h plus writes) outlives the 8h min-runtime cap, so it runs
   # urgent to make preemption unlikely; the rest finish inside the cap.
   run_evaluator "$run" "$ckpt_dataset" 1pctco2 8h urgent
   run_evaluator "$run" "$ckpt_dataset" picontrol 8h normal
-  run_randco2 "$run" "$ckpt_dataset"
+  evaluate_randco2_members "$run" "$ckpt_dataset"
 }
 
 # Stage-2 result datasets (README); best_inference_ckpt.tar of each.
-run_randco2 cm4-control-pic-1pct      01M4RE0QHT2DE8V0QRCEWM43VA
-run_randco2 cm4-masked-naive-pic-1pct 01M4J32EDGBPFNG7W8PSANBFQN
-# The runs trained here are added as their fine-tunes finish, e.g.
-#   run_all cm4-masked-naive-pic-1pct-randco2-rs0 <stage-2 result dataset>
-#   run_all cm4-masked-naive-pic-1pct-rs1 <stage-2 result dataset>
+evaluate_randco2_members cm4-control-pic-1pct      01M4RE0QHT2DE8V0QRCEWM43VA
+evaluate_randco2_members cm4-masked-naive-pic-1pct 01M4J32EDGBPFNG7W8PSANBFQN
+# The runs trained here, added as their fine-tunes finish (launch each with its
+# "<run>-" filter, so the lines above are not resubmitted).
+evaluate_all_scenarios cm4-control-pic-1pct-rs1           01M8E6Z3Q75ZGA97ZX04EV2C37
+evaluate_all_scenarios cm4-control-pic-1pct-randco2-rs0   01M8EY5JPAHSB3CNVWJ0W2806A
