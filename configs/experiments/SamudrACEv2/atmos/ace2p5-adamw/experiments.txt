@@ -11,14 +11,14 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 # Evals of the fine-tuned seeds (SamudrACEv2-ace2p5-adamw-ft): one row per config at best_inference_ckpt.
 # launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/atmos/ace2p5-adamw . --config-dir configs/experiments/SamudrACEv2/eval/atmos-1pct-piC-nofiles-randco2
 # --config-dir configs/experiments/SamudrACEv2/eval/atmos-1pct-piC-nofiles-randco2
-SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|wait_1pct-ic0001-130yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|wait_piC-ic0151-200yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|wait_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|wait_randco2-1xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|wait_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|wait_randco2-2xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|wait_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|wait_randco2-4xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|run_1pct-ic0001-130yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|run_piC-ic0151-200yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|run_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|run_randco2-1xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|run_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|run_randco2-2xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|run_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|run_randco2-4xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
 
 SamudrACEv2-ace2p5-adamw-ft|rs1|01M8CRFHDEWVZ7BHADASXJAV1F|wait_1pct-ic0001-130yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
 SamudrACEv2-ace2p5-adamw-ft|rs1|01M8CRFHDEWVZ7BHADASXJAV1F|wait_piC-ic0151-200yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
