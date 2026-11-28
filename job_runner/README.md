@@ -160,7 +160,7 @@ G|rs0|<training experiment ID>|wait_<tag>|best_inference_ckpt|high|--min-runtime
   launch that config against the training's checkpoint.
 - `experiment_id` is the training's beaker experiment ID; `evaluate.sh`
   resolves its results dataset from it.
-- Row settings are the `EVAL_WAIT_*` variables in `lib.sh`.
+- Row settings are the `EVAL_WAIT_*` variables in `lib.sh`, except where the flags below override them.
 - `--eval-checkpoints <ckpt>[,<ckpt>...]` (needs `--eval-config-dir`) writes
   one row per config and checkpoint, the checkpoint in the `checkpoint` column,
   checkpoints varying fastest; without it each row uses `EVAL_WAIT_CHECKPOINT`.
@@ -171,6 +171,18 @@ G|rs0|<training experiment ID>|wait_<tag>|best_inference_ckpt|high|--min-runtime
   ```
   G|rs0|<training experiment ID>|wait_1pct|ema_ckpt_0001|high|--min-runtime 8h|...|1
   G|rs0|<training experiment ID>|wait_1pct|ema_ckpt_0002|high|--min-runtime 8h|...|1
+  ```
+- `--eval-priority <priority>` and `--eval-cluster <cluster>` (each needs
+  `--eval-config-dir`) set the `priority` and `cluster` columns of every row;
+  `evaluate.sh` passes them to gantry. Priority is one of `EVAL_PRIORITIES`
+  (`low normal high urgent`); cluster is one of `EVAL_CLUSTER_ALIASES` (the
+  `build_cluster_args` aliases) or a `node_caps.txt` cluster, as `<name>` or
+  `ai2/<name>`. Anything else stops the script before any submission. Without
+  them, rows keep `EVAL_WAIT_PRIORITY` and `EVAL_WAIT_CLUSTER` (blank). With
+  `--eval-checkpoints ema_ckpt_0001 --eval-priority urgent --eval-cluster titan`:
+
+  ```
+  G|rs0|<training experiment ID>|wait_1pct|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
   ```
 - The directory resolves as `--config-dir` does (absolute, or relative to the
   repository root, and inside it). A directory with no
@@ -297,9 +309,12 @@ This is useful for:
 - `validate_config_once()`: Validate a config; under `--dry-run`, once per unique config and overrides
 - `parse_config_dir_arg()`: Parse `--config-dir` argument into `CONFIG_DIR_OVERRIDE`
 - `resolve_config_dir()`: Resolve `--config-dir` to a repo-root-relative path, rejecting one outside the repository root
-- `parse_eval_config_dir_arg()`: Parse `--eval-config-dir` and `--eval-checkpoints` into `EVAL_CONFIG_DIR_OVERRIDE` and `EVAL_CHECKPOINTS_OVERRIDE`
-- `resolve_eval_config_dir()`: Resolve `--eval-config-dir` into `EVAL_CONFIG_DIR`, its `EVAL_CONFIG_TAGS`, and `EVAL_CHECKPOINTS`
+- `parse_eval_config_dir_arg()`: Parse `--eval-config-dir`, `--eval-checkpoints`, `--eval-priority` and `--eval-cluster` into `EVAL_*_OVERRIDE` and `EVAL_*_GIVEN`
+- `resolve_eval_config_dir()`: Resolve `--eval-config-dir` into `EVAL_CONFIG_DIR`, its `EVAL_CONFIG_TAGS`, `EVAL_CHECKPOINTS`, `EVAL_PRIORITY` and `EVAL_CLUSTER`
 - `resolve_eval_checkpoints()`: Split and check `--eval-checkpoints` into `EVAL_CHECKPOINTS`
+- `resolve_eval_priority_and_cluster()`: Check `--eval-priority` / `--eval-cluster` into `EVAL_PRIORITY` / `EVAL_CLUSTER`
+- `node_caps_clusters()`: Print the cluster names in `node_caps.txt`
+- `is_one_of()`: Succeed when a value equals one of the listed values
 
 **Output and Logging:**
 - `print_dry_run_header()`: Print dry-run mode header
