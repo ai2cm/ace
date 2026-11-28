@@ -6,8 +6,8 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs0|01M8DJV155VNH6CWZ320E0HCZH|running_1pct-ic0001-130yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
 SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs0|01M8DJV155VNH6CWZ320E0HCZH|running_piC-ic0151-200yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
 
-SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs1|01M8DJVFZNPPH5DQR35S4QVNCN|run_1pct-ic0001-130yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
-SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs1|01M8DJVFZNPPH5DQR35S4QVNCN|run_piC-ic0151-200yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs1|01M8DJVFZNPPH5DQR35S4QVNCN|running_1pct-ic0001-130yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs1|01M8DJVFZNPPH5DQR35S4QVNCN|running_piC-ic0151-200yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
 
 SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs2|01M8DJVZKQZR173Z8JATVBMM2C|wait_1pct-ic0001-130yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
 SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs2|01M8DJVZKQZR173Z8JATVBMM2C|wait_piC-ic0151-200yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
