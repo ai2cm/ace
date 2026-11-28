@@ -49,6 +49,11 @@ https://github.com/ai2cm/full-model/compare/job_runner
   each submitted run gets one `wait_<tag>` row per `evaluator-config-<tag>.yaml`
   in `<path>` (training's experiment ID, `high` priority, `--min-runtime 8h`, 1
   GPU) and no `training` row; `tests/test_train_eval_config_dir.sh`
+- [FEAT] `--eval-checkpoints <ckpt>[,<ckpt>...]` with `--eval-config-dir`: one
+  `wait_<tag>` row per evaluator config and checkpoint (checkpoint in the
+  `checkpoint` column, e.g. `ema_ckpt_0001`) instead of one
+  `best_inference_ckpt` row per config; checkpoint names are `[A-Za-z0-9_.]`
+  (no `-`, so that eval job names stay distinct per checkpoint)
 
 ### Changed
 

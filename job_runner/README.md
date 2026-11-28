@@ -161,6 +161,17 @@ G|rs0|<training experiment ID>|wait_<tag>|best_inference_ckpt|high|--min-runtime
 - `experiment_id` is the training's beaker experiment ID; `evaluate.sh`
   resolves its results dataset from it.
 - Row settings are the `EVAL_WAIT_*` variables in `lib.sh`.
+- `--eval-checkpoints <ckpt>[,<ckpt>...]` (needs `--eval-config-dir`) writes
+  one row per config and checkpoint, the checkpoint in the `checkpoint` column,
+  checkpoints varying fastest; without it each row uses `EVAL_WAIT_CHECKPOINT`.
+  Names are `[A-Za-z0-9_.]`: a `-` could make two job names identical.
+  `evaluate.sh` puts the checkpoint in the job group
+  (`<group>-eval_<ckpt>-<tag>`), so job and wandb names differ per checkpoint:
+
+  ```
+  G|rs0|<training experiment ID>|wait_1pct|ema_ckpt_0001|high|--min-runtime 8h|...|1
+  G|rs0|<training experiment ID>|wait_1pct|ema_ckpt_0002|high|--min-runtime 8h|...|1
+  ```
 - The directory resolves as `--config-dir` does (absolute, or relative to the
   repository root, and inside it). A directory with no
   `evaluator-config-*.yaml` stops the script before any submission.
@@ -286,8 +297,9 @@ This is useful for:
 - `validate_config_once()`: Validate a config; under `--dry-run`, once per unique config and overrides
 - `parse_config_dir_arg()`: Parse `--config-dir` argument into `CONFIG_DIR_OVERRIDE`
 - `resolve_config_dir()`: Resolve `--config-dir` to a repo-root-relative path, rejecting one outside the repository root
-- `parse_eval_config_dir_arg()`: Parse `--eval-config-dir` argument into `EVAL_CONFIG_DIR_OVERRIDE`
-- `resolve_eval_config_dir()`: Resolve `--eval-config-dir` into `EVAL_CONFIG_DIR` and its `EVAL_CONFIG_TAGS`
+- `parse_eval_config_dir_arg()`: Parse `--eval-config-dir` and `--eval-checkpoints` into `EVAL_CONFIG_DIR_OVERRIDE` and `EVAL_CHECKPOINTS_OVERRIDE`
+- `resolve_eval_config_dir()`: Resolve `--eval-config-dir` into `EVAL_CONFIG_DIR`, its `EVAL_CONFIG_TAGS`, and `EVAL_CHECKPOINTS`
+- `resolve_eval_checkpoints()`: Split and check `--eval-checkpoints` into `EVAL_CHECKPOINTS`
 
 **Output and Logging:**
 - `print_dry_run_header()`: Print dry-run mode header
