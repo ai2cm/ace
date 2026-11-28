@@ -1,0 +1,7 @@
+group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
+
+# X18 stage 2 = X2 initialized from the coupled /ckpt.tar = X18 stage 1 (4 epochs, D44 Outcome (2)) best_inference_ckpt (ckpt_type as X13 from no228urh).
+# wandb_id and results_dataset are placeholders (X18S1_WANDB_ID, X18S1_RESULTS_DATASET): fill from stage 1 after it finishes.
+# Row is 'deferred': set skip_or_train to 'train' only on the maintainer's launch go.
+
+1deg-hybridsstdiag-randco2ft-x18s2-pclr-replayonly-x18s1||ace-samudra-coupled-cm4|X18S1_WANDB_ID|best_inference_ckpt|deferred|urgent|titan|8||3|ai2/ace|seed=0|X18S1_RESULTS_DATASET|8h
