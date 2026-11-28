@@ -1,3 +1,14 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
 
-1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|training|best_inference_ckpt|normal|--min-runtime 8h
+# X17 01M8DPHV3BV65KF56J24BS5ZAV (max_epochs 4): coupled evals, one row per (config, EMA checkpoint ema_ckpt_0001, ema_ckpt_0002, ema_ckpt_0003, ema_ckpt_0004).
+# Random-CO2 evals of its lifted atmosphere: configs/experiments/cm4_1pct_46to125_piC_156to235/atmos_randco2ft_lifted/experiments.txt
+# launch: ./job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_randco2ft_x17 . --config-dir configs/experiments/cm4_eval/coupled-1pct-piC-nofiles
+# --config-dir configs/experiments/cm4_eval/coupled-1pct-piC-nofiles
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0003|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0004|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0003|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0004|urgent|--min-runtime 8h||||titan||||1|

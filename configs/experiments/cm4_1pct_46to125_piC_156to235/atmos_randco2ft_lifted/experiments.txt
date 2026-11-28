@@ -175,3 +175,44 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 1deg-hybridsstdiag-randco2ft-x13-pclr-replay-jointpairs-no228urh||01M88XR6M9NDR1DYY17MC993HG|ran_randco2-1xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M8AMGCBWF5XSV70GM6QC0NJV
 1deg-hybridsstdiag-randco2ft-x13-pclr-replay-jointpairs-no228urh||01M88XR6M9NDR1DYY17MC993HG|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M8AMGCBWF5XSV70GM6QC0NJV
 1deg-hybridsstdiag-randco2ft-x13-pclr-replay-jointpairs-no228urh||01M88XR6M9NDR1DYY17MC993HG|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M8AMGCBWF5XSV70GM6QC0NJV
+
+# X15e4 (max_epochs 2 -> ema_ckpt_0001, ema_ckpt_0002) and X17 (max_epochs 4 -> ema_ckpt_0001..ema_ckpt_0004): random-CO2 evals (sstblend and non-sstblend) of the lifted atmosphere, one row per (config, EMA checkpoint).
+# launch: ./job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/atmos_randco2ft_lifted . --config-dir configs/experiments/cm4_eval/atmos-randco2 --lift-coupled-atmosphere
+# --config-dir configs/experiments/cm4_eval/atmos-randco2
+1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-1xCO2-ic3|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-1xCO2-ic3|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-2xCO2-ic3|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-2xCO2-ic3|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-4xCO2-ic3|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-4xCO2-ic3|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0003|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0004|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-1xCO2-ic3|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-1xCO2-ic3|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-1xCO2-ic3|ema_ckpt_0003|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-1xCO2-ic3|ema_ckpt_0004|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0003|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0004|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-2xCO2-ic3|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-2xCO2-ic3|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-2xCO2-ic3|ema_ckpt_0003|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-2xCO2-ic3|ema_ckpt_0004|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0003|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0004|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-4xCO2-ic3|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-4xCO2-ic3|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-4xCO2-ic3|ema_ckpt_0003|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-4xCO2-ic3|ema_ckpt_0004|urgent|--min-runtime 8h||||titan||||1|

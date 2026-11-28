@@ -1,3 +1,10 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
 
-1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|training|best_inference_ckpt|normal|--min-runtime 8h
+# X15e4 01M8DPGTASHWEMB5Z72F82YSW0 (max_epochs 2): coupled evals, one row per (config, EMA checkpoint ema_ckpt_0001, ema_ckpt_0002).
+# Random-CO2 evals of its lifted atmosphere: configs/experiments/cm4_1pct_46to125_piC_156to235/atmos_randco2ft_lifted/experiments.txt
+# launch: ./job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/coupled_randco2ft_x15 . --config-dir configs/experiments/cm4_eval/coupled-1pct-piC-nofiles
+# --config-dir configs/experiments/cm4_eval/coupled-1pct-piC-nofiles
+1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
