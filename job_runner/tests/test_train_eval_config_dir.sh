@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests {uncoupled,coupled}_{train,finetune}.sh experiments.txt rows with and without
-# --eval-config-dir. Runs the real scripts in a throwaway git repo with a bare
+# --eval-config-dir and --eval-checkpoints. Runs the real scripts in a throwaway git repo with a bare
 # origin; gantry, beaker and python are stubs, so nothing is launched.
 # Usage: bash job_runner/tests/test_train_eval_config_dir.sh
 # JOB_RUNNER_SRC=<dir> tests another copy of job_runner/.
@@ -181,6 +181,39 @@ F1|ft2|${EXPER_ID}|wait_piC-ic0151${WAIT_ROW_TAIL}"
     check_pushed "$SCRIPT --eval-config-dir" "$REPO"
 done
 
+# With --eval-checkpoints: one wait_<tag> row per config x checkpoint, checkpoints fastest
+CKPT_ROW_TAIL="|high|--min-runtime 8h||||||||1|"
+for CASE in "uncoupled_train.sh:G1:rs0:rs2" "coupled_finetune.sh:F1:ft0:ft2"; do
+    IFS=: read -r SCRIPT GROUP TAG_A TAG_B <<<"$CASE"
+    REPO=$(new_repo "${SCRIPT%.sh}-ckpts")
+    run_script "$REPO" "$SCRIPT" --eval-config-dir eval_configs --eval-checkpoints ema_ckpt_0001,ema_ckpt_0002 ||
+        { fail "$SCRIPT --eval-checkpoints exit"; cat "$WORK/out"; }
+    EXPECTED="$HEADER"
+    for TAG in "$TAG_A" "$TAG_B"; do
+        EXPECTED+=$'\n'
+        for CONFIG_TAG in 1pct piC-ic0151; do
+            for CKPT in ema_ckpt_0001 ema_ckpt_0002; do
+                EXPECTED+=$'\n'"${GROUP}|${TAG}|${EXPER_ID}|wait_${CONFIG_TAG}|${CKPT}${CKPT_ROW_TAIL}"
+            done
+        done
+    done
+    check_file "$SCRIPT --eval-checkpoints" "$REPO/exper/coupled/cfg/experiments.txt" "$EXPECTED"
+    check_pushed "$SCRIPT --eval-checkpoints" "$REPO"
+done
+
+REPO=$(new_repo ckpts-dry-run)
+run_script "$REPO" uncoupled_train.sh --dry-run --eval-config-dir eval_configs --eval-checkpoints ema_ckpt_0001,ema_ckpt_0002 ||
+    { fail "--eval-checkpoints dry run exit"; cat "$WORK/out"; }
+if [[ ! -e "$REPO/exper/coupled/cfg/experiments.txt" ]] &&
+    grep -qxF "      G1|rs2|01234567890abcdef|wait_piC-ic0151|ema_ckpt_0002${CKPT_ROW_TAIL}" "$WORK/out" &&
+    grep -qxF "  Eval Checkpoints: ema_ckpt_0001 ema_ckpt_0002" "$WORK/out" &&
+    grep -qF "Append 8 wait_<tag> entries to experiments.txt (4 per job;" "$WORK/out"; then
+    pass "--eval-checkpoints dry run prints per-checkpoint rows, writes nothing"
+else
+    fail "--eval-checkpoints dry run"
+    cat "$WORK/out"
+fi
+
 # Dry run: rows printed, nothing written or committed
 for CASE in "uncoupled_train.sh:G1|rs2:4" "coupled_train.sh:C1|rs0:2" "uncoupled_finetune.sh:F1|ft2:4" \
     "coupled_finetune.sh:F1|ft2:4"; do
@@ -219,6 +252,39 @@ for CASE in "missing:no_such_dir:is not a directory" \
         pass "--eval-config-dir $NAME refused"
     else
         fail "--eval-config-dir $NAME"
+        cat "$WORK/out"
+    fi
+done
+
+# Bad --eval-checkpoints: refused before any submission
+for CASE in "no dir:-:ema_ckpt_0001:requires --eval-config-dir" \
+    "no value:eval_configs::requires a comma-separated checkpoint list" \
+    "empty string:eval_configs::empty checkpoint name" \
+    "empty string no dir:-::requires --eval-config-dir" \
+    "trailing comma:eval_configs:ema_ckpt_0001,:empty checkpoint name" \
+    "leading comma:eval_configs:,ema_ckpt_0001:names must be non-empty" \
+    "inner empty:eval_configs:ema_ckpt_0001,,ema_ckpt_0002:names must be non-empty" \
+    "pipe:eval_configs:ema|ckpt:names must be non-empty" \
+    "space:eval_configs:ema ckpt:names must be non-empty" \
+    "flag as value:eval_configs:--dry-run:names must be non-empty" \
+    "hyphen:eval_configs:ema_ckpt_0001,ema-ckpt:names must be non-empty" \
+    "repeat:eval_configs:ema_ckpt_0001,ema_ckpt_0001:repeats ema_ckpt_0001"; do
+    IFS=: read -r NAME DIR CKPTS MESSAGE <<<"$CASE"
+    REPO=$(new_repo "bad-ckpts-${NAME// /-}")
+    ARGS=()
+    [[ "$DIR" != "-" ]] && ARGS+=(--eval-config-dir "$DIR")
+    if [[ "$NAME" == "no value" ]]; then
+        ARGS+=(--eval-checkpoints)
+    else
+        ARGS+=(--eval-checkpoints "$CKPTS")
+    fi
+    if ! run_script "$REPO" uncoupled_train.sh "${ARGS[@]}" &&
+        grep -qF -- "$MESSAGE" "$WORK/out" &&
+        ! grep -qF "Launching" "$WORK/out" &&
+        [[ ! -e "$REPO/exper/coupled/cfg/experiments.txt" ]]; then
+        pass "--eval-checkpoints $NAME refused"
+    else
+        fail "--eval-checkpoints $NAME"
         cat "$WORK/out"
     fi
 done

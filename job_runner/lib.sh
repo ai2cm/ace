@@ -464,16 +464,19 @@ experiments_row() {
     echo "${FIELDS[*]}"
 }
 
-# Print the wait_<tag> rows of one submitted training, one per EVAL_CONFIG_TAGS
-# entry, each carrying the training's experiment ID
+# Print the wait_<tag> rows of one submitted training, one per
+# EVAL_CONFIG_TAGS x EVAL_CHECKPOINTS entry (checkpoints vary fastest), each
+# carrying the training's experiment ID
 # Args: JOB_GROUP TAG EXPERIMENT_ID
 eval_wait_rows() {
-    local JOB_GROUP="$1" TAG="$2" EXPERIMENT_ID="$3" CONFIG_TAG
+    local JOB_GROUP="$1" TAG="$2" EXPERIMENT_ID="$3" CONFIG_TAG CHECKPOINT
     for CONFIG_TAG in "${EVAL_CONFIG_TAGS[@]}"; do
-        experiments_row group="$JOB_GROUP" tag="$TAG" experiment_id="$EXPERIMENT_ID" \
-            status="wait_${CONFIG_TAG}" checkpoint="$EVAL_WAIT_CHECKPOINT" \
-            priority="$EVAL_WAIT_PRIORITY" min_runtime="$EVAL_WAIT_MIN_RUNTIME" \
-            n_gpus="$EVAL_WAIT_N_GPUS"
+        for CHECKPOINT in "${EVAL_CHECKPOINTS[@]}"; do
+            experiments_row group="$JOB_GROUP" tag="$TAG" experiment_id="$EXPERIMENT_ID" \
+                status="wait_${CONFIG_TAG}" checkpoint="$CHECKPOINT" \
+                priority="$EVAL_WAIT_PRIORITY" min_runtime="$EVAL_WAIT_MIN_RUNTIME" \
+                n_gpus="$EVAL_WAIT_N_GPUS"
+        done
     done
 }
 
@@ -624,11 +627,15 @@ resolve_config_dir() {
     echo "${RESOLVED#"${ROOT_RESOLVED}"/}"
 }
 
-# Parse --eval-config-dir argument from arguments
-# Sets global EVAL_CONFIG_DIR_OVERRIDE (empty when the flag is absent)
+# Parse --eval-config-dir and --eval-checkpoints arguments from arguments
+# Sets globals EVAL_CONFIG_DIR_OVERRIDE and EVAL_CHECKPOINTS_OVERRIDE (each
+# empty when its flag is absent), and EVAL_CHECKPOINTS_GIVEN (1 when
+# --eval-checkpoints is given, even with an empty value)
 # Usage: parse_eval_config_dir_arg "$@"
 parse_eval_config_dir_arg() {
     EVAL_CONFIG_DIR_OVERRIDE=""
+    EVAL_CHECKPOINTS_OVERRIDE=""
+    EVAL_CHECKPOINTS_GIVEN=""
     while [[ $# -gt 0 ]]; do
         case $1 in
             --eval-config-dir)
@@ -637,6 +644,15 @@ parse_eval_config_dir_arg() {
                     exit 1
                 fi
                 EVAL_CONFIG_DIR_OVERRIDE="$2"
+                shift 2
+                ;;
+            --eval-checkpoints)
+                if [[ $# -lt 2 ]]; then
+                    echo "Error: --eval-checkpoints requires a comma-separated checkpoint list" >&2
+                    exit 1
+                fi
+                EVAL_CHECKPOINTS_OVERRIDE="$2"
+                EVAL_CHECKPOINTS_GIVEN=1
                 shift 2
                 ;;
             *)
@@ -650,15 +666,24 @@ parse_eval_config_dir_arg() {
 # evaluator-config-<tag>.yaml -> <tag>, the inverse of evaluate.sh's
 # run_<tag> -> evaluator-config-<tag>.yaml
 # Requires REPO_ROOT, so call after init_script_environment
-# Sets EVAL_CONFIG_DIR (repo-root-relative; empty without the flag) and the
-# EVAL_CONFIG_TAGS array; exits when the directory holds no evaluator config
+# Sets EVAL_CONFIG_DIR (repo-root-relative; empty without the flag), the
+# EVAL_CONFIG_TAGS array, and the EVAL_CHECKPOINTS array (--eval-checkpoints
+# split on commas, else EVAL_WAIT_CHECKPOINT); exits when the directory holds
+# no evaluator config or the checkpoint list is malformed
 # Usage: resolve_eval_config_dir "$EXPERIMENT_DIR" "$CONFIG_SUBDIR"
 resolve_eval_config_dir() {
     EVAL_CONFIG_DIR=""
     EVAL_CONFIG_TAGS=()
+    EVAL_CHECKPOINTS=()
     if [[ -z "$EVAL_CONFIG_DIR_OVERRIDE" ]]; then
+        if [[ -n "$EVAL_CHECKPOINTS_GIVEN" ]]; then
+            echo "Error: --eval-checkpoints requires --eval-config-dir" >&2
+            exit 1
+        fi
         return
     fi
+
+    resolve_eval_checkpoints
 
     EVAL_CONFIG_DIR=$(resolve_config_dir "$1" "$2" "$EVAL_CONFIG_DIR_OVERRIDE" --eval-config-dir) || exit 1
 
@@ -675,11 +700,41 @@ resolve_eval_config_dir() {
     fi
 }
 
+# Set EVAL_CHECKPOINTS from EVAL_CHECKPOINTS_OVERRIDE; exits on an empty,
+# repeated, or non-[A-Za-z0-9_.] checkpoint name (no -, so that
+# evaluate.sh's <group>-eval_<ckpt>-<tag> job names stay distinct)
+resolve_eval_checkpoints() {
+    if [[ -z "$EVAL_CHECKPOINTS_GIVEN" ]]; then
+        EVAL_CHECKPOINTS=("$EVAL_WAIT_CHECKPOINT")
+        return
+    fi
+
+    local CHECKPOINT SEEN=","
+    IFS=, read -r -a EVAL_CHECKPOINTS <<<"$EVAL_CHECKPOINTS_OVERRIDE"
+    # read drops one trailing empty field, so check the raw string too
+    if [[ "$EVAL_CHECKPOINTS_OVERRIDE" == *, ]] || [[ ${#EVAL_CHECKPOINTS[@]} -eq 0 ]]; then
+        echo "Error: --eval-checkpoints has an empty checkpoint name: $EVAL_CHECKPOINTS_OVERRIDE" >&2
+        exit 1
+    fi
+    for CHECKPOINT in "${EVAL_CHECKPOINTS[@]}"; do
+        if [[ ! "$CHECKPOINT" =~ ^[A-Za-z0-9_.]+$ ]]; then
+            echo "Error: --eval-checkpoints names must be non-empty [A-Za-z0-9_.] (no -): '$CHECKPOINT' in $EVAL_CHECKPOINTS_OVERRIDE" >&2
+            exit 1
+        fi
+        if [[ "$SEEN" == *",$CHECKPOINT,"* ]]; then
+            echo "Error: --eval-checkpoints repeats $CHECKPOINT: $EVAL_CHECKPOINTS_OVERRIDE" >&2
+            exit 1
+        fi
+        SEEN+="$CHECKPOINT,"
+    done
+}
+
 # gantry --min-runtime when a row leaves min_runtime blank. 0 is backfill-only.
 DEFAULT_MIN_RUNTIME=8h
 
 # Settings of the wait_<tag> rows written for --eval-config-dir; evaluate.sh
-# reads them once the row is flipped to run_<tag>
+# reads them once the row is flipped to run_<tag>. EVAL_WAIT_CHECKPOINT is the
+# checkpoint when --eval-checkpoints is absent.
 EVAL_WAIT_CHECKPOINT=best_inference_ckpt
 EVAL_WAIT_PRIORITY=high
 EVAL_WAIT_MIN_RUNTIME="--min-runtime $DEFAULT_MIN_RUNTIME"
@@ -775,6 +830,9 @@ print_dry_run_header() {
         if [[ -n "${EVAL_CONFIG_DIR:-}" ]]; then
             echo "  Eval Config Directory: $EVAL_CONFIG_DIR"
             echo "  Eval Config Tags: ${EVAL_CONFIG_TAGS[*]}"
+            if [[ -n "$EVAL_CHECKPOINTS_GIVEN" ]]; then
+                echo "  Eval Checkpoints: ${EVAL_CHECKPOINTS[*]}"
+            fi
         fi
         print_stats_config
         echo
@@ -923,7 +981,8 @@ print_dry_run_summary() {
         echo "  - Launch $2 gantry jobs"
         echo "  - Commit $2 config files to git"
         if [[ -n "${EVAL_CONFIG_DIR:-}" ]]; then
-            echo "  - Append $(( $2 * ${#EVAL_CONFIG_TAGS[@]} )) wait_<tag> entries to experiments.txt (${#EVAL_CONFIG_TAGS[@]} per job; no training entries)"
+            local ROWS_PER_JOB=$(( ${#EVAL_CONFIG_TAGS[@]} * ${#EVAL_CHECKPOINTS[@]} ))
+            echo "  - Append $(( $2 * ROWS_PER_JOB )) wait_<tag> entries to experiments.txt (${ROWS_PER_JOB} per job; no training entries)"
         else
             echo "  - Append $2 entries to experiments.txt"
         fi
