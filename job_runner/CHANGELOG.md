@@ -54,6 +54,12 @@ https://github.com/ai2cm/full-model/compare/job_runner
   `checkpoint` column, e.g. `ema_ckpt_0001`) instead of one
   `best_inference_ckpt` row per config; checkpoint names are `[A-Za-z0-9_.]`
   (no `-`, so that eval job names stay distinct per checkpoint)
+- [FEAT] `--eval-priority <priority>` and `--eval-cluster <cluster>` with
+  `--eval-config-dir`: set the `priority` and `cluster` columns of every
+  `wait_<tag>` row (e.g. `urgent`, `titan`); priority is one of
+  `low|normal|high|urgent`, cluster a `build_cluster_args` alias or a
+  `node_caps.txt` cluster (`<name>` or `ai2/<name>`), checked before any
+  submission; absent, rows keep `EVAL_WAIT_PRIORITY` and a blank cluster
 
 ### Changed
 

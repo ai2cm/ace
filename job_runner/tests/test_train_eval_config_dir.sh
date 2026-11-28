@@ -1,7 +1,8 @@
 #!/bin/bash
 # Tests {uncoupled,coupled}_{train,finetune}.sh experiments.txt rows with and without
-# --eval-config-dir and --eval-checkpoints. Runs the real scripts in a throwaway git repo with a bare
-# origin; gantry, beaker and python are stubs, so nothing is launched.
+# --eval-config-dir, --eval-checkpoints, --eval-priority and --eval-cluster. Runs the real
+# scripts in a throwaway git repo with a bare origin; gantry, beaker and python are stubs, so
+# nothing is launched.
 # Usage: bash job_runner/tests/test_train_eval_config_dir.sh
 # JOB_RUNNER_SRC=<dir> tests another copy of job_runner/.
 
@@ -285,6 +286,85 @@ for CASE in "no dir:-:ema_ckpt_0001:requires --eval-config-dir" \
         pass "--eval-checkpoints $NAME refused"
     else
         fail "--eval-checkpoints $NAME"
+        cat "$WORK/out"
+    fi
+done
+
+# With --eval-priority / --eval-cluster: every wait_<tag> row carries them
+for CASE in "uncoupled_train.sh:G1:rs0:rs2:urgent:titan:--eval-checkpoints ema_ckpt_0001,ema_ckpt_0002" \
+    "coupled_finetune.sh:F1:ft0:ft2:low:ai2/jupiter:" \
+    "uncoupled_finetune.sh:F1:ft0:ft2:urgent::" \
+    "coupled_train.sh:C1:rs0::high:jupiter+titan:"; do
+    IFS=: read -r SCRIPT GROUP TAG_A TAG_B PRIORITY CLUSTER EXTRA <<<"$CASE"
+    ARGS=(--eval-config-dir eval_configs --eval-priority "$PRIORITY")
+    [[ -n "$CLUSTER" ]] && ARGS+=(--eval-cluster "$CLUSTER")
+    CKPTS=(best_inference_ckpt)
+    if [[ -n "$EXTRA" ]]; then
+        read -r -a EXTRA_ARGS <<<"$EXTRA"
+        ARGS+=("${EXTRA_ARGS[@]}")
+        CKPTS=(ema_ckpt_0001 ema_ckpt_0002)
+    fi
+    REPO=$(new_repo "${SCRIPT%.sh}-placement")
+    run_script "$REPO" "$SCRIPT" "${ARGS[@]}" || { fail "$SCRIPT --eval-priority/--eval-cluster exit"; cat "$WORK/out"; }
+    EXPECTED="$HEADER"
+    for TAG in $TAG_A $TAG_B; do
+        EXPECTED+=$'\n'
+        for CONFIG_TAG in 1pct piC-ic0151; do
+            for CKPT in "${CKPTS[@]}"; do
+                EXPECTED+=$'\n'"${GROUP}|${TAG}|${EXPER_ID}|wait_${CONFIG_TAG}|${CKPT}|${PRIORITY}|--min-runtime 8h||||${CLUSTER}||||1|"
+            done
+        done
+    done
+    check_file "$SCRIPT ${ARGS[*]}" "$REPO/exper/coupled/cfg/experiments.txt" "$EXPECTED"
+    check_pushed "$SCRIPT ${ARGS[*]}" "$REPO"
+done
+
+REPO=$(new_repo placement-dry-run)
+run_script "$REPO" coupled_train.sh --dry-run --eval-config-dir eval_configs --eval-priority urgent --eval-cluster titan ||
+    { fail "--eval-priority/--eval-cluster dry run exit"; cat "$WORK/out"; }
+if [[ ! -e "$REPO/exper/coupled/cfg/experiments.txt" ]] &&
+    grep -qxF "      C1|rs0|01234567890abcdef|wait_1pct|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|" "$WORK/out" &&
+    grep -qxF "  Eval Priority: urgent" "$WORK/out" &&
+    grep -qxF "  Eval Cluster: titan" "$WORK/out"; then
+    pass "--eval-priority/--eval-cluster dry run prints rows, writes nothing"
+else
+    fail "--eval-priority/--eval-cluster dry run"
+    cat "$WORK/out"
+fi
+
+# Bad --eval-priority / --eval-cluster: refused before any submission
+for CASE in "priority no dir:-:--eval-priority:urgent:--eval-priority requires --eval-config-dir" \
+    "cluster no dir:-:--eval-cluster:titan:--eval-cluster requires --eval-config-dir" \
+    "priority no value:eval_configs:--eval-priority::requires a priority" \
+    "cluster no value:eval_configs:--eval-cluster::requires a cluster" \
+    "priority empty string:eval_configs:--eval-priority::must be one of" \
+    "priority empty string no dir:-:--eval-priority::--eval-priority requires --eval-config-dir" \
+    "cluster empty string:eval_configs:--eval-cluster::must be one of" \
+    "priority unknown:eval_configs:--eval-priority:preemptible:must be one of" \
+    "priority case:eval_configs:--eval-priority:Urgent:must be one of" \
+    "priority two words:eval_configs:--eval-priority:high urgent:must be one of" \
+    "priority flag as value:eval_configs:--eval-priority:--dry-run:must be one of" \
+    "cluster typo:eval_configs:--eval-cluster:titian:must be one of" \
+    "cluster pipe:eval_configs:--eval-cluster:titan|x:must be one of" \
+    "cluster two words:eval_configs:--eval-cluster:jupiter titan:must be one of" \
+    "cluster ai2 alias:eval_configs:--eval-cluster:ai2/b200:must be one of" \
+    "cluster ai2 empty:eval_configs:--eval-cluster:ai2/:must be one of"; do
+    IFS=: read -r NAME DIR FLAG VALUE MESSAGE <<<"$CASE"
+    REPO=$(new_repo "bad-placement-${NAME// /-}")
+    ARGS=()
+    [[ "$DIR" != "-" ]] && ARGS+=(--eval-config-dir "$DIR")
+    if [[ "$NAME" == *"no value" ]]; then
+        ARGS+=("$FLAG")
+    else
+        ARGS+=("$FLAG" "$VALUE")
+    fi
+    if ! run_script "$REPO" uncoupled_train.sh "${ARGS[@]}" &&
+        grep -qF -- "$MESSAGE" "$WORK/out" &&
+        ! grep -qF "Launching" "$WORK/out" &&
+        [[ ! -e "$REPO/exper/coupled/cfg/experiments.txt" ]]; then
+        pass "$FLAG $NAME refused"
+    else
+        fail "$FLAG $NAME"
         cat "$WORK/out"
     fi
 done
