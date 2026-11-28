@@ -474,8 +474,8 @@ eval_wait_rows() {
         for CHECKPOINT in "${EVAL_CHECKPOINTS[@]}"; do
             experiments_row group="$JOB_GROUP" tag="$TAG" experiment_id="$EXPERIMENT_ID" \
                 status="wait_${CONFIG_TAG}" checkpoint="$CHECKPOINT" \
-                priority="$EVAL_WAIT_PRIORITY" min_runtime="$EVAL_WAIT_MIN_RUNTIME" \
-                n_gpus="$EVAL_WAIT_N_GPUS"
+                priority="$EVAL_PRIORITY" cluster="$EVAL_CLUSTER" \
+                min_runtime="$EVAL_WAIT_MIN_RUNTIME" n_gpus="$EVAL_WAIT_N_GPUS"
         done
     done
 }
@@ -627,15 +627,20 @@ resolve_config_dir() {
     echo "${RESOLVED#"${ROOT_RESOLVED}"/}"
 }
 
-# Parse --eval-config-dir and --eval-checkpoints arguments from arguments
-# Sets globals EVAL_CONFIG_DIR_OVERRIDE and EVAL_CHECKPOINTS_OVERRIDE (each
-# empty when its flag is absent), and EVAL_CHECKPOINTS_GIVEN (1 when
-# --eval-checkpoints is given, even with an empty value)
+# Parse --eval-config-dir, --eval-checkpoints, --eval-priority and
+# --eval-cluster arguments from arguments
+# Sets globals EVAL_CONFIG_DIR_OVERRIDE and EVAL_{CHECKPOINTS,PRIORITY,CLUSTER}_OVERRIDE
+# (each empty when its flag is absent), and EVAL_{CHECKPOINTS,PRIORITY,CLUSTER}_GIVEN
+# (1 when the flag is given, even with an empty value)
 # Usage: parse_eval_config_dir_arg "$@"
 parse_eval_config_dir_arg() {
     EVAL_CONFIG_DIR_OVERRIDE=""
     EVAL_CHECKPOINTS_OVERRIDE=""
     EVAL_CHECKPOINTS_GIVEN=""
+    EVAL_PRIORITY_OVERRIDE=""
+    EVAL_PRIORITY_GIVEN=""
+    EVAL_CLUSTER_OVERRIDE=""
+    EVAL_CLUSTER_GIVEN=""
     while [[ $# -gt 0 ]]; do
         case $1 in
             --eval-config-dir)
@@ -655,6 +660,24 @@ parse_eval_config_dir_arg() {
                 EVAL_CHECKPOINTS_GIVEN=1
                 shift 2
                 ;;
+            --eval-priority)
+                if [[ $# -lt 2 ]]; then
+                    echo "Error: --eval-priority requires a priority (${EVAL_PRIORITIES[*]})" >&2
+                    exit 1
+                fi
+                EVAL_PRIORITY_OVERRIDE="$2"
+                EVAL_PRIORITY_GIVEN=1
+                shift 2
+                ;;
+            --eval-cluster)
+                if [[ $# -lt 2 ]]; then
+                    echo "Error: --eval-cluster requires a cluster" >&2
+                    exit 1
+                fi
+                EVAL_CLUSTER_OVERRIDE="$2"
+                EVAL_CLUSTER_GIVEN=1
+                shift 2
+                ;;
             *)
                 shift
                 ;;
@@ -667,23 +690,32 @@ parse_eval_config_dir_arg() {
 # run_<tag> -> evaluator-config-<tag>.yaml
 # Requires REPO_ROOT, so call after init_script_environment
 # Sets EVAL_CONFIG_DIR (repo-root-relative; empty without the flag), the
-# EVAL_CONFIG_TAGS array, and the EVAL_CHECKPOINTS array (--eval-checkpoints
-# split on commas, else EVAL_WAIT_CHECKPOINT); exits when the directory holds
-# no evaluator config or the checkpoint list is malformed
+# EVAL_CONFIG_TAGS array, the EVAL_CHECKPOINTS array (--eval-checkpoints
+# split on commas, else EVAL_WAIT_CHECKPOINT), and EVAL_PRIORITY / EVAL_CLUSTER
+# (--eval-priority / --eval-cluster, else EVAL_WAIT_PRIORITY / EVAL_WAIT_CLUSTER);
+# exits when the directory holds no evaluator config or a flag value is malformed
 # Usage: resolve_eval_config_dir "$EXPERIMENT_DIR" "$CONFIG_SUBDIR"
 resolve_eval_config_dir() {
     EVAL_CONFIG_DIR=""
     EVAL_CONFIG_TAGS=()
     EVAL_CHECKPOINTS=()
+    EVAL_PRIORITY="$EVAL_WAIT_PRIORITY"
+    EVAL_CLUSTER="$EVAL_WAIT_CLUSTER"
     if [[ -z "$EVAL_CONFIG_DIR_OVERRIDE" ]]; then
-        if [[ -n "$EVAL_CHECKPOINTS_GIVEN" ]]; then
-            echo "Error: --eval-checkpoints requires --eval-config-dir" >&2
-            exit 1
-        fi
+        local PAIR GIVEN
+        for PAIR in checkpoints:EVAL_CHECKPOINTS_GIVEN priority:EVAL_PRIORITY_GIVEN \
+            cluster:EVAL_CLUSTER_GIVEN; do
+            GIVEN="${PAIR#*:}"
+            if [[ -n "${!GIVEN}" ]]; then
+                echo "Error: --eval-${PAIR%%:*} requires --eval-config-dir" >&2
+                exit 1
+            fi
+        done
         return
     fi
 
     resolve_eval_checkpoints
+    resolve_eval_priority_and_cluster
 
     EVAL_CONFIG_DIR=$(resolve_config_dir "$1" "$2" "$EVAL_CONFIG_DIR_OVERRIDE" --eval-config-dir) || exit 1
 
@@ -729,14 +761,64 @@ resolve_eval_checkpoints() {
     done
 }
 
+# Succeeds when $1 equals one of the remaining arguments
+# Usage: is_one_of "$VALUE" a b c
+is_one_of() {
+    local VALUE="$1" ITEM
+    shift
+    for ITEM in "$@"; do
+        [[ "$VALUE" == "$ITEM" ]] && return 0
+    done
+    return 1
+}
+
+# Print the cluster names in node_caps.txt, one per line
+node_caps_clusters() {
+    awk -F'|' '/^#/ || $1 == "cluster" || NF < 2 { next } { print $1 }' \
+        "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/node_caps.txt"
+}
+
+# Set EVAL_PRIORITY and EVAL_CLUSTER from --eval-priority / --eval-cluster when
+# given; exits on a priority outside EVAL_PRIORITIES, or a cluster that is
+# neither an EVAL_CLUSTER_ALIASES alias nor a node_caps.txt cluster ([ai2/]<name>)
+resolve_eval_priority_and_cluster() {
+    if [[ -n "$EVAL_PRIORITY_GIVEN" ]]; then
+        if ! is_one_of "$EVAL_PRIORITY_OVERRIDE" "${EVAL_PRIORITIES[@]}"; then
+            echo "Error: --eval-priority must be one of ${EVAL_PRIORITIES[*]}: '$EVAL_PRIORITY_OVERRIDE'" >&2
+            exit 1
+        fi
+        EVAL_PRIORITY="$EVAL_PRIORITY_OVERRIDE"
+    fi
+
+    if [[ -n "$EVAL_CLUSTER_GIVEN" ]]; then
+        local CLUSTERS=() NAME
+        while IFS= read -r NAME; do
+            CLUSTERS+=("$NAME")
+        done < <(node_caps_clusters)
+        if ! is_one_of "$EVAL_CLUSTER_OVERRIDE" "${EVAL_CLUSTER_ALIASES[@]}" &&
+            ! is_one_of "${EVAL_CLUSTER_OVERRIDE#ai2/}" "${CLUSTERS[@]}"; then
+            echo "Error: --eval-cluster must be one of ${EVAL_CLUSTER_ALIASES[*]} ${CLUSTERS[*]} (a cluster also as ai2/<name>; new clusters go in node_caps.txt): '$EVAL_CLUSTER_OVERRIDE'" >&2
+            exit 1
+        fi
+        EVAL_CLUSTER="$EVAL_CLUSTER_OVERRIDE"
+    fi
+}
+
 # gantry --min-runtime when a row leaves min_runtime blank. 0 is backfill-only.
 DEFAULT_MIN_RUNTIME=8h
 
 # Settings of the wait_<tag> rows written for --eval-config-dir; evaluate.sh
 # reads them once the row is flipped to run_<tag>. EVAL_WAIT_CHECKPOINT is the
-# checkpoint when --eval-checkpoints is absent.
+# checkpoint when --eval-checkpoints is absent; EVAL_WAIT_PRIORITY and
+# EVAL_WAIT_CLUSTER (blank = build_cluster_args default) when --eval-priority /
+# --eval-cluster are absent.
 EVAL_WAIT_CHECKPOINT=best_inference_ckpt
 EVAL_WAIT_PRIORITY=high
+EVAL_WAIT_CLUSTER=""
+# Values --eval-priority accepts (gantry --priority) and the CLUSTER aliases of
+# build_cluster_args that --eval-cluster accepts besides node_caps.txt clusters
+EVAL_PRIORITIES=(low normal high urgent)
+EVAL_CLUSTER_ALIASES=(h100 a100 b200 a100+h100 jupiter+titan)
 EVAL_WAIT_MIN_RUNTIME="--min-runtime $DEFAULT_MIN_RUNTIME"
 EVAL_WAIT_N_GPUS=1
 
@@ -832,6 +914,12 @@ print_dry_run_header() {
             echo "  Eval Config Tags: ${EVAL_CONFIG_TAGS[*]}"
             if [[ -n "$EVAL_CHECKPOINTS_GIVEN" ]]; then
                 echo "  Eval Checkpoints: ${EVAL_CHECKPOINTS[*]}"
+            fi
+            if [[ -n "$EVAL_PRIORITY_GIVEN" ]]; then
+                echo "  Eval Priority: $EVAL_PRIORITY"
+            fi
+            if [[ -n "$EVAL_CLUSTER_GIVEN" ]]; then
+                echo "  Eval Cluster: $EVAL_CLUSTER"
             fi
         fi
         print_stats_config

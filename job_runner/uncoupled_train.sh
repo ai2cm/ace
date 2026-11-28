@@ -1,6 +1,6 @@
 #!/bin/bash
 # Wrapper script for uncoupled training jobs
-# Usage: uncoupled_train.sh <experiment_dir> <config_subdirectory> [--atmos_stats <path>] [--ocean_stats <path>] [--coupled_stats <path>] [--dry-run] [--eval-config-dir <path> [--eval-checkpoints <ckpt>[,<ckpt>...]]]
+# Usage: uncoupled_train.sh <experiment_dir> <config_subdirectory> [--atmos_stats <path>] [--ocean_stats <path>] [--coupled_stats <path>] [--dry-run] [--eval-config-dir <path> [--eval-checkpoints <ckpt>[,<ckpt>...]] [--eval-priority <priority>] [--eval-cluster <cluster>]]
 
 set -e
 
@@ -11,7 +11,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib.sh"
 
 if [[ "$#" -lt 2 ]]; then
-  echo "Usage: $0 <experiment_dir> <config_subdirectory> [--atmos_stats <path>] [--ocean_stats <path>] [--coupled_stats <path>] [--dry-run] [--eval-config-dir <path> [--eval-checkpoints <ckpt>[,<ckpt>...]]]"
+  echo "Usage: $0 <experiment_dir> <config_subdirectory> [--atmos_stats <path>] [--ocean_stats <path>] [--coupled_stats <path>] [--dry-run] [--eval-config-dir <path> [--eval-checkpoints <ckpt>[,<ckpt>...]] [--eval-priority <priority>] [--eval-cluster <cluster>]]"
   echo "  - <experiment_dir>: Path to experiment directory (e.g., experiments/2025-08-08-jamesd/uncoupled)"
   echo "  - <config_subdirectory>: Subdirectory containing the 'train-config.yaml' to use."
   echo "  - --atmos_stats: Override atmosphere stats data path (optional)"
@@ -24,6 +24,11 @@ if [[ "$#" -lt 2 ]]; then
   echo "  - --eval-checkpoints <ckpt>[,<ckpt>...]: With --eval-config-dir, one wait_<tag> row per file and"
   echo "      checkpoint (e.g. ema_ckpt_0001,ema_ckpt_0002) instead of one best_inference_ckpt row per file."
   echo "      Checkpoint names are [A-Za-z0-9_.] (no -)."
+  echo "  - --eval-priority <priority>: With --eval-config-dir, the wait_<tag> rows' priority, one of"
+  echo "      ${EVAL_PRIORITIES[*]} (default $EVAL_WAIT_PRIORITY)."
+  echo "  - --eval-cluster <cluster>: With --eval-config-dir, the wait_<tag> rows' cluster: one of"
+  echo "      ${EVAL_CLUSTER_ALIASES[*]}, or a node_caps.txt cluster as <name> or ai2/<name>"
+  echo "      ($(node_caps_clusters | paste -sd' ')). Default blank (h100)."
   echo "Reads <experiment_dir>/<config_subdirectory>/training.txt, header:"
   echo "  $(input_header TRAINING_COLUMNS)"
   exit 1
