@@ -29,11 +29,11 @@ SamudrACEv2-ace2p5-adamw-ft|rs1|01M8CRFHDEWVZ7BHADASXJAV1F|running_randco2-2xCO2
 SamudrACEv2-ace2p5-adamw-ft|rs1|01M8CRFHDEWVZ7BHADASXJAV1F|running_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
 SamudrACEv2-ace2p5-adamw-ft|rs1|01M8CRFHDEWVZ7BHADASXJAV1F|running_randco2-4xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
 
-SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|wait_1pct-ic0001-130yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|wait_piC-ic0151-200yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|wait_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|wait_randco2-1xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|wait_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|wait_randco2-2xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|wait_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|wait_randco2-4xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|run_1pct-ic0001-130yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|run_piC-ic0151-200yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|run_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|run_randco2-1xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|run_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|run_randco2-2xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|run_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|run_randco2-4xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
