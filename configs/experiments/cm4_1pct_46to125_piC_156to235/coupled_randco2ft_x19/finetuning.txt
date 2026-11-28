@@ -4,4 +4,4 @@ group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus
 # results_dataset = no228urh's final results dataset (beaker 01M6WHHVQJDD47A41HHPWQXNXT jobs[-1]), as X13, X3 and p7czybxj mounted.
 # Row is 'deferred': set skip_or_train to 'train' only on the maintainer's launch go.
 
-1deg-hybridsstdiag-randco2ft-x19-pclr-replay-jointpairs-no228urh||ace-samudra-coupled-cm4|no228urh|best_inference_ckpt|train|urgent|titan|8||3|ai2/ace|seed=0|01M711Y5KWBW0RH2B1EK38YTEY|8h
+1deg-hybridsstdiag-randco2ft-x19-pclr-replay-jointpairs-no228urh||ace-samudra-coupled-cm4|no228urh|best_inference_ckpt|submitted|urgent|titan|8||3|ai2/ace|seed=0|01M711Y5KWBW0RH2B1EK38YTEY|8h
