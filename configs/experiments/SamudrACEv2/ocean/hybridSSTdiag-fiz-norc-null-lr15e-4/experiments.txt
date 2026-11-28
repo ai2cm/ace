@@ -1,13 +1,13 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
 
-# launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/ocean/hybridSSTdiag-fiz-norc-null-lr15e-4 . --config-dir configs/experiments/SamudrACEv2/eval/ocean
-# --config-dir configs/experiments/SamudrACEv2/eval/ocean
+# launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/ocean/hybridSSTdiag-fiz-norc-null-lr15e-4 . --config-dir configs/experiments/SamudrACEv2/eval/ocean-1pct-piC-nofiles
+# --config-dir configs/experiments/SamudrACEv2/eval/ocean-1pct-piC-nofiles
 
-SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs0|01M8DJV155VNH6CWZ320E0HCZH|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
-SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs0|01M8DJV155VNH6CWZ320E0HCZH|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs0|01M8DJV155VNH6CWZ320E0HCZH|wait_1pct-ic0001-130yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs0|01M8DJV155VNH6CWZ320E0HCZH|wait_piC-ic0151-200yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
 
-SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs1|01M8DJVFZNPPH5DQR35S4QVNCN|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
-SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs1|01M8DJVFZNPPH5DQR35S4QVNCN|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs1|01M8DJVFZNPPH5DQR35S4QVNCN|wait_1pct-ic0001-130yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs1|01M8DJVFZNPPH5DQR35S4QVNCN|wait_piC-ic0151-200yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
 
-SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs2|01M8DJVZKQZR173Z8JATVBMM2C|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
-SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs2|01M8DJVZKQZR173Z8JATVBMM2C|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs2|01M8DJVZKQZR173Z8JATVBMM2C|wait_1pct-ic0001-130yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-norc-null-lr15e-4|rs2|01M8DJVZKQZR173Z8JATVBMM2C|wait_piC-ic0151-200yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1

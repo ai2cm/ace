@@ -1,7 +1,6 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
 
 # SamudrACEv2-fto o0a2rs0 01M85PVVQNMPSMZ189ERY03BDW: training finished (jobs[-1] 01M85PVVVNYGHR1W4KDV62EYJJ: exit 0); results dataset 01M85PVVQZV5Q18J5XZXJF5WFM.
-# training row: SamudrACEv2-fto|o0a2rs0|01M85PVVQNMPSMZ189ERY03BDW|training|best_inference_ckpt|normal|--min-runtime 8h
 # launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/coupled/fto-ftalt . --config-dir configs/experiments/SamudrACEv2/eval/coupled
 # randCO2 evals of this checkpoint's atmosphere: configs/experiments/SamudrACEv2/atmos/fto-o0a2rs0-lifted/experiments.txt
 # --config-dir configs/experiments/SamudrACEv2/eval/coupled
@@ -24,22 +23,40 @@ SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|running_randco2-2xCO2-ic3-s
 SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|running_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M8AJ0JDSX4131K0BAS498EP1
 SamudrACEv2-ftalt|o0a2rs0|01M8AJ0JD76JKBRCDESPNQK9G4|running_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M8AJ0JDSX4131K0BAS498EP1
 
-# SamudrACEv2-onorc_a2p5muon-fto o0a2rs0 01M8CTRXNE22VC86PS64QYPYRW: submitted 2026-11-26; results dataset 01M8CTRXNPZ0T3B01BV6EMTD3W. Eval rows queued at submission (wait_).
-# training row: SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|training|best_inference_ckpt|normal|--min-runtime 8h
-# launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/coupled/fto-ftalt . --config-dir configs/experiments/SamudrACEv2/eval/coupled
-# --config-dir configs/experiments/SamudrACEv2/eval/coupled
-SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_1pct-ic0001-130yr|best_inference_ckpt|high|--min-runtime 6h||01M8CTRXNPZ0T3B01BV6EMTD3W
-SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_piC-ic0151-200yr|best_inference_ckpt|high|--min-runtime 8h||01M8CTRXNPZ0T3B01BV6EMTD3W
+# SamudrACEv2-onorc_a2p5muon-fto o0a2rs0 01M8CTRXNE22VC86PS64QYPYRW and o1a2rs0 01M8DN5MXTXBVCQCARBE3VVAE6 (max_epochs 8): coupled evals, one row per (config, EMA checkpoint ema_ckpt_0001..ema_ckpt_0008).
+# Random-CO2 evals of their lifted atmosphere: configs/experiments/SamudrACEv2/atmos/onorc_a2p5muon-fto-lifted/experiments.txt
+# launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/coupled/fto-ftalt . --config-dir configs/experiments/SamudrACEv2/eval/coupled-1pct-piC-nofiles
+# --config-dir configs/experiments/SamudrACEv2/eval/coupled-1pct-piC-nofiles
+SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0003|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0004|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0005|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0006|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0007|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0008|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0003|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0004|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0005|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0006|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0007|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0008|urgent|--min-runtime 8h||||titan||||1|
 
-# Random-CO2 evals (prescribed SST + sea ice) of the lifted atmosphere of SamudrACEv2-onorc_a2p5muon-fto o0a2rs0.
-# The lift flag applies to every run_ row in this file: launch only while no coupled row is run_.
-# launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/coupled/fto-ftalt . --config-dir configs/experiments/SamudrACEv2/eval/atmos --lift-coupled-atmosphere
-# --config-dir configs/experiments/SamudrACEv2/eval/atmos
-SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_randco2-1xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M8CTRXNPZ0T3B01BV6EMTD3W
-SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M8CTRXNPZ0T3B01BV6EMTD3W
-SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_randco2-2xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M8CTRXNPZ0T3B01BV6EMTD3W
-SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M8CTRXNPZ0T3B01BV6EMTD3W
-SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_randco2-4xCO2-ic3|best_inference_ckpt|high|--min-runtime 8h||01M8CTRXNPZ0T3B01BV6EMTD3W
-SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|wait_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|high|--min-runtime 8h||01M8CTRXNPZ0T3B01BV6EMTD3W
-
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0003|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0004|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0005|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0006|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0007|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0008|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0003|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0004|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0005|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0006|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0007|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0008|urgent|--min-runtime 8h||||titan||||1|

@@ -1,14 +1,39 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem
 
 
-SamudrACEv2-ace2p5-adamw|rs0|01M858XPY3MZTXZ1C23HPTC574|training|best_inference_ckpt|normal|--min-runtime 8h
+# Pretrain seeds (SamudrACEv2-ace2p5-adamw): no evals.
+# SamudrACEv2-ace2p5-adamw|rs0|01M858XPY3MZTXZ1C23HPTC574|training|best_inference_ckpt|normal|--min-runtime 8h
 
-SamudrACEv2-ace2p5-adamw|rs1|01M858Y5TVFBMYTD18Q9RBS0JK|training|best_inference_ckpt|normal|--min-runtime 8h
+# SamudrACEv2-ace2p5-adamw|rs1|01M858Y5TVFBMYTD18Q9RBS0JK|training|best_inference_ckpt|normal|--min-runtime 8h
 
-SamudrACEv2-ace2p5-adamw|rs2|01M858YJRV90NJ729Y6V0MVNY3|training|best_inference_ckpt|normal|--min-runtime 8h
+# SamudrACEv2-ace2p5-adamw|rs2|01M858YJRV90NJ729Y6V0MVNY3|training|best_inference_ckpt|normal|--min-runtime 8h
 
-SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|training|best_inference_ckpt|normal|--min-runtime 8h
+# Evals of the fine-tuned seeds (SamudrACEv2-ace2p5-adamw-ft): one row per config at best_inference_ckpt.
+# launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/atmos/ace2p5-adamw . --config-dir configs/experiments/SamudrACEv2/eval/atmos-1pct-piC-nofiles-randco2
+# --config-dir configs/experiments/SamudrACEv2/eval/atmos-1pct-piC-nofiles-randco2
+SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|wait_1pct-ic0001-130yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|wait_piC-ic0151-200yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|wait_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|wait_randco2-1xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|wait_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|wait_randco2-2xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|wait_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs0|01M8CRF2VYHZRY8CS0GKW25V6D|wait_randco2-4xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
 
-SamudrACEv2-ace2p5-adamw-ft|rs1|01M8CRFHDEWVZ7BHADASXJAV1F|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-ace2p5-adamw-ft|rs1|01M8CRFHDEWVZ7BHADASXJAV1F|wait_1pct-ic0001-130yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs1|01M8CRFHDEWVZ7BHADASXJAV1F|wait_piC-ic0151-200yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs1|01M8CRFHDEWVZ7BHADASXJAV1F|wait_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs1|01M8CRFHDEWVZ7BHADASXJAV1F|wait_randco2-1xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs1|01M8CRFHDEWVZ7BHADASXJAV1F|wait_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs1|01M8CRFHDEWVZ7BHADASXJAV1F|wait_randco2-2xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs1|01M8CRFHDEWVZ7BHADASXJAV1F|wait_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs1|01M8CRFHDEWVZ7BHADASXJAV1F|wait_randco2-4xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
 
-SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|training|best_inference_ckpt|normal|--min-runtime 8h
+SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|wait_1pct-ic0001-130yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|wait_piC-ic0151-200yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|wait_randco2-1xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|wait_randco2-1xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|wait_randco2-2xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|wait_randco2-2xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|wait_randco2-4xCO2-ic3-sstblend|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-ace2p5-adamw-ft|rs2|01M8CRG0Q370R2JJBXFHJFY9ZX|wait_randco2-4xCO2-ic3|best_inference_ckpt|urgent|--min-runtime 8h||||titan||||1|

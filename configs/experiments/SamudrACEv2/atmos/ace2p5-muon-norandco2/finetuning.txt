@@ -1,5 +1,6 @@
 group|tag|wandb_project|wandb_id|ckpt_type|skip_or_train|priority|cluster|n_gpus|shared_mem|retries|workspace|override|results_dataset|min_runtime
 
+# launch: ./job_runner/uncoupled_finetune.sh configs/experiments/SamudrACEv2/atmos/ace2p5-muon-norandco2 . --coupled_stats andrep/2026-11-13-om4-1pctco2-1deg-coupled-stats --eval-config-dir configs/experiments/SamudrACEv2/eval/atmos-1pct-piC-nofiles-randco2 --eval-priority urgent --eval-cluster titan
 SamudrACEv2-ace2p5-muon-norandco2-ft|rs0|ace2-cm4-atmos-noLSM||best_ckpt|skip|urgent|b200|4||3|ai2/ace|seed=0||8h
 SamudrACEv2-ace2p5-muon-norandco2-ft|rs1|ace2-cm4-atmos-noLSM||best_ckpt|skip|urgent|b200|4||3|ai2/ace|seed=1||8h
 SamudrACEv2-ace2p5-muon-norandco2-ft|rs2|ace2-cm4-atmos-noLSM||best_ckpt|skip|urgent|b200|4||3|ai2/ace|seed=2||8h
