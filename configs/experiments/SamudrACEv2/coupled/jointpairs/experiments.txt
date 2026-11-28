@@ -25,11 +25,11 @@ SamudrACEv2-onorc_a2p5muon-jointpairs|o0a2rs0|01M8CTT4CPJY3XR6SW7E8J247W|running
 # Random-CO2 evals of the lifted atmosphere of o0a2rs0 and o1a2rs0: configs/experiments/SamudrACEv2/atmos/onorc_a2p5muon-jointpairs-lifted/experiments.txt
 # launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/coupled/jointpairs . --config-dir configs/experiments/SamudrACEv2/eval/coupled-1pct-piC-nofiles
 # --config-dir configs/experiments/SamudrACEv2/eval/coupled-1pct-piC-nofiles
-SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|01M8DN6F03QABQE58HBPNYC313|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|01M8DN6F03QABQE58HBPNYC313|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|01M8DN6F03QABQE58HBPNYC313|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0003|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|01M8DN6F03QABQE58HBPNYC313|wait_1pct-ic0001-130yr-nofiles|ema_ckpt_0004|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|01M8DN6F03QABQE58HBPNYC313|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|01M8DN6F03QABQE58HBPNYC313|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|01M8DN6F03QABQE58HBPNYC313|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0003|urgent|--min-runtime 8h||||titan||||1|
-SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|01M8DN6F03QABQE58HBPNYC313|wait_piC-ic0151-200yr-nofiles|ema_ckpt_0004|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|01M8DN6F03QABQE58HBPNYC313|run_1pct-ic0001-130yr-nofiles|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|01M8DN6F03QABQE58HBPNYC313|run_1pct-ic0001-130yr-nofiles|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|01M8DN6F03QABQE58HBPNYC313|run_1pct-ic0001-130yr-nofiles|ema_ckpt_0003|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|01M8DN6F03QABQE58HBPNYC313|run_1pct-ic0001-130yr-nofiles|ema_ckpt_0004|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|01M8DN6F03QABQE58HBPNYC313|run_piC-ic0151-200yr-nofiles|ema_ckpt_0001|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|01M8DN6F03QABQE58HBPNYC313|run_piC-ic0151-200yr-nofiles|ema_ckpt_0002|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|01M8DN6F03QABQE58HBPNYC313|run_piC-ic0151-200yr-nofiles|ema_ckpt_0003|urgent|--min-runtime 8h||||titan||||1|
+SamudrACEv2-onorc_a2p5muon-jointpairs|o1a2rs0|01M8DN6F03QABQE58HBPNYC313|run_piC-ic0151-200yr-nofiles|ema_ckpt_0004|urgent|--min-runtime 8h||||titan||||1|
