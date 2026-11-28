@@ -1,8 +1,8 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
 
 
-SamudrACEv2-hybridSSTdiag-fiz-adamw-norc|rs0|01M8AJE3R56CH61QHD65JRM5P1|wait_1pct-ic0001-130yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
-SamudrACEv2-hybridSSTdiag-fiz-adamw-norc|rs0|01M8AJE3R56CH61QHD65JRM5P1|wait_piC-ic0151-200yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-adamw-norc|rs0|01M8AJE3R56CH61QHD65JRM5P1|run_1pct-ic0001-130yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
+SamudrACEv2-hybridSSTdiag-fiz-adamw-norc|rs0|01M8AJE3R56CH61QHD65JRM5P1|run_piC-ic0151-200yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
 
 SamudrACEv2-hybridSSTdiag-fiz-adamw-norc|rs1|01M8AJEN9QJRY4HTFPSAEZPWM3|wait_1pct-ic0001-130yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
 SamudrACEv2-hybridSSTdiag-fiz-adamw-norc|rs1|01M8AJEN9QJRY4HTFPSAEZPWM3|wait_piC-ic0151-200yr-nofiles|best_inference_ckpt|urgent|--min-runtime 8h||||||||1
