@@ -1,7 +1,8 @@
 group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_dataset|workspace|cluster|ocean_results_dataset|atmos_results_dataset|shared_mem|n_gpus
 
 # Random-CO2 evals (prescribed SST + sea ice) of the lifted atmosphere of SamudrACEv2-onorc_a2p5muon-fto (configs/experiments/SamudrACEv2/coupled/fto-ftalt), o0a2rs0 01M8CTRXNE22VC86PS64QYPYRW and o1a2rs0 01M8DN5MXTXBVCQCARBE3VVAE6:
-# one row per (config, EMA checkpoint ema_ckpt_0001..ema_ckpt_0008).
+# o0a2rs0: one row per (config, EMA checkpoint ema_ckpt_0001..ema_ckpt_0008). o1a2rs0: ema_ckpt_0001 only; the atmosphere is frozen during FTO
+# (train-config-template.yaml), so every EMA checkpoint holds the same atmosphere and one checkpoint is kept as a check.
 # --lift-coupled-atmosphere applies to every run_ row of this file: only lifted-atmosphere rows go here.
 # launch: ./job_runner/evaluate.sh configs/experiments/SamudrACEv2/atmos/onorc_a2p5muon-fto-lifted . --config-dir configs/experiments/SamudrACEv2/eval/atmos-randco2 --lift-coupled-atmosphere
 # --config-dir configs/experiments/SamudrACEv2/eval/atmos-randco2
@@ -55,50 +56,8 @@ SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|running_randco
 SamudrACEv2-onorc_a2p5muon-fto|o0a2rs0|01M8CTRXNE22VC86PS64QYPYRW|running_randco2-4xCO2-ic3|ema_ckpt_0008|urgent|--min-runtime 8h||||titan||||1|
 
 SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0003|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0004|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0005|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0006|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0007|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0008|urgent|--min-runtime 8h||||||||1|
 SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-1xCO2-ic3|ema_ckpt_0001|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-1xCO2-ic3|ema_ckpt_0002|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-1xCO2-ic3|ema_ckpt_0003|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-1xCO2-ic3|ema_ckpt_0004|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-1xCO2-ic3|ema_ckpt_0005|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-1xCO2-ic3|ema_ckpt_0006|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-1xCO2-ic3|ema_ckpt_0007|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-1xCO2-ic3|ema_ckpt_0008|urgent|--min-runtime 8h||||||||1|
 SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0003|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0004|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0005|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0006|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0007|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0008|urgent|--min-runtime 8h||||||||1|
 SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-2xCO2-ic3|ema_ckpt_0001|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-2xCO2-ic3|ema_ckpt_0002|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-2xCO2-ic3|ema_ckpt_0003|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-2xCO2-ic3|ema_ckpt_0004|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-2xCO2-ic3|ema_ckpt_0005|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-2xCO2-ic3|ema_ckpt_0006|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-2xCO2-ic3|ema_ckpt_0007|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-2xCO2-ic3|ema_ckpt_0008|urgent|--min-runtime 8h||||||||1|
 SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0003|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0004|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0005|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0006|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0007|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0008|urgent|--min-runtime 8h||||||||1|
 SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-4xCO2-ic3|ema_ckpt_0001|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-4xCO2-ic3|ema_ckpt_0002|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-4xCO2-ic3|ema_ckpt_0003|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-4xCO2-ic3|ema_ckpt_0004|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-4xCO2-ic3|ema_ckpt_0005|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-4xCO2-ic3|ema_ckpt_0006|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-4xCO2-ic3|ema_ckpt_0007|urgent|--min-runtime 8h||||||||1|
-SamudrACEv2-onorc_a2p5muon-fto|o1a2rs0|01M8DN5MXTXBVCQCARBE3VVAE6|wait_randco2-4xCO2-ic3|ema_ckpt_0008|urgent|--min-runtime 8h||||||||1|
