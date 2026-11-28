@@ -3,4 +3,4 @@ group|tag|ocean_project|ocean_wandb_id|ocean_ckpt_type|atmos_project|atmos_wandb
 # X18 stage 1: no228urh's FTO recipe, X2's row (inits, resources) with init datasets pinned to X2's mounts (U106).
 # Row is 'deferred': set skip_or_train to 'train' only on the maintainer's launch go.
 
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||ace-samudra-cm4|jrgclj2f|best_inference_ckpt|ace2-cm4-atmos-noLSM|wgz8np8z|best_inference_ckpt|train|urgent|titan|8||3|ai2/ace|seed=0|8h|01M626JPB247BQWSE0GN35SAXR|01M326W4K8VKWEXBVR5YM60YQH
+1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||ace-samudra-cm4|jrgclj2f|best_inference_ckpt|ace2-cm4-atmos-noLSM|wgz8np8z|best_inference_ckpt|submitted|urgent|titan|8||3|ai2/ace|seed=0|8h|01M626JPB247BQWSE0GN35SAXR|01M326W4K8VKWEXBVR5YM60YQH
