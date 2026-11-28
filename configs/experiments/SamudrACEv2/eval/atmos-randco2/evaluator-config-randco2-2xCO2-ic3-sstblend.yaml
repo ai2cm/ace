@@ -1,0 +1,67 @@
+# job_runner/evaluate.sh configs/experiments/<exper> . \
+#   --config-dir configs/experiments/SamudrACEv2/eval/atmos-randco2
+# Copy of configs/experiments/SamudrACEv2/eval/atmos/evaluator-config-randco2-2xCO2-ic3-sstblend.yaml.
+# Adapted from configs/experiments/cm4_eval/atmos/evaluator-config-randco2-2xCO2-ic3-sstblend.yaml
+# (branch exper/2026-11-15-coupled-ft-enso-randco2-training @ 190bff913):
+# prescribed SST + sea ice, 1deg CM4-like AM4, 2xCO2 random-CO2 member ic_0003
+# (not in the SamudrACEv2 atmos fine-tune training data), from the store's first to last time.
+# surface_temperature over ocean = the 5-daily ocean sst held forward (ace PR #1623),
+# the surface the atmosphere sees when coupled; the no-suffix twin uses AM4's own ts.
+# Changes: SST/sea-ice store 2026-10-11 -> 2026-11-13 (as the SamudrACEv2 atmos fine-tune),
+# monthly writer without reference output, step_diagnostics correction logging on.
+experiment_dir: /results
+n_forward_steps: 7667  # --min-runtime 8h
+forward_steps_in_memory: 50
+checkpoint_path: /ckpt.tar
+logging:
+  log_to_screen: true
+  log_to_wandb: true
+  log_to_file: true
+  project: ace2-cm4-atmos-noLSM
+  entity: ai2cm
+aggregator:
+  log_zonal_mean_images: false
+  step_diagnostics:
+    correction_scalars: true
+    correction_maps: true
+loader:
+  start_indices:
+    times:
+      - "0152-10-01T06:00:00"
+  dataset:
+    merge:
+      - data_path: /climate-default/2026-11-13-CM4-like-AM4-random-CO2-coupled
+        file_pattern: random-CO2-2xCO2-ic_0003-atmosphere.zarr
+        engine: zarr
+      - data_path: /climate-default/2026-10-11-CM4-like-AM4-random-CO2
+        file_pattern: random-CO2-2xCO2-ic_0003.zarr
+        engine: zarr
+  num_data_workers: 4
+data_writer:
+  save_prediction_files: false
+  save_monthly_files: false
+  files:
+  - label: monthly_mean_predictions
+    names:
+    - TMP2m
+    - surface_temperature
+    - air_temperature_7
+    - air_temperature_0
+    - ULWRFtoa
+    - USWRFtoa
+    - ULWRFsfc
+    - DLWRFsfc
+    - DSWRFsfc
+    - USWRFsfc
+    - LHTFLsfc
+    - SHTFLsfc
+    - PRATEsfc
+    - specific_total_water_7
+    - specific_total_water_0
+    - h500
+    - TMP850
+    - eastward_surface_wind_stress
+    - northward_surface_wind_stress
+    time_coarsen:
+      method: monthly_mean
+    save_reference: false
