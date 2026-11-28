@@ -176,21 +176,15 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 1deg-hybridsstdiag-randco2ft-x13-pclr-replay-jointpairs-no228urh||01M88XR6M9NDR1DYY17MC993HG|ran_randco2-2xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M8AMGCBWF5XSV70GM6QC0NJV
 1deg-hybridsstdiag-randco2ft-x13-pclr-replay-jointpairs-no228urh||01M88XR6M9NDR1DYY17MC993HG|ran_randco2-4xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||01M8AMGCBWF5XSV70GM6QC0NJV
 
-# X15e4 (max_epochs 2 -> ema_ckpt_0001, ema_ckpt_0002) and X17 (max_epochs 4 -> ema_ckpt_0001..ema_ckpt_0004): random-CO2 evals (sstblend and non-sstblend) of the lifted atmosphere, one row per (config, EMA checkpoint).
+# X15e4 (atmosphere frozen: ema_ckpt_0001 only) and X17 (max_epochs 4 -> ema_ckpt_0001..ema_ckpt_0004): random-CO2 evals (sstblend and non-sstblend) of the lifted atmosphere, one row per (config, EMA checkpoint).
 # launch: ./job_runner/evaluate.sh configs/experiments/cm4_1pct_46to125_piC_156to235/atmos_randco2ft_lifted . --config-dir configs/experiments/cm4_eval/atmos-randco2 --lift-coupled-atmosphere
 # --config-dir configs/experiments/cm4_eval/atmos-randco2
 1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||||||||1|
 1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-1xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-1xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||||||||1|
 1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||||||||1|
 1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-2xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-2xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||||||||1|
 1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||||||||1|
 1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-4xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x15e4-jfto-x2ema||01M8DPGTASHWEMB5Z72F82YSW0|wait_randco2-4xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||||||||1|
 
 1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||||||||1|
 1deg-hybridsstdiag-randco2ft-x17-pclr-replay-jointpairs-wgz8np8z||01M8DPHV3BV65KF56J24BS5ZAV|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||||||||1|
@@ -243,28 +237,10 @@ group|tag|experiment_id|status|checkpoint|priority|min_runtime|override|results_
 1deg-hybridsstdiag-randco2ft-x19-pclr-replay-jointpairs-no228urh||01M8GC5JWKGF0TKCFSYWWB18JW|wait_randco2-4xCO2-ic3|ema_ckpt_0003|high|--min-runtime 8h||||||||1|
 1deg-hybridsstdiag-randco2ft-x19-pclr-replay-jointpairs-no228urh||01M8GC5JWKGF0TKCFSYWWB18JW|wait_randco2-4xCO2-ic3|ema_ckpt_0004|high|--min-runtime 8h||||||||1|
 
-# X18 s1 01M8GE68NMARN2SBFTVXJ1G9W1 (stage 1 of X18; max_epochs 4 -> ema_ckpt_0001..ema_ckpt_0004): random-CO2 evals (sstblend and non-sstblend) of the lifted atmosphere, one row per (config, EMA checkpoint). Same launch and --config-dir as the X15e4/X17 block above.
+# X18 s1 01M8GE68NMARN2SBFTVXJ1G9W1 (stage 1 of X18; atmosphere frozen: ema_ckpt_0001 only): random-CO2 evals (sstblend and non-sstblend) of the lifted atmosphere, one row per (config, EMA checkpoint). Same launch and --config-dir as the X15e4/X17 block above.
 1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-1xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||||||||1|
 1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-1xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-1xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-1xCO2-ic3|ema_ckpt_0003|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-1xCO2-ic3|ema_ckpt_0004|high|--min-runtime 8h||||||||1|
 1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-2xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||||||||1|
 1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-2xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-2xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-2xCO2-ic3|ema_ckpt_0003|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-2xCO2-ic3|ema_ckpt_0004|high|--min-runtime 8h||||||||1|
 1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0001|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0002|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0003|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-4xCO2-ic3-sstblend|ema_ckpt_0004|high|--min-runtime 8h||||||||1|
 1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-4xCO2-ic3|ema_ckpt_0001|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-4xCO2-ic3|ema_ckpt_0002|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-4xCO2-ic3|ema_ckpt_0003|high|--min-runtime 8h||||||||1|
-1deg-hybridsstdiag-randco2ft-x18s1-jfto-wgz8np8z||01M8GE68NMARN2SBFTVXJ1G9W1|wait_randco2-4xCO2-ic3|ema_ckpt_0004|high|--min-runtime 8h||||||||1|
